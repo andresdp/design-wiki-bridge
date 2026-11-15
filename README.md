@@ -2,7 +2,7 @@
   <img src="docs/assets/icon.svg" alt="design-wiki-bridge icon" width="128">
 </p>
 
-# design-wiki-bridge
+# Design Wiki Bridge
 
 > **Status: provisional.** The repo has no code yet. This README describes the planned system and will change once implementation starts.
 
