@@ -12,3 +12,4 @@ __pycache__/
 artifacts/
 runs/
 reports/
+/graphify-out
