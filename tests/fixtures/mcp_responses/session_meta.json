@@ -1,0 +1,103 @@
+{
+  "startup_s": 1.037,
+  "tools": [
+    "openwiki_begin",
+    "openwiki_finish",
+    "openwiki_inspect_page_claims",
+    "openwiki_list_wikis",
+    "openwiki_list_workspaces",
+    "openwiki_next_page",
+    "openwiki_read",
+    "openwiki_search",
+    "openwiki_submit_page",
+    "openwiki_submit_plan"
+  ],
+  "openwiki_search_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "root": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Absolute Git repository root containing openwiki/."
+      },
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000,
+        "description": "Repository question, behavior, or concept to find in the wiki."
+      },
+      "paths": {
+        "description": "Optional repository-relative source paths that boost related wiki sections.",
+        "maxItems": 20,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "limit": {
+        "description": "Optional number of ranked results to return.",
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20
+      },
+      "workspace": {
+        "description": "Optional workspace ID or unique name overriding automatic workspace selection.",
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      }
+    },
+    "required": [
+      "root",
+      "query"
+    ],
+    "additionalProperties": false
+  },
+  "openwiki_read_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "root": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Absolute Git repository root containing openwiki/."
+      },
+      "page": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000,
+        "description": "Wiki page from a search ref, e.g. \"openwiki/architecture/jobs.md\"."
+      },
+      "sections": {
+        "minItems": 1,
+        "maxItems": 20,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "description": "Heading anchors from search refs, e.g. [\"retry-control\"]."
+      },
+      "wiki": {
+        "description": "Linked wiki ID from the selected search result; omit for the current repository.",
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "includeProvenance": {
+        "description": "Include recorded frontmatter sources and Claim evidence resources with their stored versions. This locates provenance; it does not assert that evidence is current or verified.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "root",
+      "page",
+      "sections"
+    ],
+    "additionalProperties": false
+  }
+}

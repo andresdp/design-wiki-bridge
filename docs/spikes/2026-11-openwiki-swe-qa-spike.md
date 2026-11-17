@@ -1,6 +1,6 @@
 # U1 spike: revisions, SWE-QA items, OpenWiki interface
 
-Status: **partial.** Revisions, the dataset pin, and the OpenWiki interface are settled. Wiki generation and the MCP fixture capture are waiting on the user's `openwiki` runs (see "Remaining steps").
+Status: **Flask done; Requests wiki pending.** Revisions, the dataset pin, the OpenWiki interface, the Flask snapshot, and the MCP fixtures are settled (§6). Still open: the Requests wiki run, the Flask generation cost from the provider dashboard, and the KTD4 section-link decision.
 
 ## 1. SWE-QA dataset
 
@@ -77,3 +77,20 @@ KTD4 claims-first path: **feasible, but the section link has to be revised** (se
 3. Then capture the fixtures: start `openwiki mcp --host dwb`, call `openwiki_search` and `openwiki_read` (with `includeProvenance: true`) for two Flask questions, and save the raw results to `tests/fixtures/mcp_responses/`. Copy one page with its `.claims` sidecar and `.page-manifest.json` to `tests/fixtures/openwiki/`. Then trace one cross-file question from wiki hit to claim range to the original span.
 
 U7 and U8 stay blocked until step 3. U2–U6 and U9–U11 (condition A) don't depend on it.
+
+## 6. Flask snapshot and fixture results (2026-11-17)
+
+**Generation.** `openwiki` 0.9.0 (global nvm install at `~/.nvm/versions/node/v22.22.3/bin/openwiki`; the old 0.3.0 at `/usr/local` was removed). `OPENWIKI_PROVIDER=openai`. The model wasn't set on the command line and came from the saved config: **`gpt-5.6-luna`, effort medium**. Run in `artifacts/checkouts/flask-3.1.2`. Result: 12 pages (72 `##` sections), 227 reads and 118 searches by the agent, **16 min 47 s** wall time (`real 1054.92`). `openwiki/.last-update.json` records `gitHead` = the pinned SHA, `model`, and `status: complete`. One page (`architecture/configuration-and-state.md`) is still marked `openwiki_generated: true` and has no description. Cost: **to be read from the provider dashboard.** The checkout also got `AGENTS.md` and `.github/workflows/openwiki-update.yml`. Neither matters, because resolution reads through `git show <sha>:<path>`.
+
+**Claims.** 132 claims across the 12 pages (9–13 per page) with 302 evidence resources. **All are `repo://path#Lx-Ly` (KTD4 format confirmed), and all 302 ranges are valid at the pinned SHA.** They cover 57 distinct files: source, tests, `docs/*.rst`, `pyproject.toml`, and CI workflows. The goal-capsule stop condition is not triggered.
+
+**MCP.** Launched with `openwiki mcp --host dwb` over stdio through `langchain-mcp-adapters` (`client.session` + `load_mcp_tools`). Startup takes about 1.0–1.3 s, and the server exposes 10 tools (including the generation lifecycle tools, which are never called). **The server needs `git` on its `PATH`.** With a `PATH` that has no `git`, every call fails with `invalid_input: The OpenWiki root must be inside a Git repository`. `root` is the absolute checkout path. Fixtures are in `tests/fixtures/mcp_responses/`: two questions with search (10 results each) plus a read of the top section with `includeProvenance`, an empty search (`{"results": []}`, `isError: false`), and the tool schemas in `session_meta.json`. A page, its sidecar, `.page-manifest.json`, and `.last-update.json` are in `tests/fixtures/openwiki/`.
+
+**Trace (q1, "How does Flask's WSGI entry point create the request context and dispatch…").** The top hit is `architecture/request-runtime.md#dispatch-and-routing`. Reading that section returns 10 page claims spread over 8 files (`app.py`, `ctx.py`, `globals.py`, `signals.py`, `views.py`, `docs/*.rst`). The section text itself links `src/flask/app.py#L879-L920` and `#L1261-L1290` (the `full_dispatch_request` and `dispatch_request` ranges), which are original spans at the pinned SHA. Wiki hit → original span works.
+
+**Second retrieval observation.** For q2 (blueprint template filters), the top hit is a testing-matrix section (`testing/test-strategy.md#focused-validation-matrix`), not an architecture section. Search ranking is lexical, and the wiki has no dedicated templating page. This is a recall risk for condition B and should be recorded as a finding, not tuned away.
+
+**Section→claims evidence, for the KTD4 revision:**
+- **Inline source links.** Section Markdown sometimes links repository files with line fragments (`../../src/flask/app.py#L879-L920`). They are exact and section-scoped, but sparse: 25 line-range links in total (all valid at the SHA), almost all on one page (`request-runtime.md`), and present in only 7 of 72 sections.
+- **Matching claim statements to sections** (option (b): token overlap of each claim's `statement` with each section on its page, threshold 0.5): **99 of 132 claims (75%) map clearly to one section**, 22 are ambiguous between sections, and 11 match no section.
+- Proposed resolution order for U8: (1) inline line-range links in the section; (2) claims whose statement matches this section, plus ambiguous claims whose top-tied sections include it; (3) the page's unmatched claims; (4) the AST fallback for backticked symbols and paths. Each span records which step produced it (`resolution_method`). This needs user approval as the KTD4 revision.

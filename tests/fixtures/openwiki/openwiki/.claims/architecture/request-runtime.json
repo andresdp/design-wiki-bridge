@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e81851ebb48c0dfc4d7547ac355a15375bb179feecb29942196a2f199ebfa2f1",
+  "claims": [
+    {
+      "id": "claim_9a2123a8032648ae9a49ea9781cba3c4",
+      "statement": "Flask is a WSGI application: the WSGI server calls Flask.__call__, which delegates to wsgi_app, and wsgi_app can be wrapped independently for middleware while retaining the Flask object.",
+      "evidence": [
+        {
+          "resource": "repo://docs/lifecycle.rst#L57-L91",
+          "version": "repo-lines-v1:sha256:2f1292a1e14f9a0c4f72aa80c58f1aa4d865b7c4a26d9d1a4273da0bc2fe071a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlNDMyMWFmYWM2MjdmZDRiZTFhN2JjOWFlY2JhY2NiMDk1ODRmM2JlNTVlYjQxNDI0NjUzMzE3NzYwYTc0MmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiYjQ5NjhiZDM5MjQzOGUwY2RiNTUyNzA3MjNjNjJkNzczMzlmZTdhYzRkNzBiNjc4YWY2MDI2OGRjNmJjOGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjIyNjAwMjM0MTc1OWRiYTQyMjY0ZGEwZmVhYmEwMTgyNjkxZDU1NzIxYzE4NTc5OTBkNDUyMDM1ZmM3NGI3MzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlhNDNjYjIzOGVjZTk3ZWYyNTdiYTc0Y2VhOWQ4YWYyNTRiYTIwZTBiMmIyMDFlYTVlODllZmY4NmYyMTRjNTkifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L1479-L1536",
+          "version": "repo-lines-v1:sha256:e91433274c82bc162494245467ea6e5c3895c0e67613ed721f9e5950e84145a0:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIzZWE1ZWYxNmY4N2Y5MzJmYTllNTZlN2NjNjUyNjcxMmRmYzFlMTBiN2U4YmNiMWI2ODMxMTlmMmUwZDg0NzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNmYWFlYTM4NzBjNjhkY2FlYmYxODA0M2I4MjBlZDBkNDU5MDM4OTZkODJhYWJlOTczNDZjNzk3ODkyZjVkMDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVkNTIwMjlmODJhMmI1YzNiNzJhNmE0YzI4MTUyZTI2NDJjYzY4N2I2YmZlYmNmY2YwZDE0YTA4ZDM5MmEyYjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9f72c9ba4c254c1b8e9ebe4873844563",
+      "statement": "RequestContext construction creates the Flask Request from the WSGI environment and defers routing failures by storing an HTTPException; pushing a request context ensures a same-application AppContext, binds the request ContextVar, opens the session, and then matches the URL so custom converters can access session data.",
+      "evidence": [
+        {
+          "resource": "repo://src/flask/ctx.py#L303-L330",
+          "version": "repo-lines-v1:sha256:0bf9dada940ba735bd336d3f6f8afc5cb0c580b20b035ffb9419f7fbab1ee13c:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzMTdlNjBiMjc4MTZhOWQ5NzhjMjg1ODgxOWVjOGEzMjRiY2RhZWY3MTk0YmQ0ZWNkNWQxMTZlZjk1MzNmNWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImIyZWI2M2M3MTZmNDFmYjkzNzc2ZjY5MmU1YjNiOGUwMWFiN2I0OGJmZGQ4NzQwMjRiMzg0MGY1NzgyOTAyZjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg0YTBhN2M5YWFmMTQzMzI1Yzk3MjVjYWVkZmExNjYyMmM2MGY4NTE0MTBjYmFjYTIyMGQzYThjNmJkYTU0MTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiZThiODI0MGY1MTdiZWY4ZjMzNTkzZWZmNmRkNTE4MGI5Y2MxMmNkNDc4NTU5OGE4OTkwY2I3NzFmZDJiMGYifQ"
+        },
+        {
+          "resource": "repo://src/flask/ctx.py#L367-L393",
+          "version": "repo-lines-v1:sha256:b1647e064e01f4d66866fc2377daf09df6752e0ebc97b3df8e9c856b44264106:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiMjJlMzU1YjA3NDllZmQ1M2Q0NDMwNDA2ZThjNDc3Yzc4OTdmNjA0Y2RhNjBlNzBhMzY2MmFkNDBkZTZkMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyNjMwZTM3MjlhZmExZDE1NzcyZDBiMmM3OGE2NzAxNDdlNDE0NTM4ZjI1MWM3MjUwMjkzZWY2Yzc0MTAzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUxNzhlYzJiNzRjMmYyMThmM2QyNTVhYTQ1MDE0NmY2YjQyNzc1YWMwYjc1OTVhMDcyMjAyODFjNTViZGIyMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA3OGM4ZDQ5ZjAzNTlhZGQyMmY4ODhmM2I1MDQzMDRmMGE4ZjIzMWUyZWQ5MDU3ZGY0MDRhZDVhYmJjZTEzODEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_189ef6e41b0744869c28564e59ee8694",
+      "statement": "Flask exposes current_app and g through LocalProxy objects backed by the app ContextVar, and request and session through proxies backed by the request ContextVar; accessing an unbound proxy raises a context-specific RuntimeError.",
+      "evidence": [
+        {
+          "resource": "repo://docs/reqcontext.rst#L38-L52",
+          "version": "repo-lines-v1:sha256:11592c58c2baf6a62b257f7fc8ee329c2a812e2a8739a01b8d3ee6f0a6de1907:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE5NzBhNmMyMmQ4YzZjM2MwMzIyMjhjODI3ZTUwYmY3ZjEwNDhhNGE2NWJlMGJkYzQ3ZmVhN2NhNjQzMWNkYWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA2ODRlZDI5NDBhOTNiYzc5MjFkYjQ0MzYxM2JmZTY3OWE1ZWZmNmQzZjNmMmU2YjkyN2IxMWJmZmJiMzc0YTkifQ"
+        },
+        {
+          "resource": "repo://src/flask/globals.py#L17-L51",
+          "version": "repo-lines-v1:sha256:0a3cc0f0a39e24801cee6219f0f69f12b621e8df232947f6ed9f6626432796ff:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFlNjBjYmRiNmNkZDQyOGNjYjY1ZDliNTFiYTA2MjkyMmVlOTNmOTEyZmVhNmExNGFhYzkyZWQxZGI0ZDIxMzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVmYWIwYWE4NTg4M2M3ZGU0ZTRjMmM2NjllZDM4Zjk3OWU4ZDE3MTYzOThlZDliNWIwNjZkNDk5ZDg5NGNkZWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ca3973141738486b832ae27d517547b3",
+      "statement": "full_dispatch_request emits request_started, runs URL-value preprocessors and before_request handlers, allows a before handler to short-circuit the view, and otherwise dispatch_request handles deferred routing errors, automatic OPTIONS, and matched endpoint invocation with view arguments.",
+      "evidence": [
+        {
+          "resource": "repo://docs/lifecycle.rst#L111-L130",
+          "version": "repo-lines-v1:sha256:da35958de6e72c05b75284cca69713b2f4896cea3995b9fc14d2dc616b0897af:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhmOGUxOWQxYzY3Y2YwNjVjZDEzYmMyZDBmZDFhMGVkNTJjYTA1MGZiY2ZlOGY4ZDgzNDU2N2MzMTdiYzEwYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA4ZThjMTdjMjlmYzFmY2FlZTE3OWMyMjA0ZTc5ODQ4YTczOGVlNGJiYTNjODkzNzllZmNjNmFmNzlmNjY2N2MiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE1NGY5NjI1YzIyNTQyOWJlMmFjZjc2NzkzMWUwNzUzZDdhOTkwMDdlNjc0YWU4NWY1MWFiYjE4MWU3OTZlNzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIxMTE3MmIxODhlOTE1ODRhN2JmZjViZDNhZTg0OTE5YWI5YjJkMDNjZmZiZjZkMGUxYmIwNDhmNDUzNjRlMGIifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L1261-L1290",
+          "version": "repo-lines-v1:sha256:7a7d0d56c27037231fc19fa6b999050ba99fe598a8c68bdbe4f6bbda38f70020:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc0Y2M5ZjZlM2E3OGJlNzQwYjRlOGNjOWI1ZWJlMzg2YzRkNTA2ZDMxZDMxOWY1YzJkOWY1NzNiMzMxZmZiYmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiOTE5YjRmNzQ4NmI0MGU4ZTdhMmRhYTAwMzYxMjMwM2RhY2I4ZTAzOGM3ZGI3NzA0ZGNjZWMyMWYwOWE2NDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY3MjE2YWIxOWU2OGQ2ZWUzYzVlOTI0NmI4NjcwZDE4OWI3NzA1OGQ3NDVhYjEwNzBmNGJkNWI3ZmQ5YjliZWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0YjYwOTEzMTQ5YjZiYThlNTk0OTYyNWI2OWU1NjMxMWNjNjc1NjY0YmYwZTljZjgyMjFjMzQ4MmE5YTI4ZjMifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L879-L920",
+          "version": "repo-lines-v1:sha256:c05266fc1bab8d81c4ff3e469484d8501693c732893e1d5f894d7632b7475b55:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlNmI0MmY4YWVkYzZkYzU3ZmVkZjI1YTQyZWM4ZTJkNDgzYjM2NWY5ODUxMzczMDI1YTMzNmZhNWQ0ZTcyNTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxYTJmMWEzNDVhNTRkZjJhMmY5YmJjOTVkN2NhYTBjMDJhYzdhMmNmNGY5ZWM4ZGRkNGUyODc2ZGMzODE4YjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4OGM3ZmI3ZjBiYzczOTY3N2FkZjQwNzkxNjljYWE1NzcyOGQ3YTkyNjIwZWVjMzU3MzI1ODRlNTQzMzVlMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ5NDlkYWQ3NWQzMmQxOTI4Y2QwN2RkOWM2NmQ1NWU2ZGIyMmRiNjRkMGIzNzliNjkxZWZkZDZkZGJkODkxYmQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e31af3fbf485418e83c877d7cbe166bc",
+      "statement": "Response finalization converts handler output with make_response, runs after_this_request callbacks before reversed after_request callbacks, saves a non-null session, and emits request_finished; failures during error-response finalization are logged and suppressed in safe mode, while normal finalization failures propagate.",
+      "evidence": [
+        {
+          "resource": "repo://src/flask/app.py#L1292-L1325",
+          "version": "repo-lines-v1:sha256:99ac8f1b5f1ed879c12723c0adeecd8962956c24b0fb67d5c9ddcb4260181b54:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdmY2EyYzk1YjRkOWZhZGUwOWUxN2E4YzFjNTg4M2I3NzllODAzNzMyZDVhMTgwMzFiMmY5NTIzMmQ3NDljMjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFkZWZlYTM5ZWM3MjQ3ZWZhYWYwNmU2MjA5YTZiYTU3ZTQ1NTVkOTIzNDBiYjYyYmViMzBkZDgyNGI2NTUxZWMifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L922-L964",
+          "version": "repo-lines-v1:sha256:70d1337e993df41508b7896506a611db0773956bfc7699115728ad5cfc200b29:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlMTJkYWM3MzhlNjYyYjU5NzBkNWExZmRjOTZhOTQ2ZWZkZTZhNGJiNDIzNjA3NTg0NWIyODBhNGYwYzVkMzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI3ZTY5ZmUyY2Y4YTcxZTY5NmZjODJmMmY3MDcwOTc0OWViZTE2ZWRlYTBjZDgyZWM2MmEwZjI3ZGQyYjY5YTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkxYTkwYjFhMDFlY2MxMjQwZWU1YzhhZmJiZWJkMDBjNjgyNmFiYjcxZWFlYjQ0MjQwOWI2ZGQ1YTk2MjAzMTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJhMjhhMDViMmVlYTU5MzcwYWFkZDRiMDVlMTM3OGUyYTIyOGFkOGIyMjVjMTViZjgzZTNhMmZiMzE3NTk0NjAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_903ecfb3480c48c7a304c3dbb2544040",
+      "statement": "Unhandled exceptions have distinct handling layers: handle_user_exception resolves HTTP exceptions and registered handlers or re-raises, while the outer handle_exception emits got_request_exception, propagates when configured, or logs and creates an InternalServerError carrying the original exception before safe finalization.",
+      "evidence": [
+        {
+          "resource": "repo://docs/reqcontext.rst#L143-L163",
+          "version": "repo-lines-v1:sha256:1fe2479551ba33cb7a967ce20407696be6b59eec6759025c98a20f669618e5b8:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5ZGE4ZDAzZDM5ZTMyNmZhMjMzYTAxY2JlZjI1ZmQ2MzZlMDIzMDI3ZWYyOTE3MmYzOWEwZTk4MzhhNGIxMWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxZmU5ZDcyZTEyMTYzYTczMzYyNGFmYTI5NjdjOWZmZjFiNWQ0ZGJlODllMTlhMDM0ZDkwNmQ4OTFiYWQxNmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ4YzU0YjQyMmI5MjYyMGUyMGNmYjJlODg0ZmEwZmNlY2Y2MjhkMzkwNjYxM2EwZmY1NzdjNWE2NDU0MTRkM2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE1N2Q4YTI0NGYxMDg0ZTJhYzhjZDZjNTkzNGNkNDEyYmUwNDIwNTBmNGY5MjkzNmZlOThlZDU0NzRmMWNiOTkifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L1507-L1529",
+          "version": "repo-lines-v1:sha256:79fa9da5fa7f390a4622896fd6b7840dd5c50c58ab437d32f2605cce10e7185f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM1Y2UxZGEyOWY4ZWY4MjlmNDJmMDQ2OGFkYWMzOTg0Yjk2ZmQwNTVjNzIzYjg3ZGY2Y2RiZjZiM2Q4ZjY2NDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMyMmNhYjkzNTQxMWEwNTIzNmU5OGU3NWFjOTJkODcxZDQyOWVkYmMyMzJmOThhMDEwYjQxZTE3ZWIwYTUzYzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU5NTE0MmE2MmM3ZWZmMWVhNDM1Y2NlNjk3NWRjMjMzNjE2ZjljMjhkYjFmYjg4ZmYxMjgxMDgyODA1ZjZjYTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRiMjBhNDk3NDMwMmZhNDczZjUzMzhlMTQyYjM2ZTUwODgwYmJlODhlNWY4NDg1ZDNkNDVhYzkwNTg4YWRmZDYifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L770-L850",
+          "version": "repo-lines-v1:sha256:75a7a4879378b00277d66880c5c2586da91e0b2f05df7d0370214452fa606111:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwMDViNWQxN2UwMjhkY2I5NmVjYWQ0YTA0YjRlZGVlOTE2Yjg3NzY5OGQ3NGE4NzcxNGMwOGE3Mjk5MWM5MzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxNjFjZTliMTJjOGMxZGQwOWU3MTcwMWUzNzU3Mjk3OGU1MWU3YTQ3ZDA4ZDAwYzEwM2JkODE2NmU3NTFjNzciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM5NzBjOTA2NTk4YjFkN2E5NzMzNWRkZmU2ZjFjMWUyM2U3MzQ5ZTM5NmRmODJhNTM5NGU0ZDUzOTEzNmQ2YTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAxYjNkZWI1NDM2ZGU3MzVmY2MzMzdiNTJjYmRiNDU4MDU2YjZiYmI1MTk5MjM1OTFlZTNiNjcyMzNjMTc3ZDgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_0308e6e54f084cb4b47f0e8c6cd80801",
+      "statement": "Request teardown is driven by RequestContext.pop: teardown_request callbacks run in reverse order, request_tearing_down is emitted, the request is closed and its ContextVar reset, and an app context owned by that request is then popped; app teardown callbacks and appcontext signals run during AppContext.pop.",
+      "evidence": [
+        {
+          "resource": "repo://src/flask/app.py#L1326-L1385",
+          "version": "repo-lines-v1:sha256:c3b75b2f7b838c0d5b8cb5aa1a58fdc4d2246a07f39131873e4c1da266e99cca:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3MmY2OWNhNGY4ZTliYmJjN2NhZjZlNThiMWNiYjM3YmU0NmRjODBkZWNhZDRjMTMwNGQ1YTFmNTAxZDcwZjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM0MzQ5YmIzMDM3MjE2MmIzMjk1N2M4NTk3MzEzNDIyMDEwNGZmN2JiZWM3OWMzOTM0NzljNmNlZDdkYmFkYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlkYThiOTBmMzAyM2UzZjUzOTEyOTM3ZDFlNTM3M2FiNGIyZjJmNDIzMDJjNTJjN2JiMGFkMzRkNjYwYjkwODkifQ"
+        },
+        {
+          "resource": "repo://src/flask/ctx.py#L251-L278",
+          "version": "repo-lines-v1:sha256:8bc05ea81b8155918742a5c773b57161cb3bb310a52986f7344e4c3d97d1f5de:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiMjJlMzU1YjA3NDllZmQ1M2Q0NDMwNDA2ZThjNDc3Yzc4OTdmNjA0Y2RhNjBlNzBhMzY2MmFkNDBkZTZkMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0YmE3YTc0NzI4ODFkOGI5YjU0OWY3YmI4Mjc3M2Y4MjQyM2E0Nzc1MjhkMTNhMzI2NTFjZDEzNmNmYTRlMzUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIwODg2NTk5ZDdiOTVmODUzMzNmNGI2OWFiMDk1ODliNmEyMDU5MzQ3MzY5YTBkMjU4ZmYxYjFlODA2MjI4ZjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFhOTY3OWZmODZhNDBmZGUxMTM3YjEwOGE3NWZjNGEwZjc2NTc2NTQ5M2RjNjNiMTFiYWQ2ZDVjNGJiYjM1NjUifQ"
+        },
+        {
+          "resource": "repo://src/flask/ctx.py#L395-L449",
+          "version": "repo-lines-v1:sha256:b7c202fba7923f9804518620b5a20a93083ec64d26f060245051dd7a40cd5292:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRjNjlkYmI4ZDc2Y2ZhNzM3N2IyZDg5YmMzYWU3NjhkYzhiMGYwMzVlMmU4N2Y0NzZhMTJiYTVmMjc5YjMyMDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://src/flask/signals.py#L8-L17",
+          "version": "repo-lines-v1:sha256:416bb02530881d67dbbe33f5b527b260d80709334e6a90b6a0176759600ec855:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVjMWE4ZjRmODk0NWY0ZjM0NTkwNTJjNDNmZWE5YzY4Yjg4ZDIzOWM3MGViNjUxMWU3MTYwODRjMDFlYTc2NzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI0MGQ4ZjkzZDEyNDBjMzczOTA3MWVjYmY2MWY1ZjcwOTBlYjk2MTdhZjNiNWIzYjM3MjM4OWY3MWNhNzljZGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRlODVjMzk1YzkzNjA1NTMyZDdlMDk5OWI5Mzc2NzdhZjhhMGZlMjUwMDQ1YjdkYWViNzViMjc5YWQ0ZDU3NzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c0c1fa1cc1f3419d818ef27aca1fd673",
+      "statement": "Flask remains WSGI for async handlers: ensure_sync leaves synchronous functions unchanged and wraps coroutine functions through async_to_sync, whose default implementation uses asgiref; async support therefore waits for the coroutine within a WSGI worker rather than providing an ASGI runtime.",
+      "evidence": [
+        {
+          "resource": "repo://docs/async-await.rst#L28-L58",
+          "version": "repo-lines-v1:sha256:2057ab8c9e61e34c8f817023839244ee62ef71dcaaa67ab7f736d2e533ae9c1f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkY2RjMjBjYWIzNmYyZWIzMTJlNjZmODgxZWU5MDUyNmI2ZGY1MDVhNWZkNDI0OTIxYWVhMWUzODY4NzMyNTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1NDQ0ZDIwM2I1ZWU5ODI2MGQ2MjcxYjdhNWJlYTJlNGQ2MDZlMTcwMjk0ZTU4YzA2NGY0YThiOWYxMWU0OTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE2ZTE3NzY2MmU3NWQxYWY5ZTIxNjRiYTQ5MTg1ZGY1MzlmODM3Yjg4NzNmYmI0YWFhNjBjMjlhYzMwODM4MmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRmMTBkYjAwZGI5MDJjNTQ3ZTMzNzU4YTBiNTdjMTNkNmRhMDYxMTQzZDdjMDkwYjI2Y2FlMTMzYzg3NDIxNzUifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L966-L1001",
+          "version": "repo-lines-v1:sha256:a0775d47f753a4001c5bbe2e0bc5147a9eb9c1f2b8fb4842b04245d69102cfd7:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0ZjVhZjM2ZDdjYjJhYjY1YzE2MmEwZDdkMWFhZTY5MGY2NjVlNWEzMmZkYzA0ZWY0MjU1ZmYyMTI2MWM0ODciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiYTdiYzYyMjViYTA1NjE0NTFkYTkxZmRiNmJlZGY4OTZhOGFkMzVlM2NmYWZkOTIxNDViZDA0MGU2MmM0MDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEyNDg4NjNiZDZiNTgwMGNiYmUzYjc0NDhjYmQwZGU0ZGRhYWY3YjhmMjkyZDM5YTU1YWQyMWZiNzI4MWE2YTAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBhMzU4YjA5NmRlM2FlYmRiZjhjNDVjNzc1YTQyMTUwZDA1N2UzNzZjNmE1NWYzZThlNDUzN2Q5NDNkNDZiMzAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f2808e1ce7c34484a26ec037c491e654",
+      "statement": "The ensure_sync boundary is overridable and is used for views, lifecycle callbacks, error handlers, teardown callbacks, and signal receivers, allowing extensions to invoke potentially asynchronous functions without changing Flask's WSGI contract.",
+      "evidence": [
+        {
+          "resource": "repo://docs/async-await.rst#L93-L125",
+          "version": "repo-lines-v1:sha256:30e57a08c813fdbb1ae5f3dc2bb101c81480aafa20611de836ad12237d8c165e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1OTM5ZDM4MmQxNmQ1MWI2YTJjZGIxNjQ3MzJhNDlmYjcyZWE4ZDEzZGE3YjdlNmFlOWNiMzkxYjA2MjAxMDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkZjE2MmU5OTkxY2Y3NTFhNDk2YzQ2OTU1ZWZiZTc3MzI3ZGMwZWNiOTU0NGYxYjdmZTgxZTE5MGZlOGExNjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFmN2FkMmJjMDdkZDhkN2VkYzQ2M2VkNzllNDgxYmViZDJkMjJjODc2YjJhNjllNzUzZDg5ZjIyOGNkYzc0NTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L1326-L1385",
+          "version": "repo-lines-v1:sha256:c3b75b2f7b838c0d5b8cb5aa1a58fdc4d2246a07f39131873e4c1da266e99cca:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3MmY2OWNhNGY4ZTliYmJjN2NhZjZlNThiMWNiYjM3YmU0NmRjODBkZWNhZDRjMTMwNGQ1YTFmNTAxZDcwZjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM0MzQ5YmIzMDM3MjE2MmIzMjk1N2M4NTk3MzEzNDIyMDEwNGZmN2JiZWM3OWMzOTM0NzljNmNlZDdkYmFkYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjlkYThiOTBmMzAyM2UzZjUzOTEyOTM3ZDFlNTM3M2FiNGIyZjJmNDIzMDJjNTJjN2JiMGFkMzRkNjYwYjkwODkifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L879-L920",
+          "version": "repo-lines-v1:sha256:c05266fc1bab8d81c4ff3e469484d8501693c732893e1d5f894d7632b7475b55:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlNmI0MmY4YWVkYzZkYzU3ZmVkZjI1YTQyZWM4ZTJkNDgzYjM2NWY5ODUxMzczMDI1YTMzNmZhNWQ0ZTcyNTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxYTJmMWEzNDVhNTRkZjJhMmY5YmJjOTVkN2NhYTBjMDJhYzdhMmNmNGY5ZWM4ZGRkNGUyODc2ZGMzODE4YjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4OGM3ZmI3ZjBiYzczOTY3N2FkZjQwNzkxNjljYWE1NzcyOGQ3YTkyNjIwZWVjMzU3MzI1ODRlNTQzMzVlMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ5NDlkYWQ3NWQzMmQxOTI4Y2QwN2RkOWM2NmQ1NWU2ZGIyMmRiNjRkMGIzNzliNjkxZWZkZDZkZGJkODkxYmQifQ"
+        },
+        {
+          "resource": "repo://src/flask/app.py#L966-L1001",
+          "version": "repo-lines-v1:sha256:a0775d47f753a4001c5bbe2e0bc5147a9eb9c1f2b8fb4842b04245d69102cfd7:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0ZjVhZjM2ZDdjYjJhYjY1YzE2MmEwZDdkMWFhZTY5MGY2NjVlNWEzMmZkYzA0ZWY0MjU1ZmYyMTI2MWM0ODciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiYTdiYzYyMjViYTA1NjE0NTFkYTkxZmRiNmJlZGY4OTZhOGFkMzVlM2NmYWZkOTIxNDViZDA0MGU2MmM0MDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEyNDg4NjNiZDZiNTgwMGNiYmUzYjc0NDhjYmQwZGU0ZGRhYWY3YjhmMjkyZDM5YTU1YWQyMWZiNzI4MWE2YTAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBhMzU4YjA5NmRlM2FlYmRiZjhjNDVjNzc1YTQyMTUwZDA1N2UzNzZjNmE1NWYzZThlNDUzN2Q5NDNkNDZiMzAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_5bb9f03130344487958b877ef48f3a11",
+      "statement": "Class-based views participate in normal dispatch through generated view functions: View.as_view optionally creates an instance per request and invokes dispatch_request, while MethodView selects the HTTP method handler and falls back from HEAD to GET; these calls use ensure_sync.",
+      "evidence": [
+        {
+          "resource": "repo://src/flask/views.py#L143-L191",
+          "version": "repo-lines-v1:sha256:94b9587c47c4a9cc64fe7728c6e41b88cd6a600bd21096e31566e42dc397e4d4:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI0YWE0OTA4OTcxYzMyYzllMGEwYmIzYWUxMDJlNmZkMDNmZmYxMjNkZWU1MmJkZDdhMjlmMDQwNjlhZGM4N2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5MmNkZDkxMGYyM2RlNzU4OTkyOTcyYzdjYzE3M2UzMmUwN2I1MDYyNjEzNmFkMDQxOWM3NTllNzZjZmI3OWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY2MjZjZDE3ZDI1ZWI5MTc4M2E5MjcwZmU2MDhjYjYyNjNiNGE3NWNlZjA4ZmYzN2Q5OTQyODY4ZmY3MWVjNTAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://src/flask/views.py#L38-L125",
+          "version": "repo-lines-v1:sha256:6b486f1f192600dfae39a8ceee3885c21e3cec86a3a3bf9564bacabf3ef4d801:eyJzZWxlY3RlZExpbmVDb3VudCI6ODgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA2MmJjZjlmNmM2YzBkM2Q1M2FmYzZmYWJkM2I2M2MyN2Y4ZDBjMTRmNjZiZTE1YzFkNDJlODZkOGMwMGUyNTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjN2U2ZWM1MDQ2NTAwZDk5YmEwMjUyMzQxMDE1ZDIxZTQ3ZjE4NjdhY2NhNDc0ZjRlMTU1Mjg2MDI3YTQ0YTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI5YzM2Mzc0MTU3ZWEwZDc3MDQxOGFhOTczNjZkYjMwYTVlNjdhYzc2NjVmMGQ1NTJkNjFlMjgyMjg3M2NmMGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImViOTNmZTJmY2M5OGMzZGQ3YzM3NDY0Y2M2MDZhMmI4NThjNTdkNzIwNzUxMDliZGE4MGIwZWVhOWU2NWZlMzcifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-17T13:38:32.140Z"
+  }
+}
