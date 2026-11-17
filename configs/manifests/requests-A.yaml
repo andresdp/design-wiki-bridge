@@ -10,7 +10,7 @@ question_set:
   path: data/questions/dev/requests.jsonl
   hash: null
 indexes:
-  code_index_id: code-requests-5e1db418bd6c   # text-embedding-3-large, 872 chunks
+  code_index_id: code-requests-3c43be80eea9   # text-embedding-3-large, 876 chunks, chunker v2
   pdf_index_id: pdf-requests-v1-2fbd3b7d3bdb   # rfc9110 + rfc9112, 240 pages
 pdf_enabled: true
 models:

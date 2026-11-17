@@ -10,7 +10,7 @@ question_set:
   path: data/questions/dev/flask.jsonl
   hash: null
 indexes:
-  code_index_id: code-flask-4389daaac0e9   # text-embedding-3-large, 1358 chunks
+  code_index_id: code-flask-d8133bc0499d   # text-embedding-3-large, 1362 chunks, chunker v2
   pdf_index_id: pdf-flask-v1-55138d10d333   # rfc9110 + rfc3875, 226 pages
 pdf_enabled: true
 models:
