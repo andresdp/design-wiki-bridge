@@ -22,7 +22,7 @@ prompts:
   generate:
     path: src/dwb/prompt_files/generate_v2.md
 budgets:
-  code_top_k: 20
+  code_top_k: 40            # = rerank_pool, so code-only items can fill the token budget too
   wiki_search_k: 10
   wiki_read_sections: 5
   wiki_max_spans: 20

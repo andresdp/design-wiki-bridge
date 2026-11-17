@@ -446,9 +446,13 @@ def experiment_evaluate(
 ) -> None:
     """Score two saved runs offline and write the paired report tables."""
     from dwb.eval.command import evaluate_runs
+    from dwb.evidence_text import EvidenceTextError
 
-    res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
-                        deepeval=deepeval or None)
+    try:
+        res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
+                            deepeval=deepeval or None)
+    except EvidenceTextError as e:
+        raise _fail(str(e)) from None
     print(json.dumps(res, indent=2))
 
 

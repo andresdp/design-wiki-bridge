@@ -92,5 +92,9 @@ class PdfRetriever:
     def __init__(self, index: VectorIndex):
         self.index = index
 
+    @property
+    def embedding_model(self) -> str:
+        return self.index.info.embedding_model
+
     def retrieve(self, query: str, k: int) -> list[EvidenceItem]:
         return self.index.search(query, k, branch="pdf")

@@ -13,7 +13,7 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 - Tests (offline; `live` tests are skipped): `conda run -n taxonomy pytest`
 - Live checks (need `OPENAI_API_KEY`): `conda run -n taxonomy pytest -m live`
 - Lint: `conda run -n taxonomy ruff check src tests`
-- User guide: `docs/usage.md`. The CLI is typer (`src/dwb/cli.py`); `dwb --help` lists commands.
+- User guide: `docs/usage.md`. Architecture (mermaid diagrams + design decisions): `docs/architecture.md`; keep it current when components or decisions change. Its module layers (§2) are enforced by `tests/test_layers.py`; a new module needs a layer there. The CLI is typer (`src/dwb/cli.py`); `dwb --help` lists commands.
 - Two modes, same commands. **User tool**: inside any git repo, `dwb init` writes `<repo>/.dwb/config.yaml`, `dwb index` builds every listed source for HEAD, then `dwb ask "<q>"` / `dwb chat` / `dwb status` (code in `src/dwb/project.py`, `src/dwb/init_wizard.py`). **Research harness**: from this folder, `ask`/`chat` take `--repo <name>` (configs/repos.yaml, `configs/chat.yaml`); the wiki replaces vector search when enabled.
 - Readiness: `conda run -n taxonomy dwb status`
 - Research code index: `dwb index code <repo> [--embedding-model <model>]`
@@ -29,7 +29,7 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 
 Use the existing conda env **`taxonomy`** (Python 3.11) for everything, e.g. `conda run -n taxonomy python ...` or `conda run -n taxonomy pytest ...`. **Ask the user before installing any package** (pip/conda/npm), even one the plan clearly needs. OpenWiki is reached through its stdio MCP server (`openwiki mcp`) via `langchain-mcp-adapters`. It needs `openwiki@0.9.0`; the global 0.3.0 install has no retrieval tools.
 
-Large artifacts are gitignored under `artifacts/`: repository clones and pinned checkouts, the SWE-QA files, indexes, wiki snapshots, and the Tavily store. Run traces go under `runs/`.
+Large artifacts are gitignored under `artifacts/`: the pinned checkouts (shallow, single-commit repos in `artifacts/checkouts/`), the SWE-QA files, indexes, wiki snapshots, and the Tavily store. Run traces go under `runs/`.
 
 ## Git / PR workflow
 

@@ -196,7 +196,7 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
 
 - **Conditions:** condition **A** uses vector search and **B** uses OpenWiki-guided search. Everything else is identical: PDFs, the web policy, the reranker, the context budget, the generator, and the citation format. `experiment check` verifies this for each manifest pair.
 - **Manifests:** manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets.
-- **Run:** `experiment run` writes `runs/<run_id>/`, containing the frozen manifest, `traces.jsonl` (one record per question), and `run_summary.json`. A test set must be frozen; its hash is in the manifest. `--overwrite` replaces a previous run.
+- **Run:** `experiment run` writes `runs/<run_id>/`, containing the frozen manifest, `traces.jsonl` (one record per question), and `run_summary.json`. Code passages are stored by reference (commit, path, lines); `experiment evaluate` reads their text back from the checkout named in the manifest, so keep that checkout. A test set must be frozen; its hash is in the manifest. `--overwrite` replaces a previous run.
 - **Web modes:**
   - `record` calls Tavily for searches that aren't stored yet and saves them.
   - `replay` uses stored results only.
@@ -211,6 +211,16 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
   Results are paired A/B differences with improved/tied/regressed counts. Judge verdicts are cached. `--no-judge` gives recall and cost only.
 - **Wiki snapshots:** the research harness copies a pinned snapshot into each checkout before a condition B run. In user mode the wiki is used in place.
 - **Question records** live in `data/questions/{test,dev}/`; see `data/questions/README.md`.
+
+**Adding a research repository.** Pin a commit and fetch only that commit:
+
+```sh
+git init -q artifacts/checkouts/<repo>-<tag>
+git -C artifacts/checkouts/<repo>-<tag> fetch --depth 1 https://github.com/<org>/<repo>.git "refs/tags/<tag>:refs/tags/<tag>"
+git -C artifacts/checkouts/<repo>-<tag> checkout --detach "<tag>^{commit}"
+```
+
+Then add it to `configs/repos.yaml` (`url`, `tag`, `sha`, `checkout`), and optionally add a PDF corpus and excluded web domains to `configs/chat.yaml`. Build the indexes with `dwb index code <repo>` and the commands above. Choosing the commit to pin (as the U1 spike did by scoring tags against SWE-QA) needs the full history, so do that in a separate, temporary clone.
 
 Research configuration:
 
