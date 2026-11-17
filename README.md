@@ -4,7 +4,7 @@
 
 # Design Wiki Bridge
 
-> **Status: in progress.** Condition A (vector baseline), the shared stages, the batch runner, and offline evaluation are built and tested offline. Condition B's OpenWiki client and resolver are waiting on the wiki generation runs (see [`docs/spikes/2026-11-openwiki-swe-qa-spike.md`](docs/spikes/2026-11-openwiki-swe-qa-spike.md)).
+> **Status: in progress.** Both conditions, the shared stages, the batch runner, and offline evaluation are built. Condition B runs end to end on the Flask wiki snapshot. Still to do: the Requests wiki, the benchmark content, and the real-model pilot (see [`docs/spikes/2026-11-openwiki-swe-qa-spike.md`](docs/spikes/2026-11-openwiki-swe-qa-spike.md)).
 
 Cross-source question answering over software projects with verifiable citations. The system uses a generated repository wiki ([LangChain OpenWiki](https://github.com/langchain-ai/openwiki)) only as a map for finding the original code and test evidence. Answers then combine that evidence with external specifications (PDFs, Web pages) and cite each claim to an original source span.
 
@@ -50,6 +50,7 @@ ruff check src tests
 ```bash
 dwb index-code --repo flask --embedding-model text-embedding-3-large
 dwb index-pdf  --corpus configs/pdfs/<corpus>.yaml --embedding-model text-embedding-3-large
+dwb wiki-snapshot --repo flask --provider openai --model gpt-5.6-luna --effort medium --elapsed-s 1054.92
 dwb check-paired configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
 dwb run --manifest configs/manifests/flask-A.yaml            # --web-mode live = latency flag
 dwb evaluate --run-a runs/<A> --run-b runs/<B> --out reports/<name>

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-`docs/journal-extension-plan.md` owns the study design. The implementation plan is `docs/plans/2026-11-15-1948-feat-cross-source-qa-research-system-plan.md`, and the U1 findings (pinned SHAs, SWE-QA row IDs, the OpenWiki 0.9.0 interface) are in `docs/spikes/2026-11-openwiki-swe-qa-spike.md`. The code lives in the `dwb` package (`src/dwb/`). Condition B's OpenWiki client and resolver (U7/U8) are not built yet.
+`docs/journal-extension-plan.md` owns the study design. The implementation plan is `docs/plans/2026-11-15-1948-feat-cross-source-qa-research-system-plan.md`, and the U1 findings (pinned SHAs, SWE-QA row IDs, the OpenWiki 0.9.0 interface) are in `docs/spikes/2026-11-openwiki-swe-qa-spike.md`. The code lives in the `dwb` package (`src/dwb/`). Both conditions are built. The resolver follows the revised KTD4 order in the spike doc §6. The Flask wiki snapshot is `wiki-flask-52e1119f2d9c`; its manifest is in `configs/wikis/`.
 
 ## Commands
 
@@ -15,6 +15,7 @@ All of these run in the `taxonomy` env. The package is installed editable (`pip 
 - Lint: `conda run -n taxonomy ruff check src tests`
 - Code index (condition A): `conda run -n taxonomy dwb index-code --repo flask --embedding-model <model>`
 - PDF index: `conda run -n taxonomy dwb index-pdf --corpus configs/pdfs/<corpus>.yaml --embedding-model <model>`
+- Register a generated wiki: `conda run -n taxonomy dwb wiki-snapshot --repo flask --provider openai --model <model> --effort <effort> --elapsed-s <s> [--cost-usd <usd>]`
 - Paired gate: `conda run -n taxonomy dwb check-paired configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml`
 - Run one condition: `conda run -n taxonomy dwb run --manifest configs/manifests/flask-A.yaml` (`--web-mode live` is the latency flag)
 - Evaluate: `conda run -n taxonomy dwb evaluate --run-a runs/<A> --run-b runs/<B> --out reports/<name>` (`--no-judge` gives recall and cost only)
