@@ -44,7 +44,7 @@ def test_evaluate_command_writes_all_tables(tmp_path, record):
     assert base  # example manifest still parses
     (tmp_path / "prompts").mkdir()
     for p in ("judge_claim_v1.md", "judge_support_v1.md"):
-        (tmp_path / "prompts" / p).write_text((ROOT / "prompts" / p).read_text())
+        (tmp_path / "prompts" / p).write_text((ROOT / "src/dwb/prompt_files" / p).read_text())
     cfg = tmp_path / "eval.yaml"
     cfg.write_text(yaml.safe_dump({"judge": {"model": "fake", "prompts_dir": "prompts",
                                              "cache": "cache.jsonl"},

@@ -6,7 +6,7 @@ from dwb.evidence import code_item
 from dwb.generate import GeneratedAnswer, Generator, render_answer, validate_claims
 from fakes import FakeStructuredChat
 
-PROMPT = Path(__file__).resolve().parents[1] / "prompts" / "generate_v1.md"
+PROMPT = Path(__file__).resolve().parents[1] / "src" / "dwb" / "prompt_files" / "generate_v1.md"
 
 
 def ctx():

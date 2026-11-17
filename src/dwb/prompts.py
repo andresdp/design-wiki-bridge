@@ -9,6 +9,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from dwb.manifest import prompt_hash
 
 USER_MARKER = "---user---"
+PROMPT_DIR = Path(__file__).parent / "prompt_files"  # shipped with the package
+GENERATE_PROMPT = PROMPT_DIR / "generate_v1.md"
 
 
 def load_prompt(path: str | Path) -> tuple[ChatPromptTemplate, str]:

@@ -5,7 +5,7 @@ from conftest import make_trace
 from dwb.eval.claims_judge import ClaimsJudge
 from fakes import FakeStructuredChat
 
-PROMPTS = Path(__file__).resolve().parents[2] / "prompts"
+PROMPTS = Path(__file__).resolve().parents[2] / "src" / "dwb" / "prompt_files"
 
 
 def judge_fn(messages):

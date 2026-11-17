@@ -20,7 +20,7 @@ models:
   temperature: 0.0
 prompts:
   generate:
-    path: prompts/generate_v1.md
+    path: src/dwb/prompt_files/generate_v1.md
 budgets:
   code_top_k: 20
   wiki_search_k: 10

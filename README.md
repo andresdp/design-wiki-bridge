@@ -76,7 +76,7 @@ ruff check src tests
 
 ```
 configs/       repos.yaml, chat.yaml, pdfs/, manifests/, wikis/, eval.yaml
-prompts/       versioned generator and judge prompts (hashed into manifests)
+src/dwb/prompt_files/  versioned generator and judge prompts (hashed into manifests)
 src/dwb/       evidence, manifest, trace, budget, rerank, generate, graph, runner, chat, workspace, cli
   benchmark/   question schema, SWE-QA loader, freeze
   retrieval/   chunking, Chroma code/PDF indexes, wiki types

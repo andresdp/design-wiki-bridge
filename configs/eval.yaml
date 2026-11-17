@@ -2,7 +2,7 @@
 judge:
   model: gpt-5.5-2026-04-23  # dated snapshot; differs from the generator (gpt-5.6-luna)
   temperature: 0.0
-  prompts_dir: prompts       # judge_claim_v1.md, judge_support_v1.md
+  prompts_dir: src/dwb/prompt_files   # judge_claim_v1.md, judge_support_v1.md
   cache: artifacts/judge_cache.jsonl
 matching:                    # KTD15
   min_overlap_lines: 1

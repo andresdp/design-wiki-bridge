@@ -222,7 +222,7 @@ Question records live in `data/questions/{test,dev}/`. See `data/questions/READM
 | `configs/manifests/*.yaml` | Experiment run manifests (one per repository and condition) |
 | `configs/eval.yaml` | Evaluation judge model and span-matching rules |
 | `configs/wikis/*.json` | Registered wiki snapshot manifests |
-| `prompts/*.md` | Versioned prompts; their hashes are recorded in every run |
+| `src/dwb/prompt_files/*.md` | Versioned prompts, shipped with the package; their hashes are recorded in every run |
 
 ## Logging and output
 

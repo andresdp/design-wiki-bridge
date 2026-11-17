@@ -13,6 +13,7 @@ from dwb.eval.matching import MatchRules
 from dwb.eval.report import question_row, write_report
 from dwb.log import get_logger
 from dwb.manifest import load_manifest
+from dwb.prompts import PROMPT_DIR
 from dwb.trace import TraceRecord, read_traces
 
 LOG = get_logger("eval")
@@ -44,7 +45,8 @@ def evaluate_runs(
             judge_llm = ChatOpenAI(model=cfg["judge"]["model"],
                                    temperature=cfg["judge"].get("temperature", 0.0))
         cache = cfg["judge"].get("cache")
-        judge = ClaimsJudge(judge_llm, base_dir / cfg["judge"].get("prompts_dir", "prompts"),
+        pdir = cfg["judge"].get("prompts_dir")
+        judge = ClaimsJudge(judge_llm, (base_dir / pdir) if pdir else PROMPT_DIR,
                             model_id=cfg["judge"]["model"],
                             cache_path=(base_dir / cache) if cache else None)
     run_deepeval = cfg.get("deepeval", {}).get("enabled", False) if deepeval is None else deepeval

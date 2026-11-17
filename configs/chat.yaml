@@ -6,7 +6,7 @@ models:
   embedding: text-embedding-3-large   # must match the model the indexes were built with
   temperature: 0.0
 
-prompt: prompts/generate_v1.md
+prompt: src/dwb/prompt_files/generate_v1.md
 
 # Default source toggles. The repository itself is always on.
 sources:

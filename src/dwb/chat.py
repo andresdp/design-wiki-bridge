@@ -19,6 +19,7 @@ from typing import Any
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
 from dwb.manifest import Budgets, Indexes, Models, PromptRef, QuestionSetRef, RunManifest, WebConfig
+from dwb.prompts import GENERATE_PROMPT
 from dwb.trace import TraceRecord
 from dwb.workspace import Workspace, WorkspaceError
 
@@ -116,7 +117,7 @@ def build_manifest(ws: Workspace, s: ChatSettings) -> tuple[RunManifest, list[st
         repo_sha=repo.sha, checkout=str(repo.checkout),
         question_set=QuestionSetRef(id="chat", path="-"), indexes=indexes,
         pdf_enabled=sources.pdf, models=models,
-        prompts={"generate": PromptRef(path=cfg.get("prompt", "prompts/generate_v1.md"))},
+        prompts={"generate": PromptRef(path=cfg.get("prompt") or str(GENERATE_PROMPT))},
         budgets=Budgets(**(cfg.get("budgets") or {})), web=web,
     )
     return m, notes

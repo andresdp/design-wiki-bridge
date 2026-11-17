@@ -49,8 +49,6 @@ def ws(tmp_path) -> Workspace:
         "sources": {"wiki": False, "pdf": True, "web": False},
         "repos": {"toy": {"pdf_corpus": "configs/pdfs/toy.yaml",
                           "web_exclude_domains": ["toy.example.org"]}}}))
-    (tmp_path / "prompts").mkdir()
-    shutil.copy(ROOT / "prompts" / "generate_v1.md", tmp_path / "prompts" / "generate_v1.md")
     for kind, idx, parts in (("code", "code-toy-1", {"repo": "toy", "sha": sha}),
                              ("pdf", "pdf-toy-1", {"corpus_id": "toy-v1"})):
         d = tmp_path / "artifacts" / "indexes" / idx
