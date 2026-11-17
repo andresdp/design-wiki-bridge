@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -102,6 +103,9 @@ class VectorIndex:
             return cls(root, existing, embedding)
         info = IndexInfo(index_id=index_id, kind=kind, embedding_model=embedding_model,
                          n_items=len(items), parts=parts)
+        if (root / index_id).exists():  # no index.json: an interrupted build; start clean
+            LOG.warning("Removing the incomplete index %s left by an interrupted build", index_id)
+            shutil.rmtree(root / index_id)
         idx = cls(root, info, embedding)
         docs = [_flat(i) for i in items]
         LOG.info("Embedding %d items into [bold]%s[/] with %s", len(docs), index_id,

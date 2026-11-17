@@ -227,3 +227,190 @@ def test_research_mode_still_needs_repo_flag_outside_projects(monkeypatch):
     assert r.exit_code == 2 and "--repo" in r.output
     with pytest.raises(WorkspaceError):
         ProjectWorkspace(ROOT)
+
+
+# ------------------------------------------------------------------ review fixes
+
+
+def test_project_env_only_supplies_api_keys(tmp_path, monkeypatch):
+    from dwb.project import load_env
+
+    proj = tmp_path / "cloned"
+    proj.mkdir()
+    (proj / ".env").write_text("OPENAI_API_KEY=from-repo\nOPENAI_BASE_URL=https://evil.example\n"
+                               "HTTPS_PROXY=http://evil.example:8080\n")
+    for k in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "HTTPS_PROXY"):
+        monkeypatch.delenv(k, raising=False)
+    loaded = load_env(cwd=proj, global_env=tmp_path / "none.env")
+    assert loaded == [proj / ".env"]
+    assert os.environ["OPENAI_API_KEY"] == "from-repo"
+    assert "OPENAI_BASE_URL" not in os.environ and "HTTPS_PROXY" not in os.environ
+
+
+def test_harness_env_and_global_env_load_in_full(tmp_path, monkeypatch):
+    from dwb.project import load_env
+
+    harness = tmp_path / "harness"
+    (harness / "configs").mkdir(parents=True)
+    (harness / "configs/repos.yaml").write_text("repos: {}\n")
+    (harness / ".env").write_text("DWB_T_LOCAL=1\n")
+    glob = tmp_path / "global.env"
+    glob.write_text("DWB_T_GLOBAL=2\n")
+    for k in ("DWB_T_LOCAL", "DWB_T_GLOBAL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "shell")
+    (harness / ".env").write_text("DWB_T_LOCAL=1\nOPENAI_API_KEY=file\n")
+    load_env(cwd=harness, global_env=glob)
+    assert os.environ["DWB_T_LOCAL"] == "1" and os.environ["DWB_T_GLOBAL"] == "2"
+    assert os.environ["OPENAI_API_KEY"] == "shell"  # the shell always wins
+
+
+def test_saved_key_is_never_world_readable(tmp_path, monkeypatch):
+    p = tmp_path / "dwb" / ".env"
+    monkeypatch.delenv("DWB_TEST_KEY", raising=False)
+    old = os.umask(0o022)
+    try:
+        save_global_key("DWB_TEST_KEY", "one", p)
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    assert not list(p.parent.glob("*.tmp"))
+
+
+def test_pdf_names_include_a_url_hash():
+    from dwb.project import pdf_filename
+
+    a = pdf_filename("https://a.example.org/spec.pdf")
+    b = pdf_filename("https://b.example.org/spec.pdf?v=2")
+    assert a != b and a.startswith("spec-") and a.endswith(".pdf")
+    assert pdf_filename("https://a.example.org/spec.pdf") == a
+
+
+def test_pdf_download_errors_are_workspace_errors(tmp_path, monkeypatch):
+    import io
+    import urllib.error
+    import urllib.request
+
+    from dwb.project import _fetch_pdf
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: Resp(b"<html>login"))
+    with pytest.raises(WorkspaceError, match="did not return a PDF"):
+        _fetch_pdf("https://x.example.org/a.pdf", tmp_path)
+    assert not list(tmp_path.iterdir())  # nothing cached
+
+    def offline(req, timeout):
+        raise urllib.error.URLError("no network")
+
+    monkeypatch.setattr(urllib.request, "urlopen", offline)
+    with pytest.raises(WorkspaceError, match="could not download"):
+        _fetch_pdf("https://x.example.org/a.pdf", tmp_path)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: Resp(b"%PDF-1.7 ..."))
+    p = _fetch_pdf("https://x.example.org/a.pdf", tmp_path)
+    assert p.read_bytes().startswith(b"%PDF") and not list(tmp_path.glob("*.part"))
+
+
+def test_wiki_generation_failures(repo, monkeypatch):
+    import dwb.project as project
+    from dwb.project import WikiCfg, _generate_wiki
+
+    monkeypatch.setattr(project.shutil, "which", lambda name: None)
+    with pytest.raises(WorkspaceError, match="not installed"):
+        _generate_wiki(repo, WikiCfg(), update=False)
+    monkeypatch.setattr(project.shutil, "which", lambda name: "/bin/openwiki")
+    monkeypatch.setattr(project.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 1))
+    with pytest.raises(WorkspaceError, match="exited with status 1"):
+        _generate_wiki(repo, WikiCfg(), update=True)
+
+
+def test_malformed_config_is_a_clear_error(repo):
+    (repo / ".dwb").mkdir(exist_ok=True)
+    (repo / ".dwb/config.yaml").write_text("name: [unclosed\n")
+    with pytest.raises(WorkspaceError, match="is not valid"):
+        ProjectWorkspace(repo)
+
+
+def test_chat_uses_the_indexed_ids_not_the_newest_index(repo):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    ws = _project(repo)
+    state = index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    sha = state["sha"]
+    newer = ws.index_root / "code-toy-newer"
+    newer.mkdir(parents=True)
+    (newer / "index.json").write_text(json.dumps({
+        "index_id": "code-toy-newer", "kind": "code", "embedding_model": "fake-64",
+        "n_items": 1, "parts": {"repo": "toy", "sha": sha}, "created_at": "2999-01-01"}))
+    assert ws.find_code_index("toy", sha, "fake-64") == state["code_index_id"]
+    assert ws.find_code_index("toy", sha, "other-model") is None
+    assert ws.find_code_index("toy", "0" * 40, "fake-64") is None
+
+
+def test_removing_pdfs_drops_the_old_corpus(repo):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    ws = _project(repo)
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    assert ws.pdf_corpus_id("toy")
+    cfg = yaml.safe_load((repo / ".dwb/config.yaml").read_text())
+    cfg["pdfs"] = []
+    (repo / ".dwb/config.yaml").write_text(yaml.safe_dump(cfg))
+    ws = ProjectWorkspace(repo)
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    assert not (repo / ".dwb/pdf_corpus.yaml").exists()
+    assert ws.pdf_corpus_id("toy") is None
+
+
+def test_wiki_edited_after_index_is_refused(repo):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    sha = _git(repo, "rev-parse", "HEAD")
+    shutil.copytree(ROOT / "tests/fixtures/openwiki/openwiki", repo / "openwiki")
+    last = json.loads((repo / "openwiki/.last-update.json").read_text())
+    (repo / "openwiki/.last-update.json").write_text(json.dumps({**last, "gitHead": sha}))
+    ws = _project(repo, wiki={"enabled": True})
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    assert ws.find_wiki_snapshot("toy", sha)
+    page = next((repo / "openwiki").rglob("*.md"))
+    page.write_text(page.read_text() + "\nregenerated text\n")
+    with pytest.raises(WorkspaceError, match="changed since dwb index"):
+        ws.find_wiki_snapshot("toy", sha)
+
+
+def test_user_mode_and_registry_count_wiki_pages_the_same(repo, tmp_path):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    from dwb.retrieval.openwiki_client import register_snapshot
+
+    sha = _git(repo, "rev-parse", "HEAD")
+    shutil.copytree(ROOT / "tests/fixtures/openwiki/openwiki", repo / "openwiki")
+    last = json.loads((repo / "openwiki/.last-update.json").read_text())
+    (repo / "openwiki/.last-update.json").write_text(json.dumps({**last, "gitHead": sha}))
+    ws = _project(repo, wiki={"enabled": True})
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    user = ws.find_wiki_snapshot("toy", sha)
+    reg = register_snapshot(repo, "toy", sha, tmp_path / "wikis", provider="openai",
+                            model=last.get("model") or "m", version="0.9.0")
+    assert (user["pages"], user["claims"], user["tree_sha256"]) == (
+        reg.pages, reg.claims, reg.tree_sha256)
+
+
+def test_custom_span_size_is_carried_into_chat(repo, monkeypatch):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    from dwb.chat import ChatSettings, build_manifest
+
+    cfg = ProjectConfig(name="toy", models={"chat": "gen-x", "embedding": "fake-64"},
+                        code={"max_span_tokens": 900})
+    write_config(repo, cfg)
+    ws = ProjectWorkspace(repo)
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    m, _ = build_manifest(ws, ChatSettings(repo="toy"))
+    assert m.budgets.max_span_tokens == 900

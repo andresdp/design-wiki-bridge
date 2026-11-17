@@ -17,10 +17,12 @@ from dwb.trace import TraceRecord
 
 METRICS = ("recall_candidates", "recall_final", "recall_candidates_jaccard",
            "recall_final_jaccard", "correctness", "citation_support", "coverage",
-           "abstained", "gap_claims", "context_items", "context_tokens", "total_tokens",
-           "latency_ms")
+           "abstained", "gap_claims", "failed", "degraded", "context_items", "context_tokens",
+           "total_tokens", "latency_ms")
 # abstaining / gap claims are not errors, but fewer of them means more of the question answered
-LOWER_IS_BETTER = {"abstained", "gap_claims", "context_tokens", "total_tokens", "latency_ms"}
+LOWER_IS_BETTER = {"abstained", "gap_claims", "failed", "degraded", "context_tokens",
+                   "total_tokens", "latency_ms"}
+COST_METRICS = ("context_tokens", "total_tokens", "latency_ms")
 TIE_EPS = 1e-9
 
 
@@ -34,7 +36,11 @@ def question_row(record: QuestionRecord, trace: TraceRecord, judge: ClaimsJudge 
         "recall_candidates_jaccard": r.candidates_jaccard,
         "recall_final_jaccard": r.final_jaccard,
         "empty_context": trace.empty_context, "web_triggered": trace.web_triggered,
-        "failed": bool(trace.errors),
+        # a failed question has no answer: it scores correctness 0 rather than dropping out of
+        # the paired means (survivorship), and has no cost (its stages never ran)
+        "failed": float(bool(trace.errors)),
+        "degraded": float(trace.degraded),
+        "warnings": "; ".join(trace.warnings),
         "unresolved_citation_ids": trace.validation.get("n_unresolved_ids", 0),
         # whole-answer abstention (every claim is a gap) and partial gaps, separate from errors
         "abstained": float(bool(trace.claims) and all(c.kind == "gap" for c in trace.claims)),
@@ -47,7 +53,13 @@ def question_row(record: QuestionRecord, trace: TraceRecord, judge: ClaimsJudge 
         "latency_ms": sum(s.latency_ms for s in trace.stages),
         "correctness": None, "citation_support": None, "coverage": None,
     }
-    if judge is not None and not trace.errors:
+    if trace.errors:
+        for m in COST_METRICS:
+            row[m] = None
+        if judge is not None:  # no claims: every required claim is "missing" (score 0, no calls)
+            row["correctness"] = judge.correctness(record, trace)["score"]
+        return row
+    if judge is not None:
         row["correctness"] = judge.correctness(record, trace)["score"]
         sup = judge.support(trace)
         row["citation_support"], row["coverage"] = sup["citation_support"], sup["coverage"]
@@ -92,12 +104,14 @@ def paired_summary(paired: list[dict]) -> list[dict]:
     for kind in ("public", "custom", "all"):
         rows = [p for p in paired if kind == "all" or p["kind"] == kind]
         for m in METRICS:
-            diffs = [p[f"{m}_diff"] for p in rows if p[f"{m}_diff"] is not None]
+            both = [p for p in rows if p[f"{m}_diff"] is not None]  # same questions on both sides
+            diffs = [p[f"{m}_diff"] for p in both]
             sign = -1 if m in LOWER_IS_BETTER else 1
             out.append({
                 "subset": kind, "metric": m, "n_paired": len(diffs),
-                "mean_A": _mean([p[f"{m}_A"] for p in rows]),
-                "mean_B": _mean([p[f"{m}_B"] for p in rows]),
+                "n_excluded": len(rows) - len(both),
+                "mean_A": _mean([p[f"{m}_A"] for p in both]),
+                "mean_B": _mean([p[f"{m}_B"] for p in both]),
                 "mean_diff_B_minus_A": _mean(diffs),
                 "improved": sum(1 for d in diffs if sign * d > TIE_EPS),
                 "tied": sum(1 for d in diffs if abs(d) <= TIE_EPS),

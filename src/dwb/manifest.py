@@ -21,6 +21,11 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# Network settings for every OpenAI client: a slow call fails (and is recorded) instead of
+# stalling a batch run on the SDK's 10-minute default.
+MODEL_NET: dict = {"timeout": 180, "max_retries": 2}
+
+
 class Models(_Strict):
     generator: str = Field(min_length=1)
     reranker: str = Field(min_length=1)

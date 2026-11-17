@@ -25,7 +25,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dwb.log import get_logger
 from dwb.prompts import GENERATE_PROMPT
-from dwb.workspace import RepoInfo, Workspace, WorkspaceError
+from dwb.repo import GIT_TIMEOUT_S
+from dwb.retrieval.openwiki_client import openwiki_version  # noqa: F401  (re-exported)
+from dwb.workspace import ChatDefaults, RepoInfo, Workspace, WorkspaceError
 
 LOG = get_logger("project")
 
@@ -112,7 +114,12 @@ class ProjectConfig(_M):
 
 
 def git(root: Path, *args: str, check: bool = True) -> str:
-    out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    try:
+        out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                             timeout=GIT_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise WorkspaceError(f"git {' '.join(args)} did not finish within {GIT_TIMEOUT_S} s "
+                             f"in {root}") from None
     if check and out.returncode != 0:
         raise WorkspaceError(f"git {' '.join(args)} failed: {out.stderr.strip()}")
     return out.stdout.strip()
@@ -120,7 +127,7 @@ def git(root: Path, *args: str, check: bool = True) -> str:
 
 def git_root(start: Path) -> Path | None:
     out = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, timeout=GIT_TIMEOUT_S)
     return Path(out.stdout.strip()) if out.returncode == 0 else None
 
 
@@ -130,6 +137,12 @@ def head_sha(root: Path) -> str:
 
 def is_dirty(root: Path) -> bool:
     return bool(git(root, "status", "--porcelain", "--untracked-files=no", check=False))
+
+
+def wiki_dirty(root: Path) -> bool:
+    """Committed openwiki/ files edited since HEAD (an untracked wiki is the normal case)."""
+    return bool(git(root, "status", "--porcelain", "--untracked-files=no", "--", "openwiki",
+                    check=False))
 
 
 def find_project(start: Path | None = None) -> Path | None:
@@ -187,26 +200,54 @@ def suggest_exclude_domains(root: Path) -> list[str]:
 # --------------------------------------------------------------------------- keys
 
 
-def load_env() -> list[Path]:
-    """Load ./.env then ~/.config/dwb/.env. Variables already set (the shell) always win."""
+# A repository's own .env is untrusted in user mode: a cloned repo could set
+# OPENAI_BASE_URL (or a proxy) and send the user's key elsewhere. Outside the research
+# harness folder only these names are read from ./.env.
+LOCAL_ENV_KEYS = ("OPENAI_API_KEY", "TAVILY_API_KEY")
+
+
+def load_env(cwd: Path | None = None, global_env: Path | None = None) -> list[Path]:
+    """Load ./.env then ~/.config/dwb/.env. Variables already set (the shell) always win.
+
+    ~/.config/dwb/.env is the user's own file and is loaded in full. ./.env is loaded in full
+    only in the research harness folder (it has configs/repos.yaml); anywhere else only
+    ``LOCAL_ENV_KEYS`` are taken from it."""
     try:
-        from dotenv import load_dotenv
+        from dotenv import dotenv_values, load_dotenv
     except ImportError:  # pragma: no cover
         return []
+    cwd = cwd or Path.cwd()
+    global_env = global_env or GLOBAL_ENV
     loaded = []
-    for p in (Path(".env"), GLOBAL_ENV):
-        if p.exists() and load_dotenv(p, override=False):
-            loaded.append(p)
+    local = cwd / ".env"
+    if local.exists():
+        if (cwd / "configs" / "repos.yaml").exists():
+            load_dotenv(local, override=False)
+        else:
+            for k, v in dotenv_values(local).items():
+                if k in LOCAL_ENV_KEYS and v and k not in os.environ:
+                    os.environ[k] = v
+                elif k not in LOCAL_ENV_KEYS:
+                    LOG.debug("Ignoring %s from %s (only %s are read from a project .env)", k,
+                              local, ", ".join(LOCAL_ENV_KEYS))
+        loaded.append(local)
+    if global_env.exists() and load_dotenv(global_env, override=False):
+        loaded.append(global_env)
     return loaded
 
 
 def save_global_key(name: str, value: str, path: Path = GLOBAL_ENV) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Write the key with 0600 from the start (no window where it is world-readable)."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lines = [ln for ln in (path.read_text().splitlines() if path.exists() else [])
              if not ln.startswith(f"{name}=")]
     lines.append(f"{name}={value}")
-    path.write_text("\n".join(lines) + "\n")
-    os.chmod(path, 0o600)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
     os.environ[name] = value
     return path
 
@@ -257,24 +298,67 @@ class ProjectWorkspace(Workspace):
     def repo(self, name: str | None = None) -> RepoInfo:
         return self.repos()[self.config.name]
 
-    def chat_config(self) -> dict[str, Any]:
+    def chat_config(self) -> ChatDefaults:
         c = self.config
-        return {
-            "models": {"generator": c.models.chat, "reranker": c.models.chat,
-                       "embedding": c.models.embedding, "temperature": c.models.temperature},
-            "sources": c.sources.model_dump(),
-            "web": {"max_results": c.web.max_results, "search_depth": c.web.search_depth},
-            "prompt": str(GENERATE_PROMPT),
-            "repos": {c.name: {"pdf_corpus": str(self.dir / "pdf_corpus.yaml"),
-                               "web_exclude_domains": c.web.exclude_domains}},
-        }
+        return ChatDefaults(
+            models={"generator": c.models.chat, "reranker": c.models.chat,
+                    "embedding": c.models.embedding, "temperature": c.models.temperature},
+            sources=c.sources.model_dump(),
+            web={"max_results": c.web.max_results, "search_depth": c.web.search_depth},
+            prompt=str(GENERATE_PROMPT),
+            # the span size the code index was cut with (checked when chat opens the index)
+            budgets={"max_span_tokens": c.code.max_span_tokens},
+            repos={c.name: {"pdf_corpus": str(self.dir / "pdf_corpus.yaml"),
+                            "web_exclude_domains": c.web.exclude_domains}},
+        )
+
+    @property
+    def history_path(self) -> Path:
+        return self.dir / "chat_history"
+
+    # Artifact discovery reads the IDs `dwb index` recorded in state.json, never "the newest
+    # matching index": an older index left in .dwb/index must not be picked up.
+
+    def _indexed(self, sha: str, embedding_model: str | None = None) -> dict[str, Any] | None:
+        st = self.state
+        if not st or st.get("sha") != sha:
+            return None
+        if embedding_model is not None and st.get("embedding_model") != embedding_model:
+            return None
+        return st
+
+    def find_code_index(self, repo: str, sha: str, embedding_model: str) -> str | None:
+        st = self._indexed(sha, embedding_model)
+        return st.get("code_index_id") if st else None
+
+    def pdf_corpus_id(self, repo: str) -> str | None:
+        st = self.state
+        return st.get("pdf_corpus_id") if st and self.config.pdfs else None
+
+    def find_pdf_index(self, corpus_id: str, embedding_model: str) -> str | None:
+        st = self.state
+        if not st or st.get("pdf_corpus_id") != corpus_id \
+                or st.get("embedding_model") != embedding_model:
+            return None
+        return st.get("pdf_index_id")
 
     def find_wiki_snapshot(self, repo: str, sha: str) -> dict[str, Any] | None:
-        p = self.dir / WIKI_RECORD
-        if not p.exists():
+        """The wiki recorded by `dwb index`, only if openwiki/ is still that tree: the wiki is
+        read in place while code is resolved at the indexed commit, so a regenerated or edited
+        wiki would silently point at different code."""
+        from dwb.retrieval.openwiki_client import tree_sha256
+
+        p, st = self.dir / WIKI_RECORD, self._indexed(sha)
+        if not p.exists() or not st or not st.get("wiki_snapshot_id"):
             return None
         rec = json.loads(p.read_text())
-        return rec if rec.get("sha") == sha else None
+        if rec.get("sha") != sha or rec.get("snapshot_id") != st["wiki_snapshot_id"]:
+            return None
+        wiki = self.root / "openwiki"
+        if not wiki.is_dir() or tree_sha256(wiki) != rec.get("tree_sha256"):
+            raise WorkspaceError(f"{wiki} changed since dwb index (it no longer matches wiki "
+                                 f"{rec['snapshot_id']}). Run: dwb index (or --no-wiki)")
+        return rec
 
     def status_rows(self) -> list[tuple[str, str, str]]:
         """(source, state, detail) for `dwb status` in a project."""
@@ -307,20 +391,30 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60] or "doc"
 
 
+def pdf_filename(url: str) -> str:
+    """Readable stem plus a hash of the full URL, so two URLs never share one download."""
+    stem = _slug(Path(url.split("?")[0]).stem or url)
+    return f"{stem}-{hashlib.sha256(url.encode()).hexdigest()[:8]}.pdf"
+
+
 def _fetch_pdf(url: str, dest_dir: Path) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
-    name = _slug(Path(url.split("?")[0]).stem or url) + ".pdf"
-    dest = dest_dir / name
+    dest = dest_dir / pdf_filename(url)
     if dest.exists():
         return dest
     LOG.info("Downloading %s", url)
     req = urllib.request.Request(url, headers={"User-Agent": "dwb/0.1 (pdf fetch)"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        data = r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = r.read()
+    except (OSError, ValueError) as e:  # URLError, HTTPError and timeouts are OSErrors
+        raise WorkspaceError(f"could not download {url}: {e}") from None
     if not data.startswith(b"%PDF"):
         raise WorkspaceError(f"{url} did not return a PDF (download it in a browser and add the "
                              "local file to pdfs: in .dwb/config.yaml instead)")
-    dest.write_bytes(data)
+    part = dest.with_name(dest.name + ".part")  # an interrupted download never looks complete
+    part.write_bytes(data)
+    os.replace(part, dest)
     return dest
 
 
@@ -332,14 +426,6 @@ def openwiki_status(root: Path) -> dict[str, Any]:
         d = json.loads(last.read_text())
         info.update(git_head=d.get("gitHead"), model=d.get("model"), status=d.get("status"))
     return info
-
-
-def openwiki_version() -> str | None:
-    exe = shutil.which("openwiki")
-    if not exe:
-        return None
-    pkg = Path(exe).resolve().parents[2] / "package.json"
-    return json.loads(pkg.read_text()).get("version") if pkg.exists() else "unknown"
 
 
 def _generate_wiki(root: Path, cfg: WikiCfg, update: bool) -> float:
@@ -364,7 +450,7 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
     from dwb.repo import RepoReader
     from dwb.retrieval.chunking import ChunkingConfig
     from dwb.retrieval.code_index import build_code_index
-    from dwb.retrieval.openwiki_client import WikiSnapshot, tree_sha256
+    from dwb.retrieval.openwiki_client import describe_wiki
     from dwb.retrieval.pdf_index import PdfCorpus, PdfDoc, build_pdf_index
 
     c, root = ws.config, ws.root
@@ -377,7 +463,9 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
             raise WorkspaceError("OPENAI_API_KEY is not set (run dwb init, or export it)")
         from langchain_openai import OpenAIEmbeddings
 
-        embedding = OpenAIEmbeddings(model=c.models.embedding)
+        from dwb.manifest import MODEL_NET
+
+        embedding = OpenAIEmbeddings(model=c.models.embedding, **MODEL_NET)
     state: dict[str, Any] = {"sha": sha, "embedding_model": c.models.embedding,
                              "indexed_at": datetime.now(UTC).isoformat()}
 
@@ -408,8 +496,11 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
         pidx = build_pdf_index(ws.index_root, corpus, Path("/"), embedding, c.models.embedding)
         state["pdf_index_id"] = pidx.info.index_id
         state["pdf_corpus_id"] = corpus.corpus_id
+    else:  # PDFs removed from the config: drop the old corpus so chat cannot pick it up
+        (ws.dir / "pdf_corpus.yaml").unlink(missing_ok=True)
 
     # wiki
+    (ws.dir / WIKI_RECORD).unlink(missing_ok=True)  # re-recorded below only if still current
     if c.wiki.enabled:
         ow = openwiki_status(root)
         current = ow["exists"] and ow["git_head"] == sha
@@ -419,22 +510,21 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
             elapsed = _generate_wiki(root, c.wiki, update=ow["exists"])
             ow = openwiki_status(root)
             current = ow["exists"] and ow["git_head"] == sha
+        if current and wiki_dirty(root):
+            current = False
+            ow["dirty"] = True
         if current:
-            snap = WikiSnapshot(repo=c.name, sha=sha, version=openwiki_version() or "unknown",
-                                provider=c.wiki.provider, model=ow["model"] or c.wiki.model,
-                                elapsed_s=elapsed, tree_sha256=tree_sha256(root / "openwiki"),
-                                pages=sum(1 for p in (root / "openwiki").rglob("*.md")
-                                          if ".claims" not in p.parts),
-                                claims=sum(len(json.loads(p.read_text()).get("claims", []))
-                                           for p in (root / "openwiki/.claims").rglob("*.json")),
-                                generated_at=None)
-            snap.snapshot_id = snap.compute_id()
+            snap = describe_wiki(root / "openwiki", c.name, sha,
+                                 version=openwiki_version() or "unknown",
+                                 provider=c.wiki.provider, model=ow["model"] or c.wiki.model,
+                                 elapsed_s=elapsed)
             (ws.dir / WIKI_RECORD).write_text(snap.model_dump_json(indent=2))
             state["wiki_snapshot_id"] = snap.snapshot_id
             LOG.info("[bold]Wiki[/]: %s (%d pages, %d claims)", snap.snapshot_id, snap.pages,
                      snap.claims)
         else:
-            why = "missing" if not ow["exists"] else f"generated at {str(ow['git_head'])[:12]}"
+            why = ("missing" if not ow["exists"] else "has uncommitted edits" if ow.get("dirty")
+                   else f"generated at {str(ow['git_head'])[:12]}")
             state["wiki_note"] = f"openwiki/ {why}, not HEAD; set wiki.generate: true or " \
                                  "run openwiki code --update"
             LOG.warning("Wiki not available: %s", state["wiki_note"])

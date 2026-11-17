@@ -15,7 +15,7 @@ from dwb.chat import (
     Sources,
     build_manifest,
     parse_command,
-    render_answer,
+    print_answer,
 )
 from dwb.workspace import Workspace, WorkspaceError
 from graph_fakes import components
@@ -100,7 +100,7 @@ def test_session_answers_with_repo_always_on_and_toggles(ws):
     assert t1.question_id != t2.question_id
 
 
-def test_render_answer_lists_cited_sources():
+def test_print_answer_lists_cited_sources():
     from dwb.trace import AnswerClaim, TraceRecord
 
     t = TraceRecord(question_id="q", run_id="r", condition="A", aliases={"E1": "ev_a"},
@@ -111,7 +111,7 @@ def test_render_answer_lists_cited_sources():
                     claims=[AnswerClaim(text="run returns the port", cited_aliases=["E1"],
                                         evidence_ids=["ev_a"])])
     con = Console(record=True, width=120)
-    render_answer(t, console=con)
+    print_answer(t, console=con)
     text = con.export_text()
     assert "run returns the port" in text and "[E1]" in text
     assert "src/toy/app.py:23-25" in text and "vector search" in text
@@ -160,5 +160,28 @@ def test_render_shows_gap_claims():
                     final_context_ids=["x"], evidence={},
                     claims=[AnswerClaim(text="the default status code", kind="gap")])
     con = Console(record=True, width=120)
-    render_answer(t, console=con)
+    print_answer(t, console=con)
     assert "Not established by the evidence" in con.export_text()
+
+
+def test_failed_source_switch_keeps_the_old_session(ws):
+    async def go():
+        async with ChatSession(ws, ChatSettings(repo="toy", sources=Sources(pdf=True)),
+                               components=components("A")) as s:
+            before = s.manifest
+            with pytest.raises(WorkspaceError, match="dwb wiki snapshot"):
+                await s.set_sources(wiki=True)  # no wiki snapshot exists
+            assert s.manifest is before and s.sources == Sources(wiki=False, pdf=True)
+            t = await s.ask("Still answering?")
+            return t
+
+    t = asyncio.run(go())
+    assert not t.errors and t.claims
+
+
+def test_reranker_defaults_to_the_generator(ws):
+    (ws.root / "configs" / "chat.yaml").write_text(yaml.safe_dump({
+        "models": {"generator": "gen-x", "embedding": "emb-x"}, "sources": {"pdf": False}}))
+    m, _ = build_manifest(Workspace(root=ws.root), ChatSettings(repo="toy",
+                                                                 sources=Sources(pdf=False)))
+    assert m.models.reranker == "gen-x" and m.web.exclude_domains == []

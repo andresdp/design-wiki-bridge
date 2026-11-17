@@ -64,6 +64,13 @@ class TraceRecord(BaseModel):
     answer: str | None = None
     validation: dict[str, Any] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
+    # degraded but answered: a source or the reranker failed and the question went on
+    # without it (KTD-R5: the other branches still contribute)
+    warnings: list[str] = Field(default_factory=list)
+
+    @property
+    def degraded(self) -> bool:
+        return bool(self.warnings)
 
 
 class TraceWriter:

@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Protocol
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
@@ -151,10 +151,3 @@ class StubReranker:
             ranking=list(range(len(pool))),
         )
 
-
-def make_reranker(kind: str, **kw: Any) -> Reranker:
-    if kind == "llm_listwise":
-        return LLMListwiseReranker(**kw)
-    if kind == "stub":
-        return StubReranker(**{k: v for k, v in kw.items() if k in ("pool_cap", "top_n")})
-    raise ValueError(f"unknown reranker {kind!r}")

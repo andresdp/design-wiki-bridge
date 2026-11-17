@@ -9,9 +9,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from dwb.manifest import Budgets
 
 REPOS_YAML = Path("configs/repos.yaml")
 CHAT_YAML = Path("configs/chat.yaml")
@@ -22,6 +25,62 @@ TAVILY_ROOT = Path("artifacts/tavily")
 
 class WorkspaceError(RuntimeError):
     """A user-facing setup problem, with the command that fixes it."""
+
+
+# -- chat defaults (configs/chat.yaml, or derived from .dwb/config.yaml in user mode) ------
+
+
+class _ChatStrict(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # a misspelled key is an error, not ignored
+
+
+class ChatModels(_ChatStrict):
+    generator: str | None = None
+    reranker: str | None = None  # None: rerank with the generator
+    embedding: str | None = None  # must match the model the indexes were built with
+    temperature: float = 0.0
+
+
+class ChatSourceDefaults(_ChatStrict):
+    """Default source toggles; the repository itself is always on."""
+
+    wiki: bool = False
+    pdf: bool = True
+    web: bool = False
+
+
+class ChatWeb(_ChatStrict):
+    max_results: int = 5
+    search_depth: Literal["basic", "advanced"] = "basic"
+
+
+class ChatRepo(_ChatStrict):
+    pdf_corpus: str | None = None
+    web_exclude_domains: list[str] = Field(default_factory=list)
+
+
+class ChatDefaults(_ChatStrict):
+    """Defaults for ``dwb ask`` / ``dwb chat``; command-line flags override them."""
+
+    models: ChatModels = Field(default_factory=ChatModels)
+    prompt: str | None = None  # None: the packaged generation prompt
+    sources: ChatSourceDefaults = Field(default_factory=ChatSourceDefaults)
+    web: ChatWeb = Field(default_factory=ChatWeb)
+    budgets: Budgets = Field(default_factory=Budgets)
+    repos: dict[str, ChatRepo] = Field(default_factory=dict)
+
+    @classmethod
+    def load(cls, path: Path) -> ChatDefaults:
+        if not path.exists():
+            return cls()
+        try:
+            return cls.model_validate(yaml.safe_load(path.read_text()) or {})
+        except ValidationError as e:
+            lines = "; ".join(f"{'.'.join(map(str, x['loc']))}: {x['msg']}" for x in e.errors())
+            raise WorkspaceError(f"invalid {path}: {lines}") from None
+
+    def repo(self, name: str) -> ChatRepo:
+        return self.repos.get(name) or ChatRepo()
 
 
 @dataclass
@@ -46,16 +105,22 @@ class Workspace:
     index_root: Path = INDEX_ROOT
     wiki_root: Path = WIKI_ROOT
     tavily_root: Path = TAVILY_ROOT
-    _chat: dict[str, Any] = field(default_factory=dict, repr=False)
+    _chat: ChatDefaults | None = field(default=None, repr=False)
     restores_wiki = True  # research mode copies the pinned snapshot into the checkout
 
-    def _p(self, p: Path) -> Path:
+    def resolve(self, p: Path) -> Path:
+        """A workspace-relative path made absolute against ``root``."""
         return p if p.is_absolute() else self.root / p
+
+    @property
+    def history_path(self) -> Path:
+        """Where the chat REPL keeps its input history."""
+        return self.resolve(Path("artifacts/chat_history"))
 
     # -- configuration --------------------------------------------------------------
 
     def repos(self) -> dict[str, RepoInfo]:
-        path = self._p(self.repos_yaml)
+        path = self.resolve(self.repos_yaml)
         if not path.exists():
             raise WorkspaceError(
                 f"{path} not found. Run dwb from the design-wiki-bridge folder, or create it "
@@ -64,7 +129,7 @@ class Workspace:
         cfg = yaml.safe_load(path.read_text()).get("repos", {})
         return {
             name: RepoInfo(name=name, url=r["url"], sha=r["sha"],
-                           checkout=self._p(Path(r["checkout"])), tag=r.get("tag"),
+                           checkout=self.resolve(Path(r["checkout"])), tag=r.get("tag"),
                            role=r.get("role"))
             for name, r in cfg.items()
         }
@@ -76,19 +141,15 @@ class Workspace:
                                  f"{', '.join(sorted(repos)) or 'none'} (configs/repos.yaml).")
         return repos[name]
 
-    def chat_config(self) -> dict[str, Any]:
-        if not self._chat:
-            path = self._p(self.chat_yaml)
-            self._chat = yaml.safe_load(path.read_text()) if path.exists() else {}
+    def chat_config(self) -> ChatDefaults:
+        if self._chat is None:
+            self._chat = ChatDefaults.load(self.resolve(self.chat_yaml))
         return self._chat
-
-    def repo_chat_config(self, name: str) -> dict[str, Any]:
-        return (self.chat_config().get("repos") or {}).get(name, {})
 
     # -- artifact discovery ---------------------------------------------------------
 
     def _indexes(self, kind: str) -> list[dict[str, Any]]:
-        root = self._p(self.index_root)
+        root = self.resolve(self.index_root)
         out = []
         for p in sorted(root.glob("*/index.json")) if root.exists() else []:
             info = json.loads(p.read_text())
@@ -109,7 +170,7 @@ class Workspace:
         return max(hits, key=lambda i: i.get("created_at", ""))["index_id"] if hits else None
 
     def find_wiki_snapshot(self, repo: str, sha: str) -> dict[str, Any] | None:
-        root = self._p(self.wiki_root)
+        root = self.resolve(self.wiki_root)
         snaps = []
         for p in sorted(root.glob("*/snapshot.json")) if root.exists() else []:
             s = json.loads(p.read_text())
@@ -118,10 +179,10 @@ class Workspace:
         return max(snaps, key=lambda s: s.get("registered_at", "")) if snaps else None
 
     def pdf_corpus_id(self, repo: str) -> str | None:
-        corpus = self.repo_chat_config(repo).get("pdf_corpus")
-        if not corpus or not self._p(Path(corpus)).exists():
+        corpus = self.chat_config().repo(repo).pdf_corpus
+        if not corpus or not self.resolve(Path(corpus)).exists():
             return None
-        return yaml.safe_load(self._p(Path(corpus)).read_text()).get("corpus_id")
+        return yaml.safe_load(self.resolve(Path(corpus)).read_text()).get("corpus_id")
 
     def status(self, embedding_model: str) -> list[dict[str, Any]]:
         rows = []

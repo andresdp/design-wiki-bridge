@@ -146,3 +146,24 @@ def test_traced_question_resolves_to_spike_span():
     assert ("src/flask/app.py", 879, 920) in spans
     assert all(i.locator.commit == FLASK_SHA for i in out.items)
     assert out.unresolved == []
+
+
+def test_claims_pointing_into_the_wiki_are_not_evidence():
+    sec = section("The app runs handlers.", [claim("c1", ["repo://openwiki/arch/page.md#L1-L3",
+                                                           "repo://src/toy/app.py#L1-L2"])])
+    res = resolver().resolve([sec], 20)
+    assert [i.locator.path for i in res.items] == ["src/toy/app.py"]
+    assert any(u.reason == "points into the wiki itself" for u in res.unresolved)
+
+
+def test_resolved_spans_get_unique_ranks_in_resolver_order():
+    sec = section("The app runs handlers.", [claim("c1", ["repo://src/toy/app.py#L10-L12",
+                                                           "repo://src/toy/__init__.py#L1-L1",
+                                                           "repo://src/toy/app.py#L1-L2"])])
+    res = resolver().resolve([sec], 20)
+    assert [i.provenance["rank"] for i in res.items] == [1, 2, 3]
+    assert all(i.provenance["section_rank"] == 1 for i in res.items)
+    from dwb.rerank import interleave_pool
+
+    # the reranker pool keeps that order instead of re-sorting by path
+    assert [i.id for i in interleave_pool(res.items, 40)] == [i.id for i in res.items]

@@ -5,7 +5,7 @@
 - a **user tool** you run inside any git repository (`dwb init` → `dwb index` → `dwb chat`);
 - a **research harness** that compares two ways of finding repository evidence, vector search (condition A) and OpenWiki-guided search (condition B), on a frozen question set, with offline evaluation.
 
-This document describes the components, how data flows through them, and the design decisions behind them. Usage is in [`usage.md`](usage.md), the study design in [`journal-extension-plan.md`](journal-extension-plan.md), the implementation plan in [`plans/`](plans/), and the empirical findings behind several decisions in [`spikes/2026-11-openwiki-swe-qa-spike.md`](spikes/2026-11-openwiki-swe-qa-spike.md) (cited below as *spike §n*).  Conceptual figures for the paper are in [`paper-figures.md`](paper-figures.md).
+This document describes the components, how data flows through them, and the design decisions behind them. Usage is in [`usage.md`](usage.md), the study design in [`journal-extension-plan.md`](journal-extension-plan.md), the implementation plan in [`plans/`](plans/), and the empirical findings behind several decisions in [`spikes/2026-11-openwiki-swe-qa-spike.md`](spikes/2026-11-openwiki-swe-qa-spike.md) (cited below as *spike §n*). Conceptual figures for the paper are in [`paper-figures.md`](paper-figures.md).
 
 ## 1. System context
 
@@ -151,6 +151,7 @@ flowchart TD
     webn --> rr["rerank<br/>LLM listwise, full pool (40)"]
     webn -->|"no candidates"| empty
     rr --> ctx["assemble_context<br/>8,000-token budget, E1…En aliases"]
+    ctx -->|"nothing fits the budget"| empty
     ctx --> gen["generate<br/>structured claims (answer | gap)"]
     gen --> val["validate<br/>aliases → evidence IDs"]
     val --> T(["trace_from_state → TraceRecord"])
@@ -158,8 +159,9 @@ flowchart TD
 ```
 
 - **Routing is deterministic.** Conditional edges read only the manifest and the item's `allowed_sources`; no model decides which branches run.
-- **The local branches run in parallel.** List-valued state (`stages`, `repo_candidates`, `pdf_candidates`, `unresolved_refs`, `errors`) uses `Annotated[list, operator.add]` reducers. `join_local` is added with `defer=True`, so it runs once after every active branch has finished.
+- **The local branches run in parallel.** List-valued state (`stages`, `repo_candidates`, `pdf_candidates`, `unresolved_refs`, `errors`, `warnings`) uses `Annotated[list, operator.add]` reducers. `join_local` is added with `defer=True`, so it runs once after every active branch has finished.
 - **The web is evaluated after the join.** The web fallback rule is applied in one place, identically for both conditions.
+- **A failing source degrades the question; it does not fail it.** If code, wiki search, wiki read, resolve, PDF or web retrieval raises, that node records the error in its stage and adds a `warnings` entry, and the other branches still answer. A failed rerank call falls back to pool order the same way. Degraded questions are counted in the run summary and as the `degraded` metric. A Tavily replay miss is the exception: it fails the question, because a replay run must not answer without its frozen web evidence.
 - **There is no fallback between repository branches.** If condition B finds nothing and no other source is enabled, the graph ends at `empty_context` rather than quietly switching to vector search.
 - **Execution is `ainvoke`,** with no checkpointer and no streaming. Each node returns a `StageRecord` (latency, counts, tokens, stage-specific extras).
 
@@ -311,11 +313,12 @@ flowchart LR
     QS["question set<br/>(frozen: hash must match)"] --> RUN
     OK --> RUN["experiment run<br/>one trace per question; errors isolated"]
     RUN --> TR[("runs/run_id/<br/>manifest.yaml (frozen, prompt hashes)<br/>traces.jsonl, run_summary.json")]
-    TR --> HY["hydrate code text<br/>from the checkout"]
+    TR --> GATE{"evaluate gate:<br/>A then B, check_paired<br/>on the saved manifests"}
+    GATE --> HY["hydrate code text<br/>from the checkout"]
     HY --> REC["recall<br/>(candidates & final context; KTD15 matching)"]
     HY --> JUD["claims judge<br/>correctness · citation support · coverage<br/>(cached; gap claims excluded)"]
     HY --> COST["per-stage cost<br/>latency, tokens"]
-    REC & JUD & COST --> PAIR["pair A/B by question<br/>diffs; improved/tied/regressed;<br/>public vs custom"]
+    REC & JUD & COST --> PAIR["pair A/B by question<br/>means and diffs over the same questions;<br/>improved/tied/regressed; public vs custom"]
     PAIR --> REP[("reports/:<br/>per_question, paired, paired_summary,<br/>cost, evaluator_config, judge_log")]
 ```
 
@@ -344,6 +347,9 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 | 17 | **One pipeline, two modes** | The user tool and the study share every component, so what users see is what the study measures; modes differ only in workspace and artifact location | A separate chat implementation |
 | 18 | **User mode indexes the HEAD commit through git, keeps everything in `.dwb/`** | Citations point at a real commit; uncommitted edits are excluded with a warning, and a stale index is flagged. Nothing is written to the repository's `.gitignore` | Indexing the working tree |
 | 19 | **Token accounting from LangChain callbacks, approximate counts as fallback** | Provider usage where available; LangChain's `count_tokens_approximately` for embeddings (no callbacks) or missing usage, labelled as approximate. The context budget keeps an exact counter because it is a pipeline rule | tiktoken everywhere; no embedding accounting |
+| 20 | **Failures count against the condition; degraded answers are flagged** (code review 2026-11-17) | A failed question scores correctness 0 (no answer) instead of dropping out of one side's mean, which would favor the condition that fails more. Its cost is left empty, not 0. A source or rerank failure keeps the answer but marks it `degraded`. Means are taken over the questions scored on both sides | Excluding failures silently; failing the whole question when one source fails |
+| 21 | **`evaluate` rechecks the pair** (code review 2026-11-17) | The saved manifests must be A then B and pass `check_paired`, so a swapped or mismatched pair cannot produce a valid-looking report. `--allow-unpaired` overrides it and is recorded in `evaluator_config.json`. Judge verdicts are cached per judge model and temperature | Trusting the argument order |
+| 22 | **Indexes must match the manifest they are used with** (code review 2026-11-17) | Condition A's index must be cut with the manifest's `max_span_tokens` and the current `chunker_version`; the runner refuses otherwise. User mode uses only the IDs `dwb index` recorded in `state.json`, and refuses a wiki that changed since | Picking the newest matching index |
 
 ## 11. Invariants
 
@@ -353,11 +359,14 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 - If one branch returns nothing, the others still contribute. When nothing is found at all, the graph records an explicit empty context and never substitutes another retriever.
 - The test set is frozen by content hash. Development questions are separate, and the runner rejects any ID or question text shared between dev and test.
 - Nothing leaves the machine except calls to OpenAI, Tavily (only when the web is enabled), and OpenWiki generation (only when requested). Telemetry is off for OpenWiki and Chroma.
+- In user mode, a repository's own `.env` can supply only `OPENAI_API_KEY` and `TAVILY_API_KEY`; settings such as `OPENAI_BASE_URL` are read only from the shell or `~/.config/dwb/.env`.
+- Every network or subprocess call has a timeout: OpenAI clients (180 s, 2 retries), OpenWiki MCP calls (120 s), git (120 s), PDF downloads (60 s).
 
 ## 12. Known limitations and parked work
 
 - **Run-to-run variance** from generation and judging is visible even at temperature 0 (spike §10). Report it as a validity threat, or measure it with repeated dev runs.
 - **Condition B depends on wiki coverage and on lexical wiki search** over the raw question (spike §9). The query rule is frozen and not tuned.
 - **`gpt-5.6-luna` has no dated snapshot ID**, so the model behind the name could change during the study.
-- **A question that fails mid-graph keeps only its error,** not the stages that already ran (`ainvoke`, no streaming).
+- **A question that fails mid-graph keeps only its error,** not the stages that already ran (`ainvoke`, no streaming). Source failures no longer fail the question (see §4), so this now covers only generation-stage and replay-miss failures.
+- **Chunker version 2 (2026-11-17) changes condition A's indexes.** Class-body lines after the first method are now indexed, and lines are split on `\n` only. Indexes built before have `chunker_version` 1 and must be rebuilt; their IDs change, so the A manifests need the new IDs.
 - **Parked:** an organic telemetry refactor (one callback handler per question attributed via LangGraph node metadata, separate telemetry records, pluggable sinks); see `docs/plans/2026-11-17-1830-refactor-organic-telemetry-plan.md` on `main`. Also deferred: a cross-encoder reranker backend, a matched-budget control run, and PDF-text-by-reference in traces.

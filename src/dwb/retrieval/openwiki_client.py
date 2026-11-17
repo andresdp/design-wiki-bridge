@@ -10,6 +10,7 @@ needed to attribute those claims to sections; the resolver turns them into code 
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -73,6 +74,34 @@ def tree_sha256(wiki_dir: Path) -> str:
     return h.hexdigest()
 
 
+def openwiki_version(command: str | None = None) -> str | None:
+    """Version of the installed openwiki CLI (from its package.json), or None if absent."""
+    exe = command or shutil.which("openwiki")
+    if not exe:
+        return None
+    pkg = Path(exe).resolve().parents[2] / "package.json"
+    return json.loads(pkg.read_text()).get("version", "unknown") if pkg.exists() else "unknown"
+
+
+def describe_wiki(wiki: Path, repo: str, sha: str, *, provider: str, model: str, version: str,
+                  effort: str | None = None, elapsed_s: float | None = None,
+                  cost_usd: float | None = None, config: dict[str, Any] | None = None,
+                  generated_at: str | None = None) -> WikiSnapshot:
+    """The snapshot record for an ``openwiki/`` tree. One definition of pages and claims for
+    both the research registry and user mode."""
+    claims = sum(len(json.loads(p.read_text()).get("claims", []))
+                 for p in (wiki / ".claims").rglob("*.json"))
+    pages = sum(1 for p in wiki.rglob("*.md")
+                if p.name not in ("index.md", "INSTRUCTIONS.md") and ".claims" not in p.parts)
+    snap = WikiSnapshot(
+        repo=repo, sha=sha, version=version, provider=provider, model=model, effort=effort,
+        config=config or {}, elapsed_s=elapsed_s, cost_usd=cost_usd,
+        tree_sha256=tree_sha256(wiki), pages=pages, claims=claims, generated_at=generated_at,
+    )
+    snap.snapshot_id = snap.compute_id()
+    return snap
+
+
 def _head(checkout: Path) -> str:
     return subprocess.run(["git", "-C", str(checkout), "rev-parse", "HEAD"],
                           capture_output=True, text=True, check=True).stdout.strip()
@@ -106,17 +135,9 @@ def register_snapshot(
             raise OpenWikiError(f"wiki was generated at {last['gitHead']}, not {sha}")
         if last.get("model") and last["model"] != model:
             raise OpenWikiError(f"wiki was generated with {last['model']}, not {model}")
-    claims = sum(len(json.loads(p.read_text()).get("claims", []))
-                 for p in (wiki / ".claims").rglob("*.json"))
-    pages = sum(1 for p in wiki.rglob("*.md")
-                if p.name not in ("index.md", "INSTRUCTIONS.md") and ".claims" not in p.parts)
-    snap = WikiSnapshot(
-        repo=repo, sha=sha, version=version, provider=provider, model=model, effort=effort,
-        config=config or {}, elapsed_s=elapsed_s, cost_usd=cost_usd,
-        tree_sha256=tree_sha256(wiki), pages=pages, claims=claims,
-        generated_at=last.get("updatedAt"),
-    )
-    snap.snapshot_id = snap.compute_id()
+    snap = describe_wiki(wiki, repo, sha, provider=provider, model=model, version=version,
+                         effort=effort, elapsed_s=elapsed_s, cost_usd=cost_usd, config=config,
+                         generated_at=last.get("updatedAt"))
     dest = Path(out_root) / snap.snapshot_id
     if not (dest / "snapshot.json").exists():
         if dest.exists():
@@ -227,14 +248,18 @@ def default_openwiki_bin() -> str:
 class OpenWikiClient:
     """``async with OpenWikiClient(root) as wiki: await wiki.search(q, k)``."""
 
-    def __init__(self, root: str | Path, *, command: str | None = None, host: str = "dwb"):
+    def __init__(self, root: str | Path, *, command: str | None = None, host: str = "dwb",
+                 call_timeout_s: float = 120.0):
         self.root = Path(root).resolve()
         self.command = command or default_openwiki_bin()
         self.host = host
+        self.call_timeout_s = call_timeout_s  # a hung server fails the call, not the whole run
         self.startup_stage: StageRecord | None = None
         self._stack: AsyncExitStack | None = None
         self._session = None
-        self._errlog = Path(tempfile.mkstemp(prefix="openwiki-mcp-", suffix=".log")[1])
+        fd, name = tempfile.mkstemp(prefix="openwiki-mcp-", suffix=".log")
+        os.close(fd)  # the server's shell appends to it by name
+        self._errlog = Path(name)
 
     def _connection(self) -> dict:
         path = os.pathsep.join([str(Path(self.command).parent), "/usr/bin", "/bin",
@@ -274,14 +299,22 @@ class OpenWikiClient:
                                          extra={"command": self.command, "tools": sorted(tools)})
         return self
 
-    async def __aexit__(self, *exc: object) -> None:
+    async def __aexit__(self, exc_type, *exc: object) -> None:
         if self._stack:
             await self._stack.aclose()
+        if exc_type is None:  # keep the server log only when something went wrong
+            self._errlog.unlink(missing_ok=True)
 
     async def _call(self, tool: str, args: dict) -> Any:
         if self._session is None:
             raise OpenWikiError("client not started; use 'async with'")
-        return await self._session.call_tool(tool, {"root": str(self.root), **args})
+        try:
+            return await asyncio.wait_for(
+                self._session.call_tool(tool, {"root": str(self.root), **args}),
+                self.call_timeout_s)
+        except TimeoutError:
+            raise OpenWikiError(f"{tool} did not answer within {self.call_timeout_s:.0f} s "
+                                f"(server log: {self._errlog})") from None
 
     async def search(self, query: str, k: int) -> list[SectionRef]:
         return parse_search(await self._call("openwiki_search", {"query": query, "limit": k}))

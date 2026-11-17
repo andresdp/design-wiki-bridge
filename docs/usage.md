@@ -30,7 +30,7 @@ conda activate taxonomy                  # Python 3.11 environment with the depe
 pip install --no-deps -e <path-to>/design-wiki-bridge     # installs the `dwb` command
 ```
 
-API keys: `OPENAI_API_KEY` is required, and `TAVILY_API_KEY` is needed only for web search. `dwb init` offers to save them in `~/.config/dwb/.env` (readable only by you), which `dwb` reads from any folder. A `.env` file in the current folder also works, and keys exported in your shell always take precedence.
+API keys: `OPENAI_API_KEY` is required, and `TAVILY_API_KEY` is needed only for web search. `dwb init` offers to save them in `~/.config/dwb/.env` (readable only by you), which `dwb` reads from any folder. A `.env` file in the current folder also works, and keys exported in your shell always take precedence. Inside a project, `dwb` reads only `OPENAI_API_KEY` and `TAVILY_API_KEY` from the repository's `.env`; other settings there (for example `OPENAI_BASE_URL`) are ignored, so a cloned repository cannot redirect your key. Put such settings in your shell or `~/.config/dwb/.env`.
 
 For the wiki source you also need [OpenWiki](https://github.com/langchain-ai/openwiki) **0.9.0** (`npm install -g openwiki@0.9.0`, Node ≥ 22.22) and `git` on the `PATH`.
 
@@ -196,7 +196,7 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
 
 - **Conditions:** condition **A** uses vector search and **B** uses OpenWiki-guided search. Everything else is identical: PDFs, the web policy, the reranker, the context budget, the generator, and the citation format. `experiment check` verifies this for each manifest pair.
 - **Manifests:** manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets.
-- **Run:** `experiment run` writes `runs/<run_id>/`, containing the frozen manifest, `traces.jsonl` (one record per question), and `run_summary.json`. Code passages are stored by reference (commit, path, lines); `experiment evaluate` reads their text back from the checkout named in the manifest, so keep that checkout. A test set must be frozen; its hash is in the manifest. `--overwrite` replaces a previous run.
+- **Run:** `experiment run` writes `runs/<run_id>/`, containing the frozen manifest, `traces.jsonl` (one record per question), and `run_summary.json`. Code passages are stored by reference (commit, path, lines); `experiment evaluate` reads their text back from the checkout named in the manifest, so keep that checkout. A test set must be frozen; its hash is in the manifest, and it is checked before anything else runs. `--overwrite` replaces a previous run. If one source fails for a question (for example the OpenWiki server, or the reranker call), the question is still answered from the other sources and marked degraded; `run_summary.json` counts `failed` and `degraded` questions separately. Condition A refuses a code index built with a different `max_span_tokens` or an older chunker version: rebuild it with `dwb index code <repo>` and put the new ID in the manifest.
 - **Web modes:**
   - `record` calls Tavily for searches that aren't stored yet and saves them.
   - `replay` uses stored results only.
@@ -208,7 +208,9 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
   - required-claim correctness and citation support and coverage, from the judge in `configs/eval.yaml`;
   - per-stage cost.
 
-  Results are paired A/B differences with improved/tied/regressed counts. Judge verdicts are cached. `--no-judge` gives recall and cost only.
+  Results are paired A/B differences with improved/tied/regressed counts. Means and differences use only the questions scored in both runs, and `n_excluded` says how many were left out. A failed question scores correctness 0 and counts in the `failed` metric; its cost is left empty. Judge verdicts are cached per judge model and temperature. `--no-judge` gives recall and cost only.
+
+  Pass the A run first. `evaluate` stops if the two saved manifests are not condition A then B or fail the `experiment check` rules; `--allow-unpaired` scores them anyway and records that in `evaluator_config.json`.
 - **Wiki snapshots:** the research harness copies a pinned snapshot into each checkout before a condition B run. In user mode the wiki is used in place.
 - **Question records** live in `data/questions/{test,dev}/`; see `data/questions/README.md`.
 
@@ -227,7 +229,7 @@ Research configuration:
 | File | Contents |
 |---|---|
 | `configs/repos.yaml` | Repositories: URL, pinned SHA, checkout path |
-| `configs/chat.yaml` | `ask`/`chat --repo` defaults: models, sources, per-repo PDF corpus and excluded web domains |
+| `configs/chat.yaml` | `ask`/`chat --repo` defaults: models, sources, per-repo PDF corpus and excluded web domains. Validated when loaded: a misspelled key or invalid value stops with an error that names it |
 | `configs/pdfs/*.yaml` | PDF corpora |
 | `configs/manifests/*.yaml` | Experiment run manifests (one per repository and condition) |
 | `configs/eval.yaml` | Evaluation judge model and span-matching rules |
@@ -252,3 +254,7 @@ Progress messages go to stderr, and results (answers, JSON) go to stdout. `dwb -
 | `did not return a PDF` | Download the file in a browser and list the local path under `pdfs:`. |
 | `no code index for <repo> …` (research mode) | `dwb index code <repo>`. |
 | `replay miss` during an experiment | Run that manifest with `--web-mode record` first. |
+| `code index … was built by chunker version 1` / `chunked with max_span_tokens=…` | Rebuild: `dwb index code <repo>` (research; then update the manifest's `code_index_id`) or `dwb index` (project). |
+| `runs are not a valid A/B pair` | Pass the A run first, or fix the manifests so `dwb experiment check` passes; `--allow-unpaired` only for exploration. |
+| `openwiki … changed since dwb index` | `dwb index` again, or ask with `--no-wiki`. |
+| `corrupt Tavily record` | Delete the named file and rerun with `--web-mode record`. |

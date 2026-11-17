@@ -20,12 +20,16 @@ from dwb.benchmark.schemas import QuestionRecord
 from dwb.budget import Context, assemble_context
 from dwb.evidence import EvidenceItem
 from dwb.generate import GeneratedAnswer, Generator, render_answer, validate_claims
+from dwb.log import get_logger
 from dwb.manifest import RunManifest
 from dwb.merge import merge_candidates
 from dwb.rerank import Reranker
 from dwb.retrieval.wiki_types import Resolver, Section, SectionRef, WikiClient
 from dwb.trace import AnswerClaim, StageRecord, TraceRecord
 from dwb.usage import embedding_usage
+from dwb.web.tavily_store import ReplayMiss
+
+LOG = get_logger("graph")
 
 
 class GraphState(TypedDict, total=False):
@@ -49,6 +53,7 @@ class GraphState(TypedDict, total=False):
     rendered: str | None
     empty_context: bool
     errors: Annotated[list[str], operator.add]
+    warnings: Annotated[list[str], operator.add]
 
 
 @dataclass
@@ -78,8 +83,18 @@ def _embed_stage(name: str, t0: float, items: list[EvidenceItem], query: str, re
     return st
 
 
+def _degraded(name: str, t0: float, e: Exception, **out) -> dict:
+    """A source failed: record it and let the other branches answer (R5)."""
+    msg = f"{type(e).__name__}: {e}"
+    LOG.warning("    %s failed, continuing without it: %s", name, msg)
+    return {"stages": [_stage(name, t0, error=msg)], "warnings": [f"{name}: {msg}"], **out}
+
+
 def build_graph(c: Components, m: RunManifest):
     b = m.budgets
+    # repository branch entry and exit nodes, used by both the router and the edges
+    repo_entry, repo_exit = ("code_retrieve", "code_retrieve") if m.condition == "A" else (
+        "wiki_search", "resolve")
 
     def wants_pdf(q: QuestionRecord) -> bool:
         return m.pdf_enabled and "pdf" in q.allowed_sources and c.pdf_retriever is not None
@@ -94,20 +109,26 @@ def build_graph(c: Components, m: RunManifest):
         return {"query": query, "stages": [_stage("prepare", t0, allowed=q.allowed_sources)]}
 
     def route_local(s: GraphState) -> list[str]:
-        targets = ["code_retrieve" if m.condition == "A" else "wiki_search"]
+        targets = [repo_entry]
         if wants_pdf(s["question"]):
             targets.append("pdf_retrieve")
         return targets
 
     async def code_retrieve(s: GraphState) -> dict:
         t0 = time.perf_counter()
-        items = await asyncio.to_thread(c.code_retriever.retrieve, s["query"], b.code_top_k)
+        try:
+            items = await asyncio.to_thread(c.code_retriever.retrieve, s["query"], b.code_top_k)
+        except Exception as e:
+            return _degraded("code_retrieve", t0, e)
         st = _embed_stage("code_retrieve", t0, items, s["query"], c.code_retriever, k=b.code_top_k)
         return {"repo_candidates": items, "stages": [st]}
 
     async def wiki_search(s: GraphState) -> dict:
         t0 = time.perf_counter()
-        refs = await c.wiki.search(s["query"], b.wiki_search_k)
+        try:
+            refs = await c.wiki.search(s["query"], b.wiki_search_k)
+        except Exception as e:
+            return _degraded("wiki_search", t0, e, wiki_refs=[])
         st = _stage("wiki_search", t0, k=b.wiki_search_k, refs=[r.ref for r in refs])
         st.count = len(refs)
         return {"wiki_refs": refs, "stages": [st]}
@@ -115,14 +136,20 @@ def build_graph(c: Components, m: RunManifest):
     async def wiki_read(s: GraphState) -> dict:
         t0 = time.perf_counter()
         refs = s.get("wiki_refs", [])[: b.wiki_read_sections]
-        sections = await c.wiki.read(refs) if refs else []
+        try:
+            sections = await c.wiki.read(refs) if refs else []
+        except Exception as e:
+            return _degraded("wiki_read", t0, e, wiki_sections=[])
         st = _stage("wiki_read", t0, sections=[x.ref.ref for x in sections])
         st.count = len(sections)
         return {"wiki_sections": sections, "stages": [st]}
 
     async def resolve(s: GraphState) -> dict:
         t0 = time.perf_counter()
-        res = c.resolver.resolve(s.get("wiki_sections", []), b.wiki_max_spans)
+        try:
+            res = c.resolver.resolve(s.get("wiki_sections", []), b.wiki_max_spans)
+        except Exception as e:
+            return _degraded("resolve", t0, e)
         unresolved = [u.model_dump() for u in res.unresolved]
         return {
             "repo_candidates": res.items,
@@ -133,7 +160,10 @@ def build_graph(c: Components, m: RunManifest):
 
     async def pdf_retrieve(s: GraphState) -> dict:
         t0 = time.perf_counter()
-        items = await asyncio.to_thread(c.pdf_retriever.retrieve, s["query"], b.pdf_top_k)
+        try:
+            items = await asyncio.to_thread(c.pdf_retriever.retrieve, s["query"], b.pdf_top_k)
+        except Exception as e:
+            return _degraded("pdf_retrieve", t0, e)
         st = _embed_stage("pdf_retrieve", t0, items, s["query"], c.pdf_retriever, k=b.pdf_top_k)
         return {"pdf_candidates": items, "stages": [st]}
 
@@ -152,10 +182,15 @@ def build_graph(c: Components, m: RunManifest):
 
     async def web_retrieve(s: GraphState) -> dict:
         t0 = time.perf_counter()
-        items = await asyncio.to_thread(
-            c.web_store.search, s["query"], max_results=m.web.max_results,
-            search_depth=m.web.search_depth, exclude_domains=m.web.exclude_domains,
-        )
+        try:
+            items = await asyncio.to_thread(
+                c.web_store.search, s["query"], max_results=m.web.max_results,
+                search_depth=m.web.search_depth, exclude_domains=m.web.exclude_domains,
+            )
+        except ReplayMiss:
+            raise  # a replay run must not quietly answer without its frozen web evidence
+        except Exception as e:
+            return _degraded("web_retrieve", t0, e, web_candidates=[], web_triggered=True)
         return {"web_candidates": items, "web_triggered": True,
                 "stages": [_stage("web_retrieve", t0, items, mode=m.web.mode,
                                   **getattr(c.web_store, "last_call", {}))]}
@@ -166,8 +201,11 @@ def build_graph(c: Components, m: RunManifest):
     async def rerank(s: GraphState) -> dict:
         pool, alias = merge_candidates(s.get("merged", []) + s.get("web_candidates", []))
         res = await c.reranker.arerank(s["query"], pool)
-        return {"reranked": res.items, "merged_ids": {**s.get("merged_ids", {}), **alias},
-                "stages": [res.stage]}
+        out: dict = {"reranked": res.items, "merged_ids": {**s.get("merged_ids", {}), **alias},
+                     "stages": [res.stage]}
+        if res.stage.extra.get("error"):  # answered from pool order: degraded, not failed
+            out["warnings"] = [f"rerank: {res.stage.extra['error']} (fell back to pool order)"]
+        return out
 
     async def assemble(s: GraphState) -> dict:
         t0 = time.perf_counter()
@@ -176,6 +214,10 @@ def build_graph(c: Components, m: RunManifest):
                     budget=b.context_tokens, excluded=ctx.excluded_ids)
         st.input_tokens = ctx.tokens
         return {"context": ctx, "stages": [st]}
+
+    def route_after_assemble(s: GraphState) -> str:
+        # nothing fit the budget (e.g. one oversized passage): do not generate without evidence
+        return "empty_context" if s["context"].empty else "generate"
 
     async def generate(s: GraphState) -> dict:
         answer, stage = await c.generator.agenerate(s["question"].question, s["context"])
@@ -205,14 +247,12 @@ def build_graph(c: Components, m: RunManifest):
     g.add_node("prepare", prepare)
     if m.condition == "A":
         g.add_node("code_retrieve", code_retrieve)
-        local_targets = ["code_retrieve"]
     else:
         g.add_node("wiki_search", wiki_search)
         g.add_node("wiki_read", wiki_read)
         g.add_node("resolve", resolve)
         g.add_edge("wiki_search", "wiki_read")
         g.add_edge("wiki_read", "resolve")
-        local_targets = ["wiki_search"]
     g.add_node("pdf_retrieve", pdf_retrieve)
     g.add_node("join_local", join_local, defer=True)
     g.add_node("web_retrieve", web_retrieve)
@@ -223,14 +263,15 @@ def build_graph(c: Components, m: RunManifest):
     g.add_node("empty_context", empty_context)
 
     g.add_edge(START, "prepare")
-    g.add_conditional_edges("prepare", route_local, [*local_targets, "pdf_retrieve"])
-    g.add_edge("code_retrieve" if m.condition == "A" else "resolve", "join_local")
+    g.add_conditional_edges("prepare", route_local, [repo_entry, "pdf_retrieve"])
+    g.add_edge(repo_exit, "join_local")
     g.add_edge("pdf_retrieve", "join_local")
     g.add_conditional_edges("join_local", route_after_join,
                             ["web_retrieve", "rerank", "empty_context"])
     g.add_conditional_edges("web_retrieve", route_after_web, ["rerank", "empty_context"])
     g.add_edge("rerank", "assemble_context")
-    g.add_edge("assemble_context", "generate")
+    g.add_conditional_edges("assemble_context", route_after_assemble,
+                            ["generate", "empty_context"])
     g.add_edge("generate", "validate")
     g.add_edge("validate", END)
     g.add_edge("empty_context", END)
@@ -290,4 +331,5 @@ def trace_from_state(s: GraphState, m: RunManifest, *,
         answer=s.get("rendered"),
         validation=s.get("validation", {}),
         errors=s.get("errors", []),
+        warnings=s.get("warnings", []),
     )

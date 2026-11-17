@@ -13,7 +13,7 @@ from dwb.benchmark.freeze import file_hash
 from dwb.benchmark.schemas import QuestionRecord, load_records
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
-from dwb.manifest import RunManifest
+from dwb.manifest import MODEL_NET, RunManifest
 from dwb.trace import RunDir, StageRecord, TraceRecord
 
 LOG = get_logger("run")
@@ -51,27 +51,22 @@ async def run_questions(
     on_trace: Callable[[TraceRecord], None] | None = None,
 ) -> dict[str, Any]:
     graph = build_graph(components, m)
-    n_failed = n_empty = n_web = n_unresolved = 0
     t_run = time.perf_counter()
     run_stages = list(run_stages or [])
     LOG.info("Run [bold]%s[/]: condition %s, %s @ %s, %d questions → %s", m.run_id, m.condition,
              m.repo, m.repo_sha[:12], len(questions), run_dir.root)
     async with AsyncExitStack() as stack:
-        wiki = components.wiki
-        if wiki is not None and hasattr(type(wiki), "__aenter__"):
-            LOG.info("Starting the OpenWiki MCP server")
-            await stack.enter_async_context(wiki)  # one MCP session for the whole run
-            if getattr(wiki, "startup_stage", None) is not None:
-                run_stages.append(wiki.startup_stage)
-                LOG.info("OpenWiki MCP server ready in %.0f ms",
-                         wiki.startup_stage.latency_ms)
+        startup = await start_wiki(stack, components)  # one MCP session for the whole run
+        if startup is not None:
+            run_stages.append(startup)
         counts = await _run_all(graph, m, questions, run_dir, on_trace)
-    n_failed, n_empty, n_web, n_unresolved = counts
+    n_failed, n_degraded, n_empty, n_web, n_unresolved = counts
     summary = {
         "run_id": m.run_id,
         "condition": m.condition,
         "questions": len(questions),
         "failed": n_failed,
+        "degraded": n_degraded,
         "empty_context": n_empty,
         "web_triggered": n_web,
         "unresolved_citation_ids": n_unresolved,
@@ -80,15 +75,31 @@ async def run_questions(
     }
     run_dir.write_summary(summary)
     style = "red" if n_failed else "green"
-    LOG.info("[%s]Done[/]: %d questions, %d failed, %d empty context, %d with web, "
+    LOG.info("[%s]Done[/]: %d questions, %d failed, %d degraded, %d empty context, %d with web, "
              "%d unresolved citation IDs, %.1f s. Traces: %s", style, len(questions), n_failed,
-             n_empty, n_web, n_unresolved, summary["elapsed_s"], run_dir.traces_path)
+             n_degraded, n_empty, n_web, n_unresolved, summary["elapsed_s"], run_dir.traces_path)
     return summary
 
 
-async def _run_all(graph, m: RunManifest, questions: list[QuestionRecord], run_dir: RunDir,
-                   on_trace: Callable[[TraceRecord], None] | None) -> tuple[int, int, int, int]:
-    n_failed = n_empty = n_web = n_unresolved = 0
+async def start_wiki(stack: AsyncExitStack, components: Components) -> StageRecord | None:
+    """Enter the OpenWiki MCP session (if the components have one) on ``stack``. Returns its
+    startup stage for the run summary."""
+    wiki = components.wiki
+    if wiki is None or not hasattr(type(wiki), "__aenter__"):
+        return None
+    LOG.info("Starting the OpenWiki MCP server")
+    await stack.enter_async_context(wiki)
+    stage = getattr(wiki, "startup_stage", None)
+    if stage is not None:
+        LOG.info("OpenWiki MCP server ready in %.0f ms", stage.latency_ms)
+    return stage
+
+
+async def _run_all(
+    graph, m: RunManifest, questions: list[QuestionRecord], run_dir: RunDir,
+    on_trace: Callable[[TraceRecord], None] | None,
+) -> tuple[int, int, int, int, int]:
+    n_failed = n_degraded = n_empty = n_web = n_unresolved = 0
     total = len(questions)
     with run_dir.writer() as w:
         for i, q in enumerate(questions, start=1):
@@ -102,13 +113,14 @@ async def _run_all(graph, m: RunManifest, questions: list[QuestionRecord], run_d
                                   errors=[f"{type(e).__name__}: {e}"])
             _log_trace(rec, time.perf_counter() - t0)
             n_failed += bool(rec.errors)
+            n_degraded += rec.degraded
             n_empty += rec.empty_context
             n_web += rec.web_triggered
             n_unresolved += int(rec.validation.get("n_unresolved_ids", 0) or 0)
             w.append(rec)
             if on_trace:
                 on_trace(rec)
-    return n_failed, n_empty, n_web, n_unresolved
+    return n_failed, n_degraded, n_empty, n_web, n_unresolved
 
 
 def _short(text: str, n: int = 90) -> str:
@@ -124,6 +136,8 @@ def _log_trace(rec: TraceRecord, elapsed: float) -> None:
     if rec.errors:
         LOG.warning("    [red]✗ failed[/] after %.1f s: %s", elapsed, _short(rec.errors[0], 200))
         return
+    for w in rec.warnings:
+        LOG.warning("    [yellow]degraded[/]: %s", _short(w, 200))
     if rec.empty_context:
         LOG.warning("    [yellow]∅ empty context[/] (no candidates from the enabled branches), "
                     "%.1f s", elapsed)
@@ -166,9 +180,10 @@ def build_components(
 
     LOG.info("Models: generator %s, reranker %s, embeddings %s (temperature %s)",
              m.models.generator, m.models.reranker, m.models.embedding, m.models.temperature)
-    emb = OpenAIEmbeddings(model=m.models.embedding)
-    gen_llm = ChatOpenAI(model=m.models.generator, temperature=m.models.temperature)
-    rr_llm = ChatOpenAI(model=m.models.reranker, temperature=m.models.temperature)
+    net = MODEL_NET
+    emb = OpenAIEmbeddings(model=m.models.embedding, **net)
+    gen_llm = ChatOpenAI(model=m.models.generator, temperature=m.models.temperature, **net)
+    rr_llm = ChatOpenAI(model=m.models.reranker, temperature=m.models.temperature, **net)
     c = Components(
         reranker=LLMListwiseReranker(rr_llm, pool_cap=m.budgets.rerank_pool,
                                      top_n=m.budgets.rerank_top_n, model_id=m.models.reranker),
@@ -183,8 +198,9 @@ def build_components(
         c.web_store = TavilyStore(tavily_root, m.web.store_id or "live", mode=m.web.mode)
     if m.condition == "A":
         LOG.info("Repository branch A: code index %s", m.indexes.code_index_id)
-        c.code_retriever = CodeRetriever(
-            VectorIndex.open(index_root, m.indexes.code_index_id, emb))
+        index = VectorIndex.open(index_root, m.indexes.code_index_id, emb)
+        check_code_index(index.info, m)
+        c.code_retriever = CodeRetriever(index)
     else:
         from dwb.repo import RepoReader
         from dwb.retrieval.openwiki_client import OpenWikiClient, restore_snapshot
@@ -203,6 +219,35 @@ def build_components(
         c.resolver = WikiResolver(RepoReader.from_git(checkout, m.repo_sha),
                                   max_span_tokens=m.budgets.max_span_tokens)
     return c
+
+
+class IndexMismatchError(ValueError):
+    pass
+
+
+def check_code_index(info, m: RunManifest) -> None:
+    """The code index must match the manifest: same SHA, and spans cut with the shared
+    ``max_span_tokens`` budget that condition B's resolver uses (spike §10)."""
+    parts = info.parts or {}
+    if parts.get("sha") and parts["sha"] != m.repo_sha:
+        raise IndexMismatchError(f"code index {info.index_id} is for {parts['sha'][:12]}, "
+                                 f"the manifest pins {m.repo_sha[:12]}")
+    from dwb.retrieval.chunking import ChunkingConfig
+
+    chunking = parts.get("chunking") or {}
+    current = ChunkingConfig.chunker_version
+    if chunking and chunking.get("chunker_version", 1) != current:
+        raise IndexMismatchError(
+            f"code index {info.index_id} was built by chunker version "
+            f"{chunking.get('chunker_version', 1)}, the current one is {current}. Rebuild it: "
+            f"dwb index code {parts.get('repo', '<repo>')} (then update the manifest), or "
+            "dwb index inside a project")
+    built = chunking.get("max_span_tokens")
+    if built is not None and built != m.budgets.max_span_tokens:
+        raise IndexMismatchError(
+            f"code index {info.index_id} was chunked with max_span_tokens={built}, the manifest "
+            f"budget is {m.budgets.max_span_tokens}; rebuild it with "
+            f"--max-span-tokens {m.budgets.max_span_tokens}")
 
 
 def run_manifest(

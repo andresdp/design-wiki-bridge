@@ -79,3 +79,36 @@ def test_fixture_store_replays_offline():
 def test_no_research_endpoint_in_source():
     src = "\n".join(p.read_text() for p in (ROOT / "src").rglob("*.py"))
     assert not re.search(r"\.research\s*\(", src)
+
+
+def test_excluded_domains_are_filtered_locally_too(tmp_path):
+    from dwb.web.tavily_store import is_excluded
+
+    assert is_excluded("https://flask.palletsprojects.com/en/latest/", ["palletsprojects.com"])
+    assert is_excluded("https://PalletsProjects.com/x", ["palletsprojects.com"])
+    assert not is_excluded("https://notpalletsprojects.com/x", ["palletsprojects.com"])
+    assert not is_excluded("https://peps.python.org/", [])
+
+    class Leaky(StubClient):
+        def search(self, query, **kw):
+            out = super().search(query, **kw)
+            out["results"].insert(0, {"url": "https://docs.example.org/api", "title": "own",
+                                      "content": "the project's own docs", "score": 1.0})
+            return out
+
+    store = TavilyStore(tmp_path, "s", mode="record", client=Leaky())
+    items = store.search("wsgi", max_results=3, exclude_domains=["example.org"])
+    assert [i.locator.url for i in items] == ["https://peps.python.org/pep-3333/"]
+    assert items[0].locator.passage_index == 1  # capture position kept: IDs stay stable
+    assert store.last_call["excluded_urls"] == ["https://docs.example.org/api",
+                                                "https://example.org/wsgi"]
+
+
+def test_record_write_is_atomic_and_corrupt_records_fail_clearly(tmp_path):
+    store = TavilyStore(tmp_path, "s", mode="record", client=StubClient())
+    store.search("wsgi", max_results=2)
+    files = list((tmp_path / "s").iterdir())
+    assert len(files) == 1 and files[0].suffix == ".json"  # no .tmp left behind
+    files[0].write_text('{"key": "trunc')
+    with pytest.raises(ValueError, match="corrupt Tavily record"):
+        TavilyStore(tmp_path, "s", mode="replay").search("wsgi", max_results=2)

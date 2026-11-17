@@ -70,3 +70,81 @@ def test_records_with_other_sha_rejected(tmp_path):
     with pytest.raises(QuestionSetError, match="different SHA"):
         run_manifest(m, components("A"), base_dir=tmp_path, runs_dir=tmp_path / "runs")
     assert SHA != "deadbeef"
+
+
+def test_code_index_must_match_the_manifest_chunking_and_sha():
+    from dwb.retrieval.vector_store import IndexInfo
+    from dwb.runner import IndexMismatchError, check_code_index
+
+    m = manifest("A")
+
+    def info(**parts):
+        return IndexInfo(index_id="code-x", kind="code", embedding_model="e", n_items=1,
+                         parts={"sha": m.repo_sha, **parts})
+
+    from dwb.retrieval.chunking import ChunkingConfig
+
+    v = ChunkingConfig.chunker_version
+    check_code_index(info(chunking={"max_span_tokens": m.budgets.max_span_tokens,
+                                    "chunker_version": v}), m)
+    with pytest.raises(IndexMismatchError, match="--max-span-tokens"):
+        check_code_index(info(chunking={"max_span_tokens": 800, "chunker_version": v}), m)
+    with pytest.raises(IndexMismatchError, match="chunker version 1"):
+        check_code_index(info(chunking={"max_span_tokens": m.budgets.max_span_tokens}), m)
+    with pytest.raises(IndexMismatchError, match="manifest pins"):
+        check_code_index(info(sha="0" * 40), m)
+
+
+def test_condition_b_needs_a_checkout(tmp_path, monkeypatch):
+    from dwb.runner import build_components
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    m = manifest("B").model_copy(update={"checkout": None, "pdf_enabled": False})
+    m = m.model_copy(update={"web": m.web.model_copy(update={"enabled": False})})
+    with pytest.raises(ValueError, match="needs manifest.checkout"):
+        build_components(m, base_dir=ROOT, index_root=tmp_path, tavily_root=tmp_path,
+                         wiki_root=tmp_path)
+
+
+def test_wiki_session_is_entered_once_and_its_startup_is_recorded(tmp_path):
+    from dwb.trace import StageRecord
+    from graph_fakes import FakeWiki
+
+    class SessionWiki(FakeWiki):
+        entered = exited = 0
+        startup_stage = StageRecord(name="wiki_server_start", latency_ms=12.0)
+
+        async def __aenter__(self):
+            SessionWiki.entered += 1
+            return self
+
+        async def __aexit__(self, *exc):
+            SessionWiki.exited += 1
+
+    from graph_fakes import wiki_refs, wiki_sections
+
+    q1, q2 = public_q(), public_q().model_copy(update={"id": "flask-pub-001"})
+    m = setup(tmp_path, [q1, q2])
+    m = m.model_copy(update={"condition": "B", "run_id": "flask-B-t",
+                             "indexes": manifest("B").indexes})
+    c = components("B", wiki=SessionWiki(wiki_refs(), wiki_sections()))
+    s = run_manifest(m, c, base_dir=tmp_path, runs_dir=tmp_path / "runs")
+    assert SessionWiki.entered == 1 and SessionWiki.exited == 1  # one session for the run
+    assert [st["name"] for st in s["run_stages"]] == ["wiki_server_start"]
+
+
+def test_experiment_run_checks_questions_before_touching_the_checkout(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    import dwb.cli as cli
+    import dwb.runner as runner
+
+    m = setup(tmp_path, [public_q()], frozen=False)
+    path = tmp_path / "m.yaml"
+    path.write_text(m.model_copy(update={"question_set": m.question_set.model_copy(
+        update={"hash": "sha256:wrong"})}).to_yaml())
+    called = []
+    monkeypatch.setattr(runner, "build_components", lambda *a, **k: called.append(1))
+    monkeypatch.chdir(tmp_path)
+    r = CliRunner().invoke(cli.app, ["experiment", "run", str(path)])
+    assert r.exit_code != 0 and "hash" in r.output and not called
