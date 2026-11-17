@@ -29,7 +29,7 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 
 Use the existing conda env **`taxonomy`** (Python 3.11) for everything, e.g. `conda run -n taxonomy python ...` or `conda run -n taxonomy pytest ...`. **Ask the user before installing any package** (pip/conda/npm), even one the plan clearly needs. OpenWiki is reached through its stdio MCP server (`openwiki mcp`) via `langchain-mcp-adapters`. It needs `openwiki@0.9.0`; the global 0.3.0 install has no retrieval tools.
 
-Large artifacts are gitignored under `artifacts/`: repository clones and pinned checkouts, the SWE-QA files, indexes, wiki snapshots, and the Tavily store. Run traces go under `runs/`.
+Large artifacts are gitignored under `artifacts/`: the pinned checkouts (shallow, single-commit repos in `artifacts/checkouts/`), the SWE-QA files, indexes, wiki snapshots, and the Tavily store. Run traces go under `runs/`.
 
 ## Git / PR workflow
 

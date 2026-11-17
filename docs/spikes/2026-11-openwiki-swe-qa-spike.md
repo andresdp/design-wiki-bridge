@@ -18,7 +18,7 @@ SWE-QA doesn't record the commit it was built from. I scored every release tag b
 | Requests | v2.32.5 | `b25c87d7cb8d6a18a37fa12442b5f883f9e41741` | 2025-08-18 | 34/40 (best; v2.33+ drops) |
 | pytest (reserve) | 8.4.2 | `bfae4224fd554d3d7f2c277a4cc092b6ec6af3ae` | 2025-09-03 | 31/42 (best; 9.x drops) |
 
-The rationale: in every repository the best-scoring range ends at the last release before roughly September 2025, which is consistent with when SWE-QA was published. Where tags tied, I took the newest one in the range. Clean detached checkouts are in `artifacts/checkouts/<repo>-<tag>/` (git worktrees of full clones in `artifacts/repos/`).
+The rationale: in every repository the best-scoring range ends at the last release before roughly September 2025, which is consistent with when SWE-QA was published. Where tags tied, I took the newest one in the range. Clean detached checkouts are in `artifacts/checkouts/<repo>-<tag>/`. They started as git worktrees of full clones (the full history was needed to score tags). On 2026-11-17 they were replaced by standalone shallow repositories that hold only the pinned commit; the trees and wiki snapshot hashes were verified identical. The pytest reserve checkout was removed, and re-cloning it pins the same SHA.
 
 ## 3. Item check (five items per repository, plus aggregate)
 

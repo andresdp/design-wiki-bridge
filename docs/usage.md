@@ -212,6 +212,16 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
 - **Wiki snapshots:** the research harness copies a pinned snapshot into each checkout before a condition B run. In user mode the wiki is used in place.
 - **Question records** live in `data/questions/{test,dev}/`; see `data/questions/README.md`.
 
+**Adding a research repository.** Pin a commit and fetch only that commit:
+
+```sh
+git init -q artifacts/checkouts/<repo>-<tag>
+git -C artifacts/checkouts/<repo>-<tag> fetch --depth 1 https://github.com/<org>/<repo>.git "refs/tags/<tag>:refs/tags/<tag>"
+git -C artifacts/checkouts/<repo>-<tag> checkout --detach "<tag>^{commit}"
+```
+
+Then add it to `configs/repos.yaml` (`url`, `tag`, `sha`, `checkout`), and optionally add a PDF corpus and excluded web domains to `configs/chat.yaml`. Build the indexes with `dwb index code <repo>` and the commands above. Choosing the commit to pin (as the U1 spike did by scoring tags against SWE-QA) needs the full history, so do that in a separate, temporary clone.
+
 Research configuration:
 
 | File | Contents |
