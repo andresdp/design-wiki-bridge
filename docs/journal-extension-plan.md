@@ -91,6 +91,8 @@ Run [DeepEval](https://deepeval.com/docs/evaluation-end-to-end-single-turn) offl
 
 ## Journal paper outline
 
+Conceptual figures with draft captions (overview, wiki-guided discovery, study design) are in [`paper-figures.md`](paper-figures.md).
+
 | Section | Planned content |
 |---|---|
 | Introduction | Use the conference attribution gap to motivate verifiable answers that connect concepts to implementation. State the method, benchmark and empirical contributions. |
