@@ -25,7 +25,7 @@ A LangGraph `StateGraph` with deterministic routing normalizes the question and 
 | **A. Langflow-style baseline** | Top-k AST code chunks from a Chroma index of the pinned repository. |
 | **B. OpenWiki** | `openwiki_search` and `openwiki_read` over MCP, then resolving the selected sections' Claim evidence (`repo://path#Lx-Ly`) and symbol references to original spans at the same commit. |
 
-Both conditions share the PDF retrieval, the item-declared Tavily Web policy (record/replay store), the LLM listwise reranker, the context budget, the generator, and the citation format. `dwb check-paired` enforces this for every A/B manifest pair.
+Both conditions share the PDF retrieval, the item-declared Tavily Web policy (record/replay store), the LLM listwise reranker, the context budget, the generator, and the citation format. `dwb experiment check` enforces this for every A/B manifest pair.
 
 ## Benchmark
 
@@ -38,36 +38,52 @@ Both conditions share the PDF retrieval, the item-declared Tavily Web policy (re
 
 ```bash
 conda activate taxonomy
-pip install --no-deps -e .          # the dwb package itself
-pytest                              # offline suite
-ruff check src tests
+pip install --no-deps -e .          # installs the `dwb` command
 ```
 
-`OPENAI_API_KEY` and `TAVILY_API_KEY` are needed only for live runs.
+Put `OPENAI_API_KEY` (and `TAVILY_API_KEY` for web search) in a `.env` file in this folder. Run `dwb` from here.
 
-## Commands
+## Usage
+
+The full guide is **[docs/usage.md](docs/usage.md)**. In short:
 
 ```bash
-dwb index-code --repo flask --embedding-model text-embedding-3-large
-dwb index-pdf  --corpus configs/pdfs/<corpus>.yaml --embedding-model text-embedding-3-large
-dwb wiki-snapshot --repo flask --provider openai --model gpt-5.6-luna --effort medium --elapsed-s 1054.92
-dwb check-paired configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
-dwb run --manifest configs/manifests/flask-A.yaml            # --web-mode live = latency flag
-dwb evaluate --run-a runs/<A> --run-b runs/<B> --out reports/<name>
+dwb status                                             # repositories and which sources are ready
+dwb ask flask "How does Flask answer an OPTIONS request?"
+dwb ask requests "How does Requests handle a 303 redirect?" --wiki --pdf --web
+dwb chat flask                                         # interactive; /wiki /pdf /web on|off
+
+dwb index code flask                                   # build what a repository needs
+dwb index pdf configs/pdfs/flask.yaml
+dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium --elapsed-s 1054.9
+
+dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
+dwb experiment run configs/manifests/flask-A.yaml --web-mode record
+dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/flask-dev
+```
+
+The repository is always a source; the wiki, PDFs, and the web are optional. Answers cite original code, PDF pages, and web pages, never wiki text.
+
+## Development
+
+```bash
+pytest                              # offline suite (tests marked `live` are skipped)
+pytest -m live                      # needs API keys and the local wiki snapshots
+ruff check src tests
 ```
 
 ## Layout
 
 ```
-configs/       repos.yaml (pinned SHAs, SWE-QA revision), manifests/, eval.yaml
+configs/       repos.yaml, chat.yaml, pdfs/, manifests/, wikis/, eval.yaml
 prompts/       versioned generator and judge prompts (hashed into manifests)
-src/dwb/       evidence, manifest, trace, budget, rerank, generate, graph, runner, cli
+src/dwb/       evidence, manifest, trace, budget, rerank, generate, graph, runner, chat, workspace, cli
   benchmark/   question schema, SWE-QA loader, freeze
   retrieval/   chunking, Chroma code/PDF indexes, wiki types
   web/         Tavily record/replay store
   eval/        matching, recall, claim judges, DeepEval diagnostics, report
 data/questions/  test/ (frozen), dev/, selections/
-docs/          journal-extension-plan.md, plans/, spikes/
+docs/          usage.md (guide), journal-extension-plan.md, plans/, spikes/
 artifacts/     gitignored: repo checkouts, SWE-QA files, indexes, wiki snapshots, Tavily store
 runs/          gitignored: run traces
 ```

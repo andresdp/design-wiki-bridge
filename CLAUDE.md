@@ -13,12 +13,15 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 - Tests (offline; `live` tests are skipped): `conda run -n taxonomy pytest`
 - Live checks (need `OPENAI_API_KEY`): `conda run -n taxonomy pytest -m live`
 - Lint: `conda run -n taxonomy ruff check src tests`
-- Code index (condition A): `conda run -n taxonomy dwb index-code --repo flask --embedding-model <model>`
-- PDF index: `conda run -n taxonomy dwb index-pdf --corpus configs/pdfs/<corpus>.yaml --embedding-model <model>`
-- Register a generated wiki: `conda run -n taxonomy dwb wiki-snapshot --repo flask --provider openai --model <model> --effort <effort> --elapsed-s <s> [--cost-usd <usd>]`
-- Paired gate: `conda run -n taxonomy dwb check-paired configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml`
-- Run one condition: `conda run -n taxonomy dwb run --manifest configs/manifests/flask-A.yaml` (`--web-mode live` is the latency flag)
-- Evaluate: `conda run -n taxonomy dwb evaluate --run-a runs/<A> --run-b runs/<B> --out reports/<name>` (`--no-judge` gives recall and cost only)
+- User guide: `docs/usage.md`. The CLI is typer (`src/dwb/cli.py`); `dwb --help` lists commands.
+- Readiness of each repo: `conda run -n taxonomy dwb status`
+- Ask / chat: `dwb ask <repo> "<question>" [--wiki/--no-wiki] [--pdf/--no-pdf] [--web/--no-web]`, `dwb chat <repo>` (defaults in `configs/chat.yaml`; the repo is always on, and the wiki replaces vector search when enabled)
+- Code index: `dwb index code <repo> [--embedding-model <model>]`
+- PDF index: `dwb index pdf configs/pdfs/<repo>.yaml`
+- Register a generated wiki: `dwb wiki snapshot <repo> --provider openai --model <model> --effort <effort> --elapsed-s <s>`
+- Paired gate: `dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml`
+- Run one condition: `dwb experiment run configs/manifests/flask-A.yaml [--web-mode record|replay|live] [--overwrite]`
+- Evaluate: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name>` (`--no-judge` gives recall and cost only)
 
 `conda run` doesn't forward stdin, so heredoc scripts piped into it silently do nothing. Write the script to a file first.
 

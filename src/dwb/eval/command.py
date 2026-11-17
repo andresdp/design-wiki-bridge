@@ -1,4 +1,4 @@
-"""``dwb evaluate``: score two saved runs (A and B) and write the paired report."""
+"""``dwb experiment evaluate``: score two saved runs (A and B) and write the paired report."""
 
 from __future__ import annotations
 

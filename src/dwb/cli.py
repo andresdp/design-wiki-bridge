@@ -1,27 +1,73 @@
-"""``dwb`` command line: index-code, index-pdf, wiki-snapshot, run, evaluate."""
+"""``dwb``: ask questions about a repository with cited answers, and run the experiments.
+
+Run every command from the design-wiki-bridge folder: configuration (``configs/``), artifacts
+(``artifacts/``) and API keys (``.env``) are resolved relative to it. See docs/usage.md.
+"""
 
 from __future__ import annotations
 
-import argparse
+import asyncio
 import json
-import sys
+import shutil
 from dataclasses import asdict
 from pathlib import Path
+from typing import Annotated
 
-import yaml
+import typer
+from rich.console import Console
+from rich.table import Table
 
 from dwb.log import get_logger, setup_logging
+from dwb.workspace import Workspace, WorkspaceError
 
 LOG = get_logger("cli")
-REPOS_YAML = Path("configs/repos.yaml")
-INDEX_ROOT = Path("artifacts/indexes")
+out = Console()  # results (stdout)
+err = Console(stderr=True)  # messages
+
+app = typer.Typer(
+    name="dwb", no_args_is_help=True, rich_markup_mode="rich", add_completion=False,
+    help="Ask questions about a software repository and get answers that cite the original "
+         "code, PDFs and web pages. Also runs the A/B retrieval experiments.\n\n"
+         "Run from the design-wiki-bridge folder. Guide: docs/usage.md",
+)
+index_app = typer.Typer(no_args_is_help=True, help="Build the search indexes used to answer.")
+wiki_app = typer.Typer(no_args_is_help=True, help="Register OpenWiki snapshots.")
+exp_app = typer.Typer(no_args_is_help=True,
+                      help="Run and evaluate the paired A/B experiments (research workflow).")
+app.add_typer(index_app, name="index")
+app.add_typer(wiki_app, name="wiki")
+app.add_typer(exp_app, name="experiment")
+
+WS = Workspace()
 
 
-def _repo_cfg(name: str) -> dict:
-    cfg = yaml.safe_load(REPOS_YAML.read_text())["repos"]
-    if name not in cfg:
-        raise SystemExit(f"unknown repo {name!r}; known: {sorted(cfg)}")
-    return cfg[name]
+def _load_dotenv() -> bool:
+    """Load API keys from ./.env (gitignored). Variables already set in the shell win."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return False
+    return load_dotenv(Path(".env"), override=False)
+
+
+@app.callback()
+def _main(
+    verbose: Annotated[int, typer.Option("--verbose", "-v", count=True,
+                                         help="More detail (per-stage timings). Repeatable.")] = 0,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Warnings and errors only.")] = False,
+) -> None:
+    setup_logging(-1 if quiet else verbose)
+    if _load_dotenv():
+        LOG.debug("Loaded environment from .env")
+
+
+def _fail(msg: str, code: int = 2) -> typer.Exit:
+    err.print(f"[red]Error:[/] {msg}")
+    return typer.Exit(code)
+
+
+def _default_embedding() -> str:
+    return (WS.chat_config().get("models") or {}).get("embedding", "text-embedding-3-large")
 
 
 def _embedding(model: str, fake: bool):
@@ -34,189 +80,298 @@ def _embedding(model: str, fake: bool):
     return OpenAIEmbeddings(model=model)
 
 
-def cmd_index_code(args: argparse.Namespace) -> int:
+# ------------------------------------------------------------------------- ask / chat
+
+RepoArg = Annotated[str, typer.Argument(help="Repository name from configs/repos.yaml "
+                                             "(see: dwb status).")]
+WikiOpt = Annotated[bool | None, typer.Option(
+    "--wiki/--no-wiki", help="Find repository evidence through the OpenWiki snapshot instead "
+                             "of vector search. [dim]Default: configs/chat.yaml[/]")]
+PdfOpt = Annotated[bool | None, typer.Option(
+    "--pdf/--no-pdf", help="Use the repository's PDF corpus. [dim]Default: configs/chat.yaml[/]")]
+WebOpt = Annotated[bool | None, typer.Option(
+    "--web/--no-web", help="Use live web search (Tavily; needs TAVILY_API_KEY). "
+                           "[dim]Default: configs/chat.yaml[/]")]
+ModelOpt = Annotated[str | None, typer.Option(
+    "--model", "-m", help="Chat model for answering and reranking. [dim]Default: "
+                          "configs/chat.yaml[/]")]
+
+
+def _settings(repo: str, wiki: bool | None, pdf: bool | None, web: bool | None,
+              model: str | None):
+    from dwb.chat import ChatSettings, Sources
+
+    d = WS.chat_config().get("sources") or {}
+    sources = Sources(wiki=d.get("wiki", False) if wiki is None else wiki,
+                      pdf=d.get("pdf", True) if pdf is None else pdf,
+                      web=d.get("web", False) if web is None else web)
+    return ChatSettings(repo=repo, sources=sources, generator=model)
+
+
+@app.command()
+def ask(
+    repo: RepoArg,
+    question: Annotated[str, typer.Argument(help="The question, in quotes.")],
+    wiki: WikiOpt = None, pdf: PdfOpt = None, web: WebOpt = None, model: ModelOpt = None,
+    show_context: Annotated[bool, typer.Option(
+        "--show-context", help="Also print every passage given to the model.")] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Print the full trace as JSON.")] = False,
+) -> None:
+    """Answer one question about REPO, citing the code, PDF pages and web pages it used.
+
+    [dim]Example:[/] dwb ask flask "How does Flask answer an OPTIONS request?" --pdf
+    """
+    from dwb.chat import ChatSession, render_answer
+
+    async def go():
+        async with ChatSession(WS, _settings(repo, wiki, pdf, web, model)) as s:
+            return await s.ask(question)
+
+    try:
+        trace = asyncio.run(go())
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
+    if as_json:
+        print(trace.model_dump_json(indent=2))
+    else:
+        render_answer(trace, show_context=show_context, console=out)
+    if trace.errors:
+        raise typer.Exit(1)
+
+
+@app.command()
+def chat(repo: RepoArg, wiki: WikiOpt = None, pdf: PdfOpt = None, web: WebOpt = None,
+         model: ModelOpt = None) -> None:
+    """Interactive session: ask questions about REPO, switch sources with /wiki, /pdf, /web.
+
+    Each question is answered on its own, from the evidence retrieved for it.
+    """
+    from dwb.chat import ChatSession, repl
+
+    async def go():
+        async with ChatSession(WS, _settings(repo, wiki, pdf, web, model)) as s:
+            hist = WS._p(Path("artifacts/chat_history"))
+            hist.parent.mkdir(parents=True, exist_ok=True)
+            await repl(s, out, history=hist)
+
+    try:
+        asyncio.run(go())
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
+
+
+@app.command()
+def status(embedding_model: Annotated[str | None, typer.Option(
+        help="Embedding model the indexes must match. [dim]Default: configs/chat.yaml[/]")]
+           = None) -> None:
+    """Show the configured repositories and which sources are ready for each."""
+    emb = embedding_model or _default_embedding()
+    try:
+        rows = WS.status(emb)
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
+
+    def mark(v):
+        return f"[green]✓[/] {v}" if v and v is not True else ("[green]✓[/]" if v else "[red]✗[/]")
+
+    t = Table(title=f"Repositories (indexes built with {emb})")
+    for col in ("Repo", "Version", "Checkout", "Code index", "PDF index", "Wiki snapshot"):
+        t.add_column(col)
+    for r in rows:
+        t.add_row(r["repo"], r["tag"], mark(r["checkout"]), mark(r["code_index"]),
+                  mark(r["pdf_index"]) if r["pdf_corpus"] else "[dim]no corpus[/]",
+                  mark(r["wiki"]))
+    out.print(t)
+    missing = [r for r in rows if not (r["checkout"] and r["code_index"])]
+    for r in missing:
+        out.print(f"[yellow]{r['repo']}[/]: run [bold]dwb index code {r['repo']}[/] "
+                  "(and clone the checkout if it is missing)")
+
+
+# ------------------------------------------------------------------------------ index
+
+
+@index_app.command("code")
+def index_code(
+    repo: RepoArg,
+    embedding_model: Annotated[str | None, typer.Option(
+        help="OpenAI embedding model. [dim]Default: configs/chat.yaml[/]")] = None,
+    max_span_tokens: Annotated[int, typer.Option(help="Split code spans above this size.")]
+    = 1500,
+    path: Annotated[Path | None, typer.Option(hidden=True)] = None,
+    sha: Annotated[str | None, typer.Option(hidden=True)] = None,
+    root: Annotated[Path, typer.Option(hidden=True)] = Path("artifacts/indexes"),
+    fake: Annotated[bool, typer.Option(hidden=True)] = False,
+) -> None:
+    """Chunk REPO's code at its pinned commit and embed it (needed for vector search)."""
     from dwb.repo import RepoReader
     from dwb.retrieval.chunking import ChunkingConfig
     from dwb.retrieval.code_index import build_code_index
 
-    if args.path:
-        reader = RepoReader.from_dir(args.path, sha=args.sha or "fixture")
-        repo = args.repo
-    else:
-        rc = _repo_cfg(args.repo)
-        reader = RepoReader.from_git(rc["checkout"], rc["sha"])
-        repo = args.repo
-    LOG.info("Indexing code for [bold]%s[/] at %s with %s", repo, reader.sha[:12],
-             args.embedding_model)
-    cfg = ChunkingConfig(max_span_tokens=args.max_span_tokens)
-    idx = build_code_index(args.root, reader, repo, _embedding(args.embedding_model, args.fake),
-                           args.embedding_model, cfg)
+    model = embedding_model or _default_embedding()
+    try:
+        if path:
+            reader = RepoReader.from_dir(path, sha=sha or "fixture")
+        else:
+            r = WS.repo(repo)
+            if not r.checkout_ok:
+                raise WorkspaceError(f"checkout for {repo} not found at {r.checkout}")
+            reader = RepoReader.from_git(r.checkout, r.sha)
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
+    LOG.info("Indexing code for [bold]%s[/] at %s with %s", repo, reader.sha[:12], model)
+    idx = build_code_index(root, reader, repo, _embedding(model, fake), model,
+                           ChunkingConfig(max_span_tokens=max_span_tokens))
     print(json.dumps(asdict(idx.info), indent=2))
-    return 0
 
 
-def cmd_index_pdf(args: argparse.Namespace) -> int:
+@index_app.command("pdf")
+def index_pdf(
+    corpus: Annotated[Path, typer.Argument(help="PDF corpus file, e.g. configs/pdfs/flask.yaml",
+                                           exists=True, dir_okay=False)],
+    embedding_model: Annotated[str | None, typer.Option(
+        help="OpenAI embedding model. [dim]Default: configs/chat.yaml[/]")] = None,
+    base_dir: Annotated[Path, typer.Option(help="Folder the corpus' PDF paths are relative to.")]
+    = Path("."),
+    root: Annotated[Path, typer.Option(hidden=True)] = Path("artifacts/indexes"),
+    fake: Annotated[bool, typer.Option(hidden=True)] = False,
+) -> None:
+    """Read the PDFs listed in CORPUS page by page and embed them."""
     from dwb.retrieval.pdf_index import PdfCorpus, build_pdf_index
 
-    corpus = PdfCorpus.load(args.corpus)
-    base = Path(args.base_dir) if args.base_dir else Path(args.corpus).parent
-    LOG.info("Indexing PDF corpus [bold]%s[/] (%d documents) with %s", corpus.corpus_id,
-             len(corpus.documents), args.embedding_model)
-    idx = build_pdf_index(args.root, corpus, base, _embedding(args.embedding_model, args.fake),
-                          args.embedding_model)
+    model = embedding_model or _default_embedding()
+    c = PdfCorpus.load(corpus)
+    missing = [d.path for d in c.documents if not (base_dir / d.path).exists()]
+    if missing:
+        raise _fail(f"PDF files not found (relative to {base_dir}): {', '.join(missing)}")
+    LOG.info("Indexing PDF corpus [bold]%s[/] (%d documents) with %s", c.corpus_id,
+             len(c.documents), model)
+    idx = build_pdf_index(root, c, base_dir, _embedding(model, fake), model)
     print(json.dumps(asdict(idx.info), indent=2))
-    return 0
 
 
-def cmd_wiki_snapshot(args: argparse.Namespace) -> int:
-    """Register the openwiki/ tree generated in a pinned checkout as a snapshot (KTD6, R11).
+# ------------------------------------------------------------------------------- wiki
 
-    Generation itself is run by hand with the pinned environment (see the U1 spike doc):
+
+@wiki_app.command("snapshot")
+def wiki_snapshot(
+    repo: RepoArg,
+    provider: Annotated[str, typer.Option(help="Provider OpenWiki used, e.g. openai.")],
+    model: Annotated[str, typer.Option(help="Model OpenWiki used, e.g. gpt-5.6-luna.")],
+    effort: Annotated[str | None, typer.Option(help="Reasoning effort shown by OpenWiki.")]
+    = None,
+    version: Annotated[str | None, typer.Option(
+        help="OpenWiki version. [dim]Default: read from the installed CLI[/]")] = None,
+    elapsed_s: Annotated[float | None, typer.Option(
+        help="Generation wall time in seconds (the 'real' value from /usr/bin/time).")] = None,
+    cost_usd: Annotated[float | None, typer.Option(help="Generation cost, if reported.")] = None,
+    root: Annotated[Path, typer.Option(hidden=True)] = Path("artifacts/wikis"),
+) -> None:
+    """Register the openwiki/ folder generated in REPO's checkout as a pinned snapshot.
+
+    Generate it first, inside the checkout:
     OPENWIKI_TELEMETRY_DISABLED=1 OPENWIKI_PROVIDER=... OPENWIKI_MODEL_ID=... openwiki code --init
     """
-    import shutil
+    from dwb.retrieval.openwiki_client import OpenWikiError, register_snapshot
 
-    from dwb.retrieval.openwiki_client import register_snapshot
-
-    rc = _repo_cfg(args.repo)
-    version = args.version
+    try:
+        r = WS.repo(repo)
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
     if version is None:
         exe = shutil.which("openwiki")
         pkg = Path(exe).resolve().parents[2] / "package.json" if exe else None
         version = json.loads(pkg.read_text())["version"] if pkg and pkg.exists() else "unknown"
-    LOG.info("Registering the OpenWiki tree in %s (openwiki %s, %s/%s)", rc["checkout"], version,
-             args.provider, args.model)
-    snap = register_snapshot(
-        rc["checkout"], args.repo, rc["sha"], args.root, provider=args.provider,
-        model=args.model, version=version, effort=args.effort, elapsed_s=args.elapsed_s,
-        cost_usd=args.cost_usd,
-    )
+    LOG.info("Registering the OpenWiki tree in %s (openwiki %s, %s/%s)", r.checkout, version,
+             provider, model)
+    try:
+        snap = register_snapshot(r.checkout, repo, r.sha, root, provider=provider, model=model,
+                                 version=version, effort=effort, elapsed_s=elapsed_s,
+                                 cost_usd=cost_usd)
+    except OpenWikiError as e:
+        raise _fail(str(e)) from None
     LOG.info("Snapshot [bold]%s[/]: %d pages, %d claims", snap.snapshot_id, snap.pages,
              snap.claims)
     print(snap.model_dump_json(indent=2))
-    return 0
 
 
-def cmd_run(args: argparse.Namespace) -> int:
+# ------------------------------------------------------------------------- experiment
+
+
+@exp_app.command("run")
+def experiment_run(
+    manifest: Annotated[Path, typer.Argument(help="Run manifest, e.g. "
+                                                  "configs/manifests/flask-A.yaml",
+                                             exists=True, dir_okay=False)],
+    web_mode: Annotated[str | None, typer.Option(
+        help="Override web.mode: record (live, saved), replay (saved only), live (latency; "
+             "renames the run).")] = None,
+    overwrite: Annotated[bool, typer.Option(help="Replace an existing run directory.")] = False,
+    runs_dir: Annotated[Path, typer.Option(help="Where run directories go.")] = Path("runs"),
+) -> None:
+    """Run one condition of the experiment over its question set and save the traces."""
     from dwb.manifest import load_manifest
     from dwb.runner import build_components, run_manifest
 
-    m = load_manifest(args.manifest)
-    if args.web_mode:
-        m = m.model_copy(update={"web": m.web.model_copy(update={"mode": args.web_mode})})
-        if args.web_mode == "live":
+    if web_mode not in (None, "record", "replay", "live"):
+        raise _fail("--web-mode must be record, replay or live")
+    m = load_manifest(manifest)
+    if web_mode:
+        m = m.model_copy(update={"web": m.web.model_copy(update={"mode": web_mode})})
+        if web_mode == "live":
             m = m.model_copy(update={"run_id": f"{m.run_id}-live"})
     base = Path(".")
-    comps = build_components(m, base_dir=base, index_root=Path(args.index_root),
-                             tavily_root=Path(args.tavily_root))
-    summary = run_manifest(m, comps, base_dir=base, runs_dir=Path(args.runs_dir),
-                           overwrite=args.overwrite)
+    comps = build_components(m, base_dir=base, index_root=WS.index_root,
+                             tavily_root=WS.tavily_root, wiki_root=WS.wiki_root)
+    try:
+        summary = run_manifest(m, comps, base_dir=base, runs_dir=runs_dir, overwrite=overwrite)
+    except FileExistsError as e:
+        raise _fail(f"{e} (add --overwrite to replace it)") from None
     print(json.dumps(summary, indent=2))
-    return 0 if summary["failed"] == 0 else 1
+    if summary["failed"]:
+        raise typer.Exit(1)
 
 
-def cmd_check_paired(args: argparse.Namespace) -> int:
+@exp_app.command("check")
+def experiment_check(
+    a: Annotated[Path, typer.Argument(help="Condition A manifest.", exists=True)],
+    b: Annotated[Path, typer.Argument(help="Condition B manifest.", exists=True)],
+) -> None:
+    """Check that an A/B manifest pair differs only in the repository branch."""
     from dwb.manifest import check_paired, load_manifest
 
-    res = check_paired(load_manifest(args.a), load_manifest(args.b))
+    res = check_paired(load_manifest(a), load_manifest(b))
     for f in res.failures:
         LOG.error("Shared-stage difference: %s", f)
     for n in res.notes:
         LOG.info("Note: %s", n)
     LOG.info("Paired check %s", "[green]passed[/]" if res.ok else "[red]failed[/]")
     print(json.dumps(res.model_dump(), indent=2))
-    return 0 if res.ok else 1
+    if not res.ok:
+        raise typer.Exit(1)
 
 
-def cmd_evaluate(args: argparse.Namespace) -> int:
+@exp_app.command("evaluate")
+def experiment_evaluate(
+    run_a: Annotated[Path, typer.Argument(help="Run directory of condition A.", exists=True)],
+    run_b: Annotated[Path, typer.Argument(help="Run directory of condition B.", exists=True)],
+    out_dir: Annotated[Path, typer.Option("--out", help="Report directory.")],
+    config: Annotated[Path, typer.Option(help="Evaluation config.")] = Path("configs/eval.yaml"),
+    no_judge: Annotated[bool, typer.Option("--no-judge", help="Recall and cost only; no LLM "
+                                                              "judge calls.")] = False,
+    deepeval: Annotated[bool, typer.Option(help="Also run DeepEval diagnostics.")] = False,
+) -> None:
+    """Score two saved runs offline and write the paired report tables."""
     from dwb.eval.command import evaluate_runs
 
-    res = evaluate_runs(Path(args.run_a), Path(args.run_b), Path(args.out),
-                        config_path=Path(args.config), use_judge=not args.no_judge,
-                        deepeval=args.deepeval or None)
+    res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
+                        deepeval=deepeval or None)
     print(json.dumps(res, indent=2))
-    return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="dwb")
-    p.add_argument("-v", "--verbose", action="count", default=0,
-                   help="more progress detail (per-stage timings); repeatable")
-    p.add_argument("-q", "--quiet", action="store_true", help="warnings and errors only")
-    sub = p.add_subparsers(dest="command", required=True)
-
-    ic = sub.add_parser("index-code", help="build the condition A code index")
-    ic.add_argument("--repo", required=True, help="name in configs/repos.yaml")
-    ic.add_argument("--path", help="index a plain directory instead (fixtures)")
-    ic.add_argument("--sha", help="commit label for --path")
-    ic.add_argument("--embedding-model", default="text-embedding-3-large")
-    ic.add_argument("--max-span-tokens", type=int, default=1500)
-    ic.add_argument("--root", default=str(INDEX_ROOT))
-    ic.add_argument("--fake", action="store_true", help="offline fake embeddings (smoke only)")
-    ic.set_defaults(func=cmd_index_code)
-
-    ip = sub.add_parser("index-pdf", help="build the shared PDF index")
-    ip.add_argument("--corpus", required=True, help="PDF corpus YAML")
-    ip.add_argument("--base-dir", help="directory PDF paths are relative to")
-    ip.add_argument("--embedding-model", default="text-embedding-3-large")
-    ip.add_argument("--root", default=str(INDEX_ROOT))
-    ip.add_argument("--fake", action="store_true")
-    ip.set_defaults(func=cmd_index_pdf)
-
-    ws = sub.add_parser("wiki-snapshot", help="register a generated OpenWiki tree as a snapshot")
-    ws.add_argument("--repo", required=True, help="name in configs/repos.yaml")
-    ws.add_argument("--provider", required=True)
-    ws.add_argument("--model", required=True)
-    ws.add_argument("--effort")
-    ws.add_argument("--version", help="openwiki version (default: read from the installed CLI)")
-    ws.add_argument("--elapsed-s", type=float)
-    ws.add_argument("--cost-usd", type=float)
-    ws.add_argument("--root", default="artifacts/wikis")
-    ws.set_defaults(func=cmd_wiki_snapshot)
-
-    rn = sub.add_parser("run", help="run one manifest (one condition) over its question set")
-    rn.add_argument("--manifest", required=True)
-    rn.add_argument("--runs-dir", default="runs")
-    rn.add_argument("--index-root", default=str(INDEX_ROOT))
-    rn.add_argument("--tavily-root", default="artifacts/tavily")
-    rn.add_argument("--web-mode", choices=["record", "replay", "live"],
-                    help="override web.mode; 'live' is the latency flag and renames the run")
-    rn.add_argument("--overwrite", action="store_true")
-    rn.set_defaults(func=cmd_run)
-
-    cp = sub.add_parser("check-paired", help="paired-configuration gate for an A/B pair")
-    cp.add_argument("a")
-    cp.add_argument("b")
-    cp.set_defaults(func=cmd_check_paired)
-
-    ev = sub.add_parser("evaluate", help="offline evaluation of saved A and B traces")
-    ev.add_argument("--run-a", required=True, help="run directory of condition A")
-    ev.add_argument("--run-b", required=True, help="run directory of condition B")
-    ev.add_argument("--out", required=True, help="report directory")
-    ev.add_argument("--config", default="configs/eval.yaml")
-    ev.add_argument("--no-judge", action="store_true", help="recall and cost only")
-    ev.add_argument("--deepeval", action="store_true", help="also run DeepEval diagnostics")
-    ev.set_defaults(func=cmd_evaluate)
-    return p
-
-
-def _load_dotenv() -> bool:
-    """Load API keys from ./.env (gitignored). Variables already set in the shell win."""
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return False
-    return load_dotenv(Path(".env"), override=False)
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    setup_logging(-1 if args.quiet else args.verbose)
-    loaded = _load_dotenv()
-    if loaded:
-        LOG.debug("Loaded environment from .env")
-    return args.func(args)
+def main() -> None:
+    app()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

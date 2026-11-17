@@ -1,5 +1,5 @@
 # PDF corpus for Requests. Files live in artifacts/pdfs/ (gitignored). Index with:
-#   dwb index-pdf --corpus configs/pdfs/requests.yaml --base-dir . --embedding-model text-embedding-3-large
+#   dwb index pdf configs/pdfs/requests.yaml
 corpus_id: requests-v1
 documents:
   - doc_id: rfc9110

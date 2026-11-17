@@ -1,5 +1,5 @@
 # PDF corpus for Flask. Files live in artifacts/pdfs/ (gitignored). Index with:
-#   dwb index-pdf --corpus configs/pdfs/flask.yaml --base-dir . --embedding-model text-embedding-3-large
+#   dwb index pdf configs/pdfs/flask.yaml
 # Published RFCs never change, so the RFC number is the version.
 corpus_id: flask-v1
 documents:
