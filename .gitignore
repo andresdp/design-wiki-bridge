@@ -2,3 +2,12 @@
 __pycache__/
 *.pyc
 .env
+.deepeval/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Large, regenerable artifacts (indexes, wiki snapshots, Tavily store, repo checkouts).
+# Their manifests are committed elsewhere (configs/, data/).
+artifacts/
+runs/

@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dwb"
+version = "0.1.0"
+description = "Cross-source (repository + PDF + Web) question answering with citations: vector baseline vs OpenWiki-guided retrieval."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.12",
+    "pyyaml>=6",
+    "tiktoken>=0.13",
+    "langchain-core>=1.4",
+    "langchain-classic>=1.0.7",
+    "langchain-openai>=1.2",
+    "langchain-chroma>=1.1",
+    "langchain-mcp-adapters>=0.3",
+    "langgraph>=1.2",
+    "pymupdf>=1.28",
+    "tavily-python>=0.7",
+    "deepeval>=4.1",
+]
+
+[project.scripts]
+dwb = "dwb.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "live: needs network access and API keys (OPENAI_API_KEY, TAVILY_API_KEY); skipped by default",
+]
+addopts = "-m 'not live'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
