@@ -25,6 +25,7 @@ from dwb.merge import merge_candidates
 from dwb.rerank import Reranker
 from dwb.retrieval.wiki_types import Resolver, Section, SectionRef, WikiClient
 from dwb.trace import AnswerClaim, StageRecord, TraceRecord
+from dwb.usage import embedding_usage
 
 
 class GraphState(TypedDict, total=False):
@@ -67,6 +68,16 @@ def _stage(name: str, t0: float, items: list[EvidenceItem] | None = None, **extr
                        candidate_ids=[i.id for i in items], count=len(items), extra=extra)
 
 
+def _embed_stage(name: str, t0: float, items: list[EvidenceItem], query: str, retriever,
+                 **extra) -> StageRecord:
+    """Retrieval stage record including the (approximate) query-embedding tokens."""
+    model = getattr(retriever, "embedding_model", None)
+    u = embedding_usage(query, model)
+    st = _stage(name, t0, items, embedding_model=model, **u.extra(), **extra)
+    st.input_tokens = u.input_tokens
+    return st
+
+
 def build_graph(c: Components, m: RunManifest):
     b = m.budgets
 
@@ -91,8 +102,8 @@ def build_graph(c: Components, m: RunManifest):
     async def code_retrieve(s: GraphState) -> dict:
         t0 = time.perf_counter()
         items = await asyncio.to_thread(c.code_retriever.retrieve, s["query"], b.code_top_k)
-        return {"repo_candidates": items,
-                "stages": [_stage("code_retrieve", t0, items, k=b.code_top_k)]}
+        st = _embed_stage("code_retrieve", t0, items, s["query"], c.code_retriever, k=b.code_top_k)
+        return {"repo_candidates": items, "stages": [st]}
 
     async def wiki_search(s: GraphState) -> dict:
         t0 = time.perf_counter()
@@ -123,8 +134,8 @@ def build_graph(c: Components, m: RunManifest):
     async def pdf_retrieve(s: GraphState) -> dict:
         t0 = time.perf_counter()
         items = await asyncio.to_thread(c.pdf_retriever.retrieve, s["query"], b.pdf_top_k)
-        return {"pdf_candidates": items,
-                "stages": [_stage("pdf_retrieve", t0, items, k=b.pdf_top_k)]}
+        st = _embed_stage("pdf_retrieve", t0, items, s["query"], c.pdf_retriever, k=b.pdf_top_k)
+        return {"pdf_candidates": items, "stages": [st]}
 
     async def join_local(s: GraphState) -> dict:
         t0 = time.perf_counter()

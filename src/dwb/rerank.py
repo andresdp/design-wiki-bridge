@@ -19,8 +19,8 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 
 from dwb.evidence import EvidenceItem
-from dwb.tokens import count_tokens
 from dwb.trace import StageRecord
+from dwb.usage import approx_tokens, llm_usage
 
 
 @dataclass
@@ -105,13 +105,16 @@ class LLMListwiseReranker:
         latency = (time.perf_counter() - t0) * 1000
         order, issues = repair_ranking(raw, len(docs))
         ranked = [pool[i] for i in order][: self.top_n]
-        in_tok = sum(u.get("input_tokens", 0) for u in usage.usage_metadata.values())
-        out_tok = sum(u.get("output_tokens", 0) for u in usage.usage_metadata.values())
+        from langchain_core.messages import HumanMessage
+
+        prompt_approx = [HumanMessage(query), *(HumanMessage(d.page_content) for d in docs)]
+        u = llm_usage(usage, prompt_approx if docs else None,
+                      str(raw) if docs else None)
         stage = StageRecord(
             name="rerank",
             latency_ms=latency,
-            input_tokens=in_tok,
-            output_tokens=out_tok,
+            input_tokens=u.input_tokens,
+            output_tokens=u.output_tokens,
             candidate_ids=[i.id for i in ranked],
             count=len(ranked),
             extra={
@@ -121,7 +124,8 @@ class LLMListwiseReranker:
                 "pool_ids": [i.id for i in pool],
                 "pool_truncated": max(0, len(items) - len(pool)),
                 "raw_ranking": raw,
-                "prompt_tokens_estimate": sum(count_tokens(d.page_content) for d in docs),
+                "prompt_tokens_estimate": approx_tokens([query, *(d.page_content for d in docs)]),
+                **u.extra(),
                 "error": error,
                 **issues,
             },

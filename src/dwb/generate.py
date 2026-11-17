@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from dwb.budget import Context
 from dwb.prompts import load_prompt
 from dwb.trace import AnswerClaim, StageRecord
+from dwb.usage import llm_usage
 
 
 class GeneratedClaim(BaseModel):
@@ -61,13 +62,17 @@ class Generator:
         except Exception as e:
             error = f"{type(e).__name__}: {e}"
             answer = None
+        from langchain_core.messages import HumanMessage
+
+        u = llm_usage(usage, [HumanMessage(question), HumanMessage(context.text)],
+                      answer.model_dump_json() if answer else None)
         stage = StageRecord(
             name="generate",
             latency_ms=(time.perf_counter() - t0) * 1000,
-            input_tokens=sum(u.get("input_tokens", 0) for u in usage.usage_metadata.values()),
-            output_tokens=sum(u.get("output_tokens", 0) for u in usage.usage_metadata.values()),
+            input_tokens=u.input_tokens,
+            output_tokens=u.output_tokens,
             count=len(answer.claims) if answer else 0,
-            extra={"model": self.model_id, "prompt_hash": self.prompt_hash,
+            extra={"model": self.model_id, "prompt_hash": self.prompt_hash, **u.extra(),
                    "structured_method": self.structured_method, "error": error},
         )
         return answer, stage
