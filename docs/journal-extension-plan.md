@@ -45,10 +45,10 @@ Use Tavily for Web discovery and save the exact requests and returned passages w
 
 | Condition | Repository retrieval |
 |---|---|
-| A. Langflow-style baseline in LangGraph | Retrieve top-k source code spans directly from the pinned repository using its code vector index. |
+| A. Langflow-style baseline in LangGraph | Retrieve top-k source code spans directly from the pinned repository using its code vector index. The conference Langflow export isn't available, so this baseline makes no claim of conference equivalence. |
 | B. OpenWiki in LangGraph | Call OpenWiki search and read, then resolve selected sections' references to original code or test spans. |
 
-Both configurations share the PDF retriever, Tavily policy, cross-encoder reranker, context budget, generator, and citation format. Run both on the same questions. Match the repository candidate budgets where practical and log the number returned by each branch. Condition B reads original code only when resolving a reference discovered through OpenWiki.
+Both configurations share the PDF retriever, Tavily policy, LLM listwise reranker (LangChain `LLMListwiseRerank`, pinned model, temperature 0), context budget, generator, and citation format. Run both on the same questions. Match the repository candidate budgets where practical and log the number returned by each branch. Condition B reads original code only when resolving a reference discovered through OpenWiki.
 
 ## LangGraph design
 
@@ -77,7 +77,7 @@ flowchart TD
 
 - **Offline preparation.** Ingest PDFs into the shared vector index. For condition A, index repository chunks. For condition B, build and pin the OpenWiki snapshot from the same commit used for source resolution.
 - **Conditional tool calls.** OpenWiki search returns ranked wiki section references. Read the selected sections, resolve their source references, and return code or test spans in the same evidence format as direct retrieval. The graph records wiki section IDs and unresolved references. If wiki retrieval yields nothing, the other enabled branches still contribute evidence.
-- **Shared downstream stages.** Wait for the enabled local branches before evaluating Web fallback. Apply the same fallback policy in both conditions and use frozen Tavily passages when invoked during the quality study. Log whether each condition triggered fallback. Keep Web disabled for public repository-QA items.
+- **Shared downstream stages.** Wait for the enabled local branches before evaluating Web fallback. The fallback policy is declared per item: Web runs only when the run enables it and the item's allowed sources include Web. Apply the same fallback policy in both conditions and use frozen Tavily passages when invoked during the quality study. Log whether each condition triggered fallback. Keep Web disabled for public repository-QA items.
 - **Citations and evaluation.** Preserve evidence IDs through reranking and generation. Cite original repository spans, PDF pages, or Web passages. Keep wiki references in the trace to explain how source evidence was found. Run DeepEval separately on saved traces.
 
 ## Evaluation and analysis
