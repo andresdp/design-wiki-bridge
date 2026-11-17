@@ -31,7 +31,79 @@ flowchart LR
 
 The repository is always a source. The wiki, PDFs, and the web are optional, and each is switched per run (research) or per question (user tool). Everything outside this diagram is local: git, Chroma, the PDF files, and the trace files.
 
-## 2. Code map
+## 2. Module view (layers)
+
+The static structure of the `dwb` package: six layers, where a module may import only from its own layer or a lower one. The query pipeline and the evaluator share layer 3 but never import each other, so scoring cannot touch retrieval or generation. `tests/test_layers.py` enforces both rules and fails when a new module has no layer.
+
+```mermaid
+flowchart TB
+    subgraph L1["1 · Interface"]
+        direction LR
+        cli["cli<br/>typer commands"]
+        chat["chat<br/>ChatSession, REPL, rendering"]
+        initw["init_wizard<br/>dwb init questions"]
+    end
+    subgraph L2["2 · Application: modes and orchestration"]
+        direction LR
+        project["project<br/>user mode: .dwb config, index_project"]
+        workspace["workspace<br/>research mode: artifact discovery"]
+        runner["runner<br/>build_components, batch runs"]
+        evalcmd["eval.command<br/>evaluate saved runs"]
+    end
+    subgraph L3["3 · Services"]
+        direction LR
+        subgraph PIPE["Query pipeline"]
+            direction TB
+            qgraph["graph<br/>StateGraph, trace_from_state"]
+            stages["merge · rerank · budget · generate"]
+        end
+        subgraph EVAL["Evaluation, offline"]
+            direction TB
+            scoring["matching · recall · claims_judge<br/>deepeval_diag · report"]
+            evtext["evidence_text<br/>restore code text from git"]
+        end
+    end
+    subgraph L4["4 · Adapters: indexes and external sources"]
+        direction LR
+        vec["retrieval.vector_store<br/>chunking · code_index · pdf_index"]
+        wiki["retrieval.openwiki_client<br/>resolver · wiki_types"]
+        web["web.tavily_store<br/>record and replay"]
+    end
+    subgraph L5["5 · Domain model"]
+        direction LR
+        evidence["evidence<br/>EvidenceItem, locators, IDs"]
+        trace["trace<br/>TraceRecord, AnswerClaim"]
+        manifest["manifest<br/>RunManifest, check_paired"]
+        bench["benchmark<br/>schemas · swe_qa · freeze"]
+        prompts["prompts<br/>versioned prompt files"]
+    end
+    subgraph L6["6 · Foundation"]
+        direction LR
+        repo["repo<br/>RepoReader: git show at SHA"]
+        util["tokens · usage · log"]
+    end
+    L1 --> L2 --> L3 --> L4 --> L5 --> L6
+    PIPE x--x|no imports| EVAL
+```
+
+| Layer | Modules | Responsibility | External libraries |
+|---|---|---|---|
+| 1 Interface | `cli`, `chat`, `init_wizard` | Parse commands and options, run the REPL, and render answers and logs. No retrieval logic | typer, rich, prompt_toolkit |
+| 2 Application | `project`, `workspace`, `runner`, `eval.command` | Choose the mode, find or build the artifacts, wire concrete components into the graph, and run or score a question set | PyYAML |
+| 3 Query pipeline | `graph`, `merge`, `rerank`, `budget`, `generate` | Answer one question: retrieve, merge, rerank, fit the token budget, generate cited claims. The pipeline depends on retriever interfaces; `runner` injects the concrete adapters | LangGraph, LangChain (`LLMListwiseRerank`, chat models) |
+| 3 Evaluation | `eval.*` (except `command`), `evidence_text` | Score saved traces: span recall, claim correctness, citation support and coverage, cost tables | DeepEval (optional diagnostics), LangChain chat model (judge) |
+| 4 Adapters | `retrieval.*`, `web.tavily_store` | Build and query the indexes, talk to OpenWiki over MCP and resolve wiki references to code spans, and record or replay Tavily | Chroma, OpenAI embeddings, langchain-mcp-adapters, tavily-python |
+| 5 Domain model | `evidence`, `trace`, `manifest`, `prompts`, `benchmark.*` | The shared vocabulary: evidence items and IDs, traces, run manifests, question records, and prompt versions (see §6) | pydantic |
+| 6 Foundation | `repo`, `tokens`, `usage`, `log` | Read files at a commit through git, count tokens, collect usage from callbacks, and log | tiktoken, LangChain callbacks, rich |
+
+Two consequences of the layering:
+
+- **Swapping a condition is a wiring change.** `graph` imports only the wiki result types from layer 4. `runner` decides which repository branch (A or B) and which PDF and web adapters to build, so the shared stages are identical code in both conditions.
+- **Both modes are thin.** The user tool (`project`) and the research harness (`workspace`, `runner`) differ only in layer 2. Both reach the same pipeline (§8).
+
+## 3. Code map
+
+The module-level detail behind §2: the main import edges between modules.
 
 ```mermaid
 flowchart TB
@@ -58,7 +130,7 @@ flowchart TB
 
 The evaluator (`eval/`) never imports the graph, the generator, the reranker, or the retrievers; a test enforces this. It reads only traces, question records, and git.
 
-## 3. The query graph
+## 4. The query graph
 
 One explicit LangGraph `StateGraph`, compiled per run or session for one repository branch (condition A or B):
 
@@ -91,7 +163,7 @@ flowchart TD
 - **There is no fallback between repository branches.** If condition B finds nothing and no other source is enabled, the graph ends at `empty_context` rather than quietly switching to vector search.
 - **Execution is `ainvoke`,** with no checkpointer and no streaming. Each node returns a `StageRecord` (latency, counts, tokens, stage-specific extras).
 
-## 4. Condition B in detail
+## 5. Condition B in detail
 
 ```mermaid
 sequenceDiagram
@@ -116,7 +188,7 @@ sequenceDiagram
 
 Wiki text never becomes evidence. It only guides discovery, and its section references are kept in the trace. Every span the resolver emits is original code at the pinned commit.
 
-## 5. Data model
+## 6. Data model
 
 ```mermaid
 classDiagram
@@ -193,7 +265,7 @@ classDiagram
 
 **Traces store code passages by reference.** Code passages carry no text in persisted traces: the text is exactly `git show <commit>:<path>` sliced to the lines, and `evidence_text.hydrate` restores it for evaluation. PDF and web text stay inline for the final context.
 
-## 6. Build pipeline and artifacts
+## 7. Build pipeline and artifacts
 
 ```mermaid
 flowchart LR
@@ -216,7 +288,7 @@ flowchart LR
 
 Indexes are content-addressed. Building again with the same inputs reuses the existing index and never silently rebuilds it, and `dwb ask`/`chat`/`status` find indexes by repository, commit, and embedding model, so users never handle index IDs.
 
-## 7. Two modes over one pipeline
+## 8. Two modes over one pipeline
 
 ```mermaid
 flowchart TD
@@ -231,7 +303,7 @@ flowchart TD
 
 `ask` and `chat` build an in-memory manifest from the source switches and run the same components and graph as `experiment run`. Answers in chat are therefore produced exactly as in the study. The workspace differs between the two modes only in where artifacts live and whether the wiki snapshot is restored (research) or used in place (user tool).
 
-## 8. Research run and evaluation
+## 9. Research run and evaluation
 
 ```mermaid
 flowchart LR
@@ -247,7 +319,7 @@ flowchart LR
     PAIR --> REP[("reports/:<br/>per_question, paired, paired_summary,<br/>cost, evaluator_config, judge_log")]
 ```
 
-## 9. Main design decisions
+## 10. Main design decisions
 
 IDs refer to the implementation plan (KTD) or the spike document (§).
 
@@ -273,7 +345,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 | 18 | **User mode indexes the HEAD commit through git, keeps everything in `.dwb/`** | Citations point at a real commit; uncommitted edits are excluded with a warning, and a stale index is flagged. Nothing is written to the repository's `.gitignore` | Indexing the working tree |
 | 19 | **Token accounting from LangChain callbacks, approximate counts as fallback** | Provider usage where available; LangChain's `count_tokens_approximately` for embeddings (no callbacks) or missing usage, labelled as approximate. The context budget keeps an exact counter because it is a pipeline rule | tiktoken everywhere; no embedding accounting |
 
-## 10. Invariants
+## 11. Invariants
 
 - Evidence item = ID + source type + text + locator, and IDs survive merge, reranking, context assembly, and generation. Validation logs every cited alias that doesn't resolve.
 - Shared stages are identical across conditions (`dwb experiment check`).
@@ -282,7 +354,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 - The test set is frozen by content hash. Development questions are separate, and the runner rejects any ID or question text shared between dev and test.
 - Nothing leaves the machine except calls to OpenAI, Tavily (only when the web is enabled), and OpenWiki generation (only when requested). Telemetry is off for OpenWiki and Chroma.
 
-## 11. Known limitations and parked work
+## 12. Known limitations and parked work
 
 - **Run-to-run variance** from generation and judging is visible even at temperature 0 (spike §10). Report it as a validity threat, or measure it with repeated dev runs.
 - **Condition B depends on wiki coverage and on lexical wiki search** over the raw question (spike §9). The query rule is frozen and not tuned.
