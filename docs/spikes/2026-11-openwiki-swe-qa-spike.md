@@ -138,3 +138,26 @@ Decisions (apply identically to both conditions):
 3. **The wiki search query is the normalized question text**, with no `paths` hints and no identifier extraction. This is the neutral rule; it is frozen, with no per-item tuning.
 
 The dev runs must be redone after these changes (new prompt hash and `top_n`).
+
+## 10. Second dev pilot and frozen settings (2026-11-17)
+
+After §9's changes: custom items fill the 8,000-token budget in both conditions (7.4k–8.0k tokens; A with 18–24 passages, B with 11–15). Code-only public items did not fill it in A (2.5k–2.9k tokens against B's 5.7k–7.6k), because A's 20 small chunks ran out first. Abstention is now visible as gap claims (requests pub-001 B: `abstained`; flask cus-002 B: one gap) instead of zero coverage. One public item's scores swapped between conditions from pilot 1 to pilot 2, so run-to-run variance from generation and judging is a validity threat to report, or to measure with repeated dev runs.
+
+**Change:** condition A `code_top_k` raised from 20 to 40 (= `rerank_pool`), so code-only items can also fill the token budget. `check_paired` reports the repository budget difference (A 40 chunks, B ≤ 20 resolved spans) per R7.
+
+**Frozen pipeline settings** (KTD14–KTD16 final, both conditions unless noted):
+
+| Setting | Value |
+|---|---|
+| Max span size (chunks and resolved spans) | 1,500 tokens |
+| A: code candidates | 40 |
+| B: wiki search / sections read / resolved spans | 10 / 5 / 20 |
+| PDF candidates | 10 |
+| Reranker pool / `top_n` | 40 / 40 (the context budget is the binding limit) |
+| Context budget | 8,000 tokens (tiktoken `o200k_base`) |
+| Generator and reranker | `gpt-5.6-luna`, temperature 0, prompt `generate_v2.md` |
+| Embeddings | `text-embedding-3-large` |
+| Judge | `gpt-5.5-2026-04-23`, temperature 0 |
+| Span match (KTD15) | same path and ≥ 1 overlapping line; Jaccard ≥ 0.5 as the sensitivity variant |
+| Web | item-declared; the project's own sites excluded (§8); replayed captures |
+| Wiki search query | normalized question text (§9) |

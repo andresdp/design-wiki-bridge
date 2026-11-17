@@ -46,7 +46,7 @@ class Budgets(_Strict):
     """KTD14 defaults. Repository-branch budgets may differ between A and B (R7)."""
 
     # repository branch (condition-specific)
-    code_top_k: int = 20
+    code_top_k: int = 40  # = rerank_pool, so code-only items can fill the token budget
     wiki_search_k: int = 10
     wiki_read_sections: int = 5
     wiki_max_spans: int = 20
