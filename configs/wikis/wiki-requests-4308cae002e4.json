@@ -1,0 +1,18 @@
+{
+  "snapshot_id": "wiki-requests-4308cae002e4",
+  "repo": "requests",
+  "sha": "b25c87d7cb8d6a18a37fa12442b5f883f9e41741",
+  "generator": "openwiki",
+  "version": "0.9.0",
+  "provider": "openai",
+  "model": "gpt-5.6-luna",
+  "effort": "medium",
+  "config": {},
+  "elapsed_s": 836.29,
+  "cost_usd": null,
+  "tree_sha256": "ea4336edfdd38a990a8989b703f6ddcabd4ef18266c9510ccda135ef32640fa9",
+  "pages": 11,
+  "claims": 115,
+  "generated_at": "2026-11-17T14:39:07.714Z",
+  "registered_at": "2026-11-17T14:49:01.028929+00:00"
+}
