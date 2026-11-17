@@ -1,0 +1,13 @@
+# PDF corpus for Flask. Files live in artifacts/pdfs/ (gitignored). Index with:
+#   dwb index-pdf --corpus configs/pdfs/flask.yaml --base-dir . --embedding-model text-embedding-3-large
+# Published RFCs never change, so the RFC number is the version.
+corpus_id: flask-v1
+documents:
+  - doc_id: rfc9110
+    version: rfc9110-2022-06
+    path: artifacts/pdfs/rfc9110.pdf
+    title: "RFC 9110: HTTP Semantics"
+  - doc_id: rfc3875
+    version: rfc3875-2004-10
+    path: artifacts/pdfs/rfc3875.pdf
+    title: "RFC 3875: The Common Gateway Interface (CGI) Version 1.1"
