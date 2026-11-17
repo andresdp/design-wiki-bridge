@@ -245,7 +245,12 @@ def _evidence_dump(item: EvidenceItem, with_text: bool) -> dict:
     return d
 
 
-def trace_from_state(s: GraphState, m: RunManifest) -> TraceRecord:
+def trace_from_state(s: GraphState, m: RunManifest, *,
+                     keep_code_text: bool = False) -> TraceRecord:
+    """Final graph state -> trace. Code passages are stored by reference (commit, path,
+    lines) unless ``keep_code_text``: their text is exactly ``git show <commit>:<path>``
+    sliced to those lines, and ``dwb.evidence_text.hydrate`` restores it for evaluation.
+    PDF and Web passage text is kept for the final context (and all Web passages)."""
     q = s["question"]
     ctx: Context | None = s.get("context")
     candidates = {
@@ -260,8 +265,10 @@ def trace_from_state(s: GraphState, m: RunManifest) -> TraceRecord:
     for key in ("repo_candidates", "pdf_candidates", "web_candidates", "merged", "reranked"):
         for it in s.get(key, []):
             if it.id not in evidence or it.id in final_ids:
-                # text kept for final context (judge) and web passages (KTD15 matching)
-                keep = it.id in final_ids or it.source_type == "web"
+                # text kept for final context (judge) and web passages (KTD15 matching);
+                # code text is recoverable from git, so it is stored by reference
+                keep = (it.id in final_ids or it.source_type == "web") and (
+                    keep_code_text or it.source_type != "code")
                 evidence[it.id] = _evidence_dump(it, with_text=keep)
     answer = s.get("answer")
     return TraceRecord(

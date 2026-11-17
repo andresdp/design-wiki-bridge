@@ -184,7 +184,7 @@ class ChatSession:
         t0 = time.perf_counter()
         try:
             state = await self._graph.ainvoke({"question": q})
-            trace = trace_from_state(state, self.manifest)
+            trace = trace_from_state(state, self.manifest, keep_code_text=True)
         except Exception as e:
             trace = TraceRecord(question_id=q.id, run_id=self.manifest.run_id,
                                 condition=self.manifest.condition,

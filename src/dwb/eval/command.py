@@ -11,6 +11,7 @@ from dwb.benchmark.schemas import QuestionRecord, load_records
 from dwb.eval.claims_judge import ClaimsJudge
 from dwb.eval.matching import MatchRules
 from dwb.eval.report import question_row, write_report
+from dwb.evidence_text import hydrate
 from dwb.log import get_logger
 from dwb.manifest import load_manifest
 from dwb.prompts import PROMPT_DIR
@@ -59,8 +60,12 @@ def evaluate_runs(
     for label, rd in (("A", run_a), ("B", run_b)):
         records = _records_for(rd, base_dir)
         traces[label] = read_traces(rd / "traces.jsonl")
+        run_m = load_manifest(rd / "manifest.yaml")
+        checkout = (base_dir / run_m.checkout) if run_m.checkout else None
+        filled = hydrate(traces[label], checkout)
         rows[label] = []
-        LOG.info("Condition %s: %d traces", label, len(traces[label]))
+        LOG.info("Condition %s: %d traces (%d code passages read from %s)", label,
+                 len(traces[label]), filled, checkout or "-")
         for i, t in enumerate(traces[label], start=1):
             rec = records.get(t.question_id)
             if rec is None:
