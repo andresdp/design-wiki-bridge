@@ -145,19 +145,23 @@ class ChatSession:
         return Sources(wiki=m.condition == "B", pdf=m.pdf_enabled, web=m.web.enabled)
 
     async def _open(self) -> None:
-        from dwb.runner import build_components
+        from dwb.runner import build_components, start_wiki
 
         self.manifest, self.notes = build_manifest(self.ws, self.settings)
         for n in self.notes:
             LOG.warning(n)
+        ws = self.ws
         c = self._injected or build_components(
-            self.manifest, base_dir=self.ws.root, index_root=self.ws._p(self.ws.index_root),
-            tavily_root=self.ws._p(self.ws.tavily_root), wiki_root=self.ws._p(self.ws.wiki_root),
-            restore_wiki=getattr(self.ws, "restores_wiki", True))
-        self._stack = AsyncExitStack()
-        if c.wiki is not None and hasattr(type(c.wiki), "__aenter__"):
-            LOG.info("Starting the OpenWiki MCP server")
-            await self._stack.enter_async_context(c.wiki)
+            self.manifest, base_dir=ws.root, index_root=ws.resolve(ws.index_root),
+            tavily_root=ws.resolve(ws.tavily_root), wiki_root=ws.resolve(ws.wiki_root),
+            restore_wiki=ws.restores_wiki)
+        stack = AsyncExitStack()
+        try:
+            await start_wiki(stack, c)
+        except BaseException:
+            await stack.aclose()
+            raise
+        self._stack = stack
         self._graph = build_graph(c, self.manifest)
         LOG.info("Sources: %s", self.sources.describe())
 
@@ -171,11 +175,17 @@ class ChatSession:
 
     async def set_sources(self, **changes: bool) -> None:
         """Switch sources mid-session (restarts components when the repository branch changes)."""
+        old = (self.settings, self._injected, self._stack, self._graph, self.manifest, self.notes)
         self.settings = replace(self.settings, sources=replace(self.settings.sources, **changes))
-        if self._stack:
-            await self._stack.aclose()
         self._injected = None if "wiki" in changes else self._injected
-        await self._open()
+        try:
+            await self._open()  # the new session first: on failure the old one keeps working
+        except BaseException:
+            (self.settings, self._injected, self._stack, self._graph, self.manifest,
+             self.notes) = old
+            raise
+        if old[2] is not None:
+            await old[2].aclose()
 
     async def ask(self, question: str) -> TraceRecord:
         assert self.manifest is not None and self._graph is not None, "use 'async with'"
@@ -214,7 +224,7 @@ def how_found(ev: dict[str, Any]) -> str:
     return "vector search"
 
 
-def render_answer(trace: TraceRecord, *, show_context: bool = False, console=None) -> None:
+def print_answer(trace: TraceRecord, *, show_context: bool = False, console=None) -> None:
     from rich.console import Console
     from rich.markdown import Markdown
     from rich.panel import Panel
@@ -329,7 +339,7 @@ async def repl(session: ChatSession, console=None, *, history: Path | None = Non
             console.print(f"Sources: {session.sources.describe()}")
         elif cmd == "context":
             if last:
-                render_answer(last, show_context=True, console=console)
+                print_answer(last, show_context=True, console=console)
             else:
                 console.print("[dim]No answer yet.[/]")
         elif cmd in ("wiki", "pdf", "web"):
@@ -345,6 +355,6 @@ async def repl(session: ChatSession, console=None, *, history: Path | None = Non
         elif cmd == "ask":
             with console.status("Retrieving evidence and answering…"):
                 last = await session.ask(arg or "")
-            render_answer(last, console=console)
+            print_answer(last, console=console)
         else:
             console.print(f"Unknown command /{cmd}. Type /help.")

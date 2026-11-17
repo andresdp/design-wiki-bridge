@@ -13,11 +13,33 @@ from dwb.eval.matching import MatchRules
 from dwb.eval.report import question_row, write_report
 from dwb.evidence_text import hydrate
 from dwb.log import get_logger
-from dwb.manifest import load_manifest
+from dwb.manifest import MODEL_NET, check_paired, load_manifest
 from dwb.prompts import PROMPT_DIR
 from dwb.trace import TraceRecord, read_traces
 
 LOG = get_logger("eval")
+
+
+class UnpairedRunsError(ValueError):
+    pass
+
+
+def check_runs(run_a: Path, run_b: Path, *, allow_unpaired: bool = False) -> dict[str, Any]:
+    """The two saved runs must be condition A then B under paired manifests (R6). The saved
+    manifests are the resolved ones the runs used, so this rechecks what actually ran."""
+    ma, mb = load_manifest(run_a / "manifest.yaml"), load_manifest(run_b / "manifest.yaml")
+    problems = []
+    if (ma.condition, mb.condition) != ("A", "B"):
+        problems.append(f"expected runs of condition A then B, got {ma.condition} then "
+                        f"{mb.condition} (pass the A run first)")
+    pc = check_paired(ma, mb)
+    problems += pc.failures
+    if problems and not allow_unpaired:
+        raise UnpairedRunsError("runs are not a valid A/B pair:\n  " + "\n  ".join(problems))
+    for p in problems:
+        LOG.warning("Unpaired (allowed): %s", p)
+    return {"ok": not problems, "failures": problems, "notes": pc.notes,
+            "allowed_unpaired": bool(problems and allow_unpaired)}
 
 
 def _records_for(run_dir: Path, base_dir: Path) -> dict[str, QuestionRecord]:
@@ -35,7 +57,9 @@ def evaluate_runs(
     judge_llm=None,
     use_judge: bool = True,
     deepeval: bool | None = None,
+    allow_unpaired: bool = False,
 ) -> dict[str, Any]:
+    paired_check = check_runs(run_a, run_b, allow_unpaired=allow_unpaired)
     cfg = yaml.safe_load(config_path.read_text())
     rules = MatchRules(**cfg.get("matching", {}))
     judge = None
@@ -43,12 +67,13 @@ def evaluate_runs(
         if judge_llm is None:
             from langchain_openai import ChatOpenAI
 
-            judge_llm = ChatOpenAI(model=cfg["judge"]["model"],
+            judge_llm = ChatOpenAI(model=cfg["judge"]["model"], **MODEL_NET,
                                    temperature=cfg["judge"].get("temperature", 0.0))
         cache = cfg["judge"].get("cache")
         pdir = cfg["judge"].get("prompts_dir")
         judge = ClaimsJudge(judge_llm, (base_dir / pdir) if pdir else PROMPT_DIR,
                             model_id=cfg["judge"]["model"],
+                            temperature=cfg["judge"].get("temperature", 0.0),
                             cache_path=(base_dir / cache) if cache else None)
     run_deepeval = cfg.get("deepeval", {}).get("enabled", False) if deepeval is None else deepeval
 
@@ -87,7 +112,7 @@ def evaluate_runs(
     config = {"eval_config": cfg, "match_rules": rules.__dict__,
               "judge_prompt_hashes": ({"claim": judge.claim_hash, "support": judge.support_hash}
                                       if judge else None),
-              "runs": {"A": str(run_a), "B": str(run_b)}}
+              "runs": {"A": str(run_a), "B": str(run_b)}, "paired_check": paired_check}
     result = write_report(out, rows["A"], rows["B"], traces["A"], traces["B"], config, judge,
                           diagnostics if run_deepeval else None)
     LOG.info("Report written to [bold]%s[/]: %d paired questions, %d judge calls, %d cache hits",

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
@@ -107,7 +106,9 @@ def _embedding(model: str, fake: bool):
         return DeterministicFakeEmbedding(size=64)
     from langchain_openai import OpenAIEmbeddings
 
-    return OpenAIEmbeddings(model=model)
+    from dwb.manifest import MODEL_NET
+
+    return OpenAIEmbeddings(model=model, **MODEL_NET)
 
 
 # ------------------------------------------------------------------------- ask / chat
@@ -155,7 +156,7 @@ def ask(
     [dim]Examples:[/] dwb ask "How are requests routed?"   (inside a project set up with dwb init)
               dwb ask "How does Flask answer OPTIONS?" --repo flask   (research mode)
     """
-    from dwb.chat import ChatSession, render_answer
+    from dwb.chat import ChatSession, print_answer
 
     try:
         ws, name = _workspace(repo)
@@ -170,7 +171,7 @@ def ask(
     if as_json:
         print(trace.model_dump_json(indent=2))
     else:
-        render_answer(trace, show_context=show_context, console=out)
+        print_answer(trace, show_context=show_context, console=out)
     if trace.errors:
         raise typer.Exit(1)
 
@@ -189,8 +190,7 @@ def chat(repo: RepoOpt = None, wiki: WikiOpt = None, pdf: PdfOpt = None, web: We
 
         async def go():
             async with ChatSession(ws, _settings(ws, name, wiki, pdf, web, model)) as s:
-                hist = getattr(ws, "dir", None)
-                hist = (hist / "chat_history") if hist else ws._p(Path("artifacts/chat_history"))
+                hist = ws.history_path
                 hist.parent.mkdir(parents=True, exist_ok=True)
                 await repl(s, out, history=hist)
 
@@ -218,7 +218,7 @@ def status(embedding_model: Annotated[str | None, typer.Option(
         if not pws.state or any(s in ("missing", "stale") for _, s, _ in pws.status_rows()):
             out.print("Run [bold]dwb index[/] to build what is missing.")
         return
-    if not WS._p(WS.repos_yaml).exists():
+    if not WS.resolve(WS.repos_yaml).exists():
         raise _fail("not a dwb project (run `dwb init` here) and not the design-wiki-bridge "
                     "folder (configs/repos.yaml).")
     emb = embedding_model or _default_embedding()
@@ -355,16 +355,14 @@ def wiki_snapshot(
     Generate it first, inside the checkout:
     OPENWIKI_TELEMETRY_DISABLED=1 OPENWIKI_PROVIDER=... OPENWIKI_MODEL_ID=... openwiki code --init
     """
-    from dwb.retrieval.openwiki_client import OpenWikiError, register_snapshot
+    from dwb.retrieval.openwiki_client import OpenWikiError, openwiki_version, register_snapshot
 
     try:
         r = WS.repo(repo)
     except WorkspaceError as e:
         raise _fail(str(e)) from None
     if version is None:
-        exe = shutil.which("openwiki")
-        pkg = Path(exe).resolve().parents[2] / "package.json" if exe else None
-        version = json.loads(pkg.read_text())["version"] if pkg and pkg.exists() else "unknown"
+        version = openwiki_version() or "unknown"
     LOG.info("Registering the OpenWiki tree in %s (openwiki %s, %s/%s)", r.checkout, version,
              provider, model)
     try:
@@ -394,7 +392,13 @@ def experiment_run(
 ) -> None:
     """Run one condition of the experiment over its question set and save the traces."""
     from dwb.manifest import load_manifest
-    from dwb.runner import build_components, run_manifest
+    from dwb.runner import (
+        IndexMismatchError,
+        QuestionSetError,
+        build_components,
+        load_question_set,
+        run_manifest,
+    )
 
     if web_mode not in (None, "record", "replay", "live"):
         raise _fail("--web-mode must be record, replay or live")
@@ -404,8 +408,15 @@ def experiment_run(
         if web_mode == "live":
             m = m.model_copy(update={"run_id": f"{m.run_id}-live"})
     base = Path(".")
-    comps = build_components(m, base_dir=base, index_root=WS.index_root,
-                             tavily_root=WS.tavily_root, wiki_root=WS.wiki_root)
+    try:  # check the question set before touching the checkout (B restores the wiki into it)
+        load_question_set(m, base)
+    except QuestionSetError as e:
+        raise _fail(str(e)) from None
+    try:
+        comps = build_components(m, base_dir=base, index_root=WS.index_root,
+                                 tavily_root=WS.tavily_root, wiki_root=WS.wiki_root)
+    except IndexMismatchError as e:
+        raise _fail(str(e)) from None
     try:
         summary = run_manifest(m, comps, base_dir=base, runs_dir=runs_dir, overwrite=overwrite)
     except FileExistsError as e:
@@ -443,15 +454,18 @@ def experiment_evaluate(
     no_judge: Annotated[bool, typer.Option("--no-judge", help="Recall and cost only; no LLM "
                                                               "judge calls.")] = False,
     deepeval: Annotated[bool, typer.Option(help="Also run DeepEval diagnostics.")] = False,
+    allow_unpaired: Annotated[bool, typer.Option(
+        help="Score runs that fail the A/B pairing check anyway (recorded in the report).")]
+        = False,
 ) -> None:
     """Score two saved runs offline and write the paired report tables."""
-    from dwb.eval.command import evaluate_runs
+    from dwb.eval.command import UnpairedRunsError, evaluate_runs
     from dwb.evidence_text import EvidenceTextError
 
     try:
         res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
-                            deepeval=deepeval or None)
-    except EvidenceTextError as e:
+                            deepeval=deepeval or None, allow_unpaired=allow_unpaired)
+    except (EvidenceTextError, UnpairedRunsError) as e:
         raise _fail(str(e)) from None
     print(json.dumps(res, indent=2))
 

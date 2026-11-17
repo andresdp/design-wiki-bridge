@@ -12,6 +12,19 @@ from functools import lru_cache
 from pathlib import Path
 
 
+def split_lines(text: str) -> list[str]:
+    r"""Split on ``\n`` only, as git, ``ast`` and OpenWiki count lines. ``str.splitlines`` also
+    breaks on form feeds, ``\x1c``-``\x1e``, ``\x85`` and ``\u2028``, which would shift
+    every later line number in such a file."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [ln.removesuffix("\r") for ln in lines]
+
+
+GIT_TIMEOUT_S = 120  # a hung git call fails loudly instead of freezing a run
+
+
 class RepoReader:
     def __init__(self, sha: str, *, git_dir: Path | None = None, root: Path | None = None):
         if (git_dir is None) == (root is None):
@@ -26,7 +39,7 @@ class RepoReader:
         repo_dir = Path(repo_dir)
         full = subprocess.run(
             ["git", "-C", str(repo_dir), "rev-parse", f"{sha}^{{commit}}"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, timeout=GIT_TIMEOUT_S,
         ).stdout.strip()
         return cls(full, git_dir=repo_dir)
 
@@ -42,7 +55,7 @@ class RepoReader:
             return p.read_text(errors="replace")
         out = subprocess.run(
             ["git", "-C", str(self.git_dir), "show", f"{self.sha}:{path}"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=GIT_TIMEOUT_S,
         )
         return out.stdout if out.returncode == 0 else None
 
@@ -54,7 +67,7 @@ class RepoReader:
 
     def lines(self, path: str) -> list[str] | None:
         text = self.read(path)
-        return None if text is None else text.splitlines()
+        return None if text is None else split_lines(text)
 
     def line_count(self, path: str) -> int | None:
         lines = self.lines(path)
@@ -73,6 +86,6 @@ class RepoReader:
             )
         out = subprocess.run(
             ["git", "-C", str(self.git_dir), "ls-tree", "-r", "--name-only", self.sha],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, timeout=GIT_TIMEOUT_S,
         )
         return out.stdout.splitlines()

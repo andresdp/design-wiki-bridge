@@ -66,17 +66,21 @@ class JudgeStats:
 
 class ClaimsJudge:
     def __init__(self, llm: BaseChatModel, prompt_dir: Path, *, model_id: str,
-                 cache_path: Path | None = None):
+                 temperature: float = 0.0, cache_path: Path | None = None):
         claim_tpl, self.claim_hash = load_prompt(prompt_dir / "judge_claim_v1.md")
         support_tpl, self.support_hash = load_prompt(prompt_dir / "judge_support_v1.md")
         self._claim = claim_tpl | llm.with_structured_output(ClaimVerdict)
         self._support = support_tpl | llm.with_structured_output(SupportVerdict)
         self.model_id = model_id
+        self.temperature = temperature
         self.cache = JudgeCache(cache_path)
         self.stats = JudgeStats()
 
     def _key(self, kind: str, trace_key: str, text: str, prompt: str) -> str:
-        return hashlib.sha256(json.dumps([kind, trace_key, text, prompt]).encode()).hexdigest()
+        # the judge model and temperature are part of the key: changing either must not reuse
+        # verdicts from another judge (the report names the configured judge)
+        return hashlib.sha256(json.dumps(
+            [kind, self.model_id, self.temperature, trace_key, text, prompt]).encode()).hexdigest()
 
     def _call(self, kind: str, trace_key: str, judged: str, chain, inputs: dict,
               prompt: str) -> dict:
@@ -89,7 +93,8 @@ class ClaimsJudge:
             self.stats.calls += 1
             value = chain.invoke(inputs).model_dump()
             self.cache.put(key, value)
-        self.stats.log.append({"kind": kind, "trace": trace_key, "judged": judged, **value,
+        self.stats.log.append({"kind": kind, "model": self.model_id, "trace": trace_key,
+                               "judged": judged, **value,
                                "cached": hit is not None})
         return value
 

@@ -77,3 +77,34 @@ def test_chunk_toy_repo_items_have_valid_locators():
                                                                     "toysha")
     assert run[0].text.lstrip().startswith("def run")
     assert any(i.locator.path == "README.md" for i in items)
+
+
+def test_class_body_after_the_first_method_is_indexed():
+    src = '''class Session:
+    """doc"""
+
+    def first(self):
+        return 1
+
+    new = False
+    modified = False
+
+    def second(self):
+        return 2
+
+    accessed = False
+'''
+    spans = python_spans("s.py", src, CFG)
+    got = [(s.kind, s.start, s.end) for s in spans]
+    assert ("class", 1, 3) in got
+    assert ("class_body", 6, 9) in got  # between the methods
+    assert ("class_body", 12, 13) in got  # after the last method
+    covered = {i for s in spans for i in range(s.start, s.end + 1)}
+    for line_no, line in enumerate(src.splitlines(), start=1):
+        if line.strip():
+            assert line_no in covered, line
+
+
+def test_class_without_trailing_body_has_no_empty_spans():
+    spans = python_spans("x.py", SRC, CFG)
+    assert not [s for s in spans if s.kind == "class_body"]

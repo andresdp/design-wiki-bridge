@@ -88,3 +88,88 @@ def test_abstention_reported_separately(record):
     assert row["coverage"] is None and row["citation_support"] is None  # nothing to judge
     normal = question_row(record, make_trace(), make_judge(), MatchRules())
     assert normal["abstained"] == 0.0 and normal["context_items"] == 1.0
+
+
+def test_failed_trace_scores_zero_correctness_and_no_cost(record):
+    j = make_judge()
+    failed = make_trace("B", claims=[], errors=["OpenWikiError: server died"])
+    row = question_row(record, failed, j, MatchRules())
+    assert row["failed"] == 1.0 and row["correctness"] == 0.0
+    assert row["latency_ms"] is None and row["total_tokens"] is None
+    assert j.stats.calls == 0  # no answer: every required claim is "missing" without a call
+
+
+def test_failed_question_does_not_drop_out_of_the_paired_means(record):
+    j = make_judge()
+    q2 = record.model_copy(update={"id": "q2"})
+    a = [question_row(record, make_trace("A"), j, MatchRules()),
+         question_row(q2, make_trace("A", qid="q2"), j, MatchRules())]
+    b = [question_row(record, make_trace("B"), j, MatchRules()),
+         question_row(q2, make_trace("B", qid="q2", claims=[], errors=["boom"]), j,
+                      MatchRules())]
+    s = {(r["subset"], r["metric"]): r for r in paired_summary(pair(a, b)[0])}
+    corr = s[("all", "correctness")]
+    assert corr["n_paired"] == 2 and corr["regressed"] == 1  # the failure counts against B
+    assert corr["mean_B"] < corr["mean_A"]
+    fail = s[("all", "failed")]
+    assert fail["mean_A"] == 0 and fail["mean_B"] == 0.5 and fail["regressed"] == 1
+    # cost: the failed question is excluded from both sides, not counted as free
+    lat = s[("all", "latency_ms")]
+    assert lat["n_paired"] == 1 and lat["n_excluded"] == 1
+    assert lat["mean_A"] == lat["mean_B"]
+
+
+def test_degraded_metric(record):
+    t = make_trace("B").model_copy(update={"warnings": ["rerank: ValueError: x"]})
+    row = question_row(record, t, make_judge(), MatchRules())
+    assert row["degraded"] == 1.0 and "rerank" in row["warnings"] and row["failed"] == 0.0
+
+
+def _two_runs(tmp_path, record, conds=("A", "B"), mutate=None):
+    save_records([record], tmp_path / "data" / "dev.jsonl")
+    dirs = []
+    for i, cond in enumerate(conds):
+        m = load_manifest(ROOT / "configs" / "manifests" / f"flask-{cond}.yaml")
+        m = m.model_copy(update={"question_set": m.question_set.model_copy(
+            update={"path": "data/dev.jsonl"}), "run_id": f"r{i}-{cond}"})
+        if mutate and i == 1:
+            m = mutate(m)
+        rd = RunDir.start(m, tmp_path / "runs")
+        with rd.writer() as w:
+            w.append(make_trace(cond).model_copy(update={"run_id": m.run_id}))
+        dirs.append(rd.root)
+    cfg = tmp_path / "eval.yaml"
+    cfg.write_text(yaml.safe_dump({"judge": {"model": "fake"}}))
+    return dirs, cfg
+
+
+def test_evaluate_rejects_swapped_runs(tmp_path, record):
+    import pytest
+
+    from dwb.eval.command import UnpairedRunsError
+
+    (a, b), cfg = _two_runs(tmp_path, record)
+    with pytest.raises(UnpairedRunsError, match="condition A then B"):
+        evaluate_runs(b, a, tmp_path / "out", config_path=cfg, base_dir=tmp_path,
+                      use_judge=False)
+
+
+def test_evaluate_rejects_unpaired_settings_unless_allowed(tmp_path, record):
+    import json
+
+    import pytest
+
+    from dwb.eval.command import UnpairedRunsError
+
+    def other_generator(m):
+        return m.model_copy(update={"models": m.models.model_copy(update={"generator": "x"})})
+
+    (a, b), cfg = _two_runs(tmp_path, record, mutate=other_generator)
+    with pytest.raises(UnpairedRunsError, match="models"):
+        evaluate_runs(a, b, tmp_path / "out", config_path=cfg, base_dir=tmp_path,
+                      use_judge=False)
+    evaluate_runs(a, b, tmp_path / "out", config_path=cfg, base_dir=tmp_path, use_judge=False,
+                  allow_unpaired=True)
+    cfg_out = json.loads((tmp_path / "out" / "evaluator_config.json").read_text())
+    assert cfg_out["paired_check"]["allowed_unpaired"] is True
+    assert any("models" in f for f in cfg_out["paired_check"]["failures"])

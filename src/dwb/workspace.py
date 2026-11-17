@@ -49,13 +49,19 @@ class Workspace:
     _chat: dict[str, Any] = field(default_factory=dict, repr=False)
     restores_wiki = True  # research mode copies the pinned snapshot into the checkout
 
-    def _p(self, p: Path) -> Path:
+    def resolve(self, p: Path) -> Path:
+        """A workspace-relative path made absolute against ``root``."""
         return p if p.is_absolute() else self.root / p
+
+    @property
+    def history_path(self) -> Path:
+        """Where the chat REPL keeps its input history."""
+        return self.resolve(Path("artifacts/chat_history"))
 
     # -- configuration --------------------------------------------------------------
 
     def repos(self) -> dict[str, RepoInfo]:
-        path = self._p(self.repos_yaml)
+        path = self.resolve(self.repos_yaml)
         if not path.exists():
             raise WorkspaceError(
                 f"{path} not found. Run dwb from the design-wiki-bridge folder, or create it "
@@ -64,7 +70,7 @@ class Workspace:
         cfg = yaml.safe_load(path.read_text()).get("repos", {})
         return {
             name: RepoInfo(name=name, url=r["url"], sha=r["sha"],
-                           checkout=self._p(Path(r["checkout"])), tag=r.get("tag"),
+                           checkout=self.resolve(Path(r["checkout"])), tag=r.get("tag"),
                            role=r.get("role"))
             for name, r in cfg.items()
         }
@@ -78,7 +84,7 @@ class Workspace:
 
     def chat_config(self) -> dict[str, Any]:
         if not self._chat:
-            path = self._p(self.chat_yaml)
+            path = self.resolve(self.chat_yaml)
             self._chat = yaml.safe_load(path.read_text()) if path.exists() else {}
         return self._chat
 
@@ -88,7 +94,7 @@ class Workspace:
     # -- artifact discovery ---------------------------------------------------------
 
     def _indexes(self, kind: str) -> list[dict[str, Any]]:
-        root = self._p(self.index_root)
+        root = self.resolve(self.index_root)
         out = []
         for p in sorted(root.glob("*/index.json")) if root.exists() else []:
             info = json.loads(p.read_text())
@@ -109,7 +115,7 @@ class Workspace:
         return max(hits, key=lambda i: i.get("created_at", ""))["index_id"] if hits else None
 
     def find_wiki_snapshot(self, repo: str, sha: str) -> dict[str, Any] | None:
-        root = self._p(self.wiki_root)
+        root = self.resolve(self.wiki_root)
         snaps = []
         for p in sorted(root.glob("*/snapshot.json")) if root.exists() else []:
             s = json.loads(p.read_text())
@@ -119,9 +125,9 @@ class Workspace:
 
     def pdf_corpus_id(self, repo: str) -> str | None:
         corpus = self.repo_chat_config(repo).get("pdf_corpus")
-        if not corpus or not self._p(Path(corpus)).exists():
+        if not corpus or not self.resolve(Path(corpus)).exists():
             return None
-        return yaml.safe_load(self._p(Path(corpus)).read_text()).get("corpus_id")
+        return yaml.safe_load(self.resolve(Path(corpus)).read_text()).get("corpus_id")
 
     def status(self, embedding_model: str) -> list[dict[str, Any]]:
         rows = []

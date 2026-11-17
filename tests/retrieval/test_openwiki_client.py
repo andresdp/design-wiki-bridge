@@ -119,3 +119,22 @@ def test_live_search_and_read_flask():
     wiki, refs, secs = asyncio.run(go())
     assert refs and secs and wiki.startup_stage.latency_ms > 0
     assert os.environ.get("OPENWIKI_TELEMETRY_DISABLED", "1")
+
+
+def test_hung_tool_call_times_out():
+    class Hung:
+        async def call_tool(self, tool, args):
+            await asyncio.sleep(10)
+
+    c = OpenWikiClient(Path("."), command="/bin/true", call_timeout_s=0.05)
+    c._session = Hung()
+    with pytest.raises(OpenWikiError, match="did not answer within"):
+        asyncio.run(c.search("q", 3))
+
+
+def test_server_log_removed_after_a_clean_session():
+    c = OpenWikiClient(Path("."), command="/bin/true")
+    log = c._errlog
+    assert log.exists()
+    asyncio.run(c.__aexit__(None, None, None))
+    assert not log.exists()

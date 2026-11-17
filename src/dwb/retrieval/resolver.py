@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from dwb.evidence import EvidenceItem, code_item
 from dwb.repo import RepoReader
 from dwb.retrieval.chunking import Span, split_span
+from dwb.retrieval.openwiki_client import WIKI_DIR
 from dwb.retrieval.wiki_types import ResolveResult, Section, UnresolvedRef
 
 REPO_RES = re.compile(r"^repo://([^#]+)(?:#L(\d+)-L(\d+))?$")  # whole-file form seen in 0.9.0
@@ -128,6 +129,11 @@ class WikiResolver:
 
     def _span(self, path: str, a: int, b: int, method: str, sec: Section, order: int,
               unresolved: list[UnresolvedRef], raw: str, **prov) -> list[EvidenceItem]:
+        if path == WIKI_DIR or path.startswith(f"{WIKI_DIR}/"):
+            # a committed wiki is in the git tree, but wiki text is never citable evidence
+            unresolved.append(UnresolvedRef(section=sec.ref.ref, raw=raw,
+                                            reason="points into the wiki itself"))
+            return []
         lines = self.reader.lines(path)
         if lines is None:
             unresolved.append(UnresolvedRef(section=sec.ref.ref, raw=raw,
@@ -269,4 +275,9 @@ class WikiResolver:
             seen.add(it.id)
             result.items.append(it)
         result.items = result.items[:max_spans]
+        # the resolver's order is the branch ranking the reranker pool uses; spans from one
+        # section would otherwise tie on the section rank and fall back to path order
+        for pos, it in enumerate(result.items, start=1):
+            it.provenance["section_rank"] = it.provenance["rank"]
+            it.provenance["rank"] = pos
         return result

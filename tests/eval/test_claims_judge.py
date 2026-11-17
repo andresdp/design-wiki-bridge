@@ -63,3 +63,21 @@ def test_gap_claims_are_not_judged_or_counted_in_coverage():
     sup = j.support(t)
     assert sup["coverage"] == 1.0 and sup["n_gap"] == 1 and sup["n_claims"] == 1
     assert j.stats.calls == 1
+
+
+def test_cache_is_keyed_by_judge_model(tmp_path, record):
+    j1 = make_judge(tmp_path)
+    j1.correctness(record, make_trace())
+    assert j1.stats.calls > 0
+    same = make_judge(tmp_path)
+    same.correctness(record, make_trace())
+    assert same.stats.calls == 0 and same.stats.cache_hits > 0
+    other = ClaimsJudge(FakeStructuredChat(judge_fn), PROMPTS, model_id="another-judge",
+                        cache_path=tmp_path / "cache.jsonl")
+    other.correctness(record, make_trace())
+    assert other.stats.cache_hits == 0 and other.stats.calls == j1.stats.calls
+    hotter = ClaimsJudge(FakeStructuredChat(judge_fn), PROMPTS, model_id="fake-judge",
+                         temperature=0.7, cache_path=tmp_path / "cache.jsonl")
+    hotter.correctness(record, make_trace())
+    assert hotter.stats.cache_hits == 0
+    assert j1.stats.log[0]["model"] == "fake-judge"

@@ -15,7 +15,7 @@ import logging
 from dataclasses import asdict, dataclass
 
 from dwb.evidence import EvidenceItem, code_item
-from dwb.repo import RepoReader
+from dwb.repo import RepoReader, split_lines
 from dwb.tokens import count_tokens, split_lines_by_tokens
 
 LOG = logging.getLogger(__name__)
@@ -26,6 +26,10 @@ DEFAULT_EXTENSIONS = (".py", ".pyi", ".rst", ".md", ".txt", ".toml", ".cfg", ".i
 
 @dataclass(frozen=True)
 class ChunkingConfig:
+    # bump when chunking output changes for the same settings, so a rebuilt index gets a new
+    # ID instead of reusing the old one. 2: class bodies after the first method; lines split
+    # on \n only (the review fixes of 2026-11-17)
+    chunker_version: int = 2
     window: int = 60
     overlap: int = 10
     max_span_tokens: int = 1500
@@ -65,7 +69,7 @@ def _def_start(node: ast.AST) -> int:
 
 
 def python_spans(path: str, source: str, cfg: ChunkingConfig) -> list[Span]:
-    lines = source.splitlines()
+    lines = split_lines(source)
     n = len(lines)
     if n == 0:
         return []
@@ -92,6 +96,16 @@ def python_spans(path: str, source: str, cfg: ChunkingConfig) -> list[Span]:
                 spans.append(
                     Span(path, _def_start(m), m.end_lineno, "method", f"{node.name}.{m.name}")
                 )
+            # class-body statements after the first method (attributes, nested classes,
+            # assignments between methods) get their own spans instead of being dropped
+            cursor = header_end + 1
+            for m in methods:
+                ms = _def_start(m)
+                if ms > cursor and any(lines[i - 1].strip() for i in range(cursor, ms)):
+                    spans.append(Span(path, cursor, ms - 1, "class_body", node.name))
+                cursor = max(cursor, m.end_lineno + 1)
+            if cursor <= e and any(lines[i - 1].strip() for i in range(cursor, e + 1)):
+                spans.append(Span(path, cursor, e, "class_body", node.name))
             covered.append((s, e))
 
     # module-level code outside definitions
@@ -125,9 +139,9 @@ def file_spans(path: str, text: str, cfg: ChunkingConfig) -> list[Span]:
     if path.endswith((".py", ".pyi")):
         spans = python_spans(path, text, cfg)
     else:
-        n = len(text.splitlines())
+        n = len(split_lines(text))
         spans = windows(path, 1, n, cfg.window, cfg.overlap) if n else []
-    lines = text.splitlines()
+    lines = split_lines(text)
     out: list[Span] = []
     for sp in spans:
         out.extend(split_span(sp, lines, cfg.max_span_tokens))
@@ -142,7 +156,7 @@ def chunk_repo(reader: RepoReader, cfg: ChunkingConfig) -> list[EvidenceItem]:
         text = reader.read(path)
         if text is None:
             continue
-        lines = text.splitlines()
+        lines = split_lines(text)
         for sp in file_spans(path, text, cfg):
             item = code_item(
                 reader.sha, path, sp.start, sp.end, "\n".join(lines[sp.start - 1 : sp.end]),

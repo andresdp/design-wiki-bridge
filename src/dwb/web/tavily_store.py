@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
+from urllib.parse import urlsplit
 
 from dwb.evidence import EvidenceItem, WebLocator
 from dwb.log import get_logger
@@ -64,6 +66,12 @@ def normalize_extract(urls: list[str], *, extract_depth: str = "basic") -> dict[
     return {"op": "extract", "urls": sorted(set(urls)), "extract_depth": extract_depth}
 
 
+def is_excluded(url: str, domains: list[str]) -> bool:
+    """True when the URL's host is one of ``domains`` or a subdomain of one."""
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    return any(host == d or host.endswith("." + d) for d in (x.lower().strip(".") for x in domains))
+
+
 def request_key(request: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
 
@@ -92,7 +100,11 @@ class TavilyStore:
         path = self._path(key)
         t0 = time.perf_counter()
         if self.mode in ("replay", "record") and path.exists():
-            rec = json.loads(path.read_text())
+            try:
+                rec = json.loads(path.read_text())
+            except json.JSONDecodeError as e:
+                raise ValueError(f"corrupt Tavily record {path} ({e}); delete it and rerun "
+                                 "with --web-mode record") from None
             self.last_call = {"key": key, "source": "store", "latency_ms": 0.0}
             LOG.info("    web: replayed %s (captured %s)", key[:12], rec["captured_at"][:10])
             return rec
@@ -121,12 +133,23 @@ class TavilyStore:
         }
         if self.mode == "record":
             self.dir.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(rec, indent=2, sort_keys=True))
+            tmp = path.with_name(path.name + ".tmp")  # a torn write must never be replayed
+            tmp.write_text(json.dumps(rec, indent=2, sort_keys=True))
+            os.replace(tmp, path)
         self.last_call = {"key": key, "source": "live", "latency_ms": latency}
         return rec
 
     def search(self, query: str, **kwargs: Any) -> list[EvidenceItem]:
-        rec = self._fetch(normalize_search(query, **kwargs))
+        request = normalize_search(query, **kwargs)
+        rec = self._fetch(request)
+        excluded = request["exclude_domains"]
+        results = rec["response"].get("results", [])
+        # Tavily applies exclude_domains on its side; filter again here so a subdomain or a
+        # result the service let through can never cite the project's own sites (spike §8)
+        dropped = [r["url"] for r in results if is_excluded(r.get("url", ""), excluded)]
+        if dropped:
+            LOG.info("    web: dropped %d result(s) on excluded domains", len(dropped))
+        self.last_call = {**self.last_call, "excluded_urls": dropped}
         return [
             EvidenceItem(
                 source_type="web",
@@ -136,8 +159,8 @@ class TavilyStore:
                             "title": r.get("title"), "captured_at": rec["captured_at"],
                             "request_key": rec["key"]},
             )
-            for i, r in enumerate(rec["response"].get("results", []))
-            if r.get("content")
+            for i, r in enumerate(results)  # i is the capture position: IDs stay stable
+            if r.get("content") and r["url"] not in dropped
         ]
 
     def extract(self, urls: list[str], **kwargs: Any) -> list[EvidenceItem]:
