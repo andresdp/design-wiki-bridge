@@ -11,7 +11,7 @@ question_set:
   hash: null
 indexes:
   code_index_id: code-flask-4389daaac0e9   # text-embedding-3-large, 1358 chunks
-  pdf_index_id: pending-index-pdf
+  pdf_index_id: pdf-flask-v1-55138d10d333   # rfc9110 + rfc3875, 226 pages
 pdf_enabled: true
 models:
   generator: gpt-5.5        # KTD10: pin the exact model ID before the pilot

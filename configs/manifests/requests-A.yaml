@@ -11,7 +11,7 @@ question_set:
   hash: null
 indexes:
   code_index_id: code-requests-5e1db418bd6c   # text-embedding-3-large, 872 chunks
-  pdf_index_id: pending-index-pdf
+  pdf_index_id: pdf-requests-v1-2fbd3b7d3bdb   # rfc9110 + rfc9112, 240 pages
 pdf_enabled: true
 models:
   generator: gpt-5.5        # KTD10: pin the exact model ID before the pilot
