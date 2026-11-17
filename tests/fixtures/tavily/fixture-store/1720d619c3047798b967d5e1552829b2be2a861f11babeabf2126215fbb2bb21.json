@@ -1,0 +1,30 @@
+{
+  "capture_id": "cap_1720d619c304_2026-11-17",
+  "captured_at": "2026-11-17T12:53:25.690373+00:00",
+  "key": "1720d619c3047798b967d5e1552829b2be2a861f11babeabf2126215fbb2bb21",
+  "request": {
+    "exclude_domains": [],
+    "include_domains": [],
+    "max_results": 3,
+    "op": "search",
+    "query": "flask redirect status code http semantics",
+    "search_depth": "basic"
+  },
+  "response": {
+    "query": "flask redirect status code http semantics",
+    "results": [
+      {
+        "content": "The 3xx (Redirection) class of status code indicates that further action needs to be taken by the user agent in order to fulfill the request.",
+        "score": 0.82,
+        "title": "RFC 9110 15.4 Redirection 3xx",
+        "url": "https://www.rfc-editor.org/rfc/rfc9110#section-15.4"
+      },
+      {
+        "content": "Create a redirect response object. code: The status code for the redirect. Defaults to 302.",
+        "score": 0.77,
+        "title": "flask.redirect",
+        "url": "https://flask.palletsprojects.com/en/stable/api/#flask.redirect"
+      }
+    ]
+  }
+}
