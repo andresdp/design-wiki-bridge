@@ -52,7 +52,18 @@ Facts from the 0.9.0 package (README and `dist/`):
 - **Section→claims link (KTD4):** use `openwiki_read(..., includeProvenance=true)`. That's the supported path. It returns the Claim evidence for the **page** in the same call, so U8 doesn't have to parse `.claims/` itself. Still open: are Claims tagged per *section*, or only per page? If only per page, U8 attributes a page's claims to every section read from that page. This gets confirmed from the captured fixtures.
 - **Pinning:** `OPENWIKI_PROVIDER`, `OPENWIKI_MODEL_ID`, and `OPENWIKI_TELEMETRY_DISABLED=1` all exist. `openwiki code --init` writes `openwiki/`, maintains `AGENTS.md` (and refreshes `CLAUDE.md` if there is one), and may add CI files to the checkout. The resolver must therefore validate spans against `git show <sha>:<path>`, not against working-tree files.
 
-KTD4 claims-first path: **plausible, not yet verified.** The Goal Capsule stop condition (claims missing or not in `repo://path#Lx-Ly` form) is **not triggered** by the documentation. It gets confirmed or triggered by the fixture capture below.
+Result shapes, from the 0.9.0 source (`dist/retrieval/wiki.js`, `dist/integrations/mcp/server.js`). The MCP server returns `structuredContent` = the result object, with a JSON copy in `content[0].text`:
+
+- search → `{"results": [{"kind": "section", "ref": ["<page>#<anchor>"], "content": "<title>\nSection: <heading>\n<description>\n<excerpt>"}]}`. The array order is the rank. **There is no numeric score.** Ranking goes path-hint matches, then query-term coverage, then FTS score, then row order. An empty `results` list is valid.
+- read → `{"page": "<page>", "sections": [{"section": "<anchor>", "content": "<raw markdown>"}], "provenance"?: {"sources": [...], "claims": [{"id", "evidence": [{"resource": "repo://path#Lx-Ly", "version"}]}]}}`.
+- Claim sidecar type (`dist/claims/core/types.d.ts`): `Claim = {id, statement, evidence[]}`, stored per page as `PageClaims = {schemaVersion, pageVersion, claims[], verification?}`. Evidence resources must be line ranges (`#L10-L24`). Whole-file resources are rejected.
+
+**Section→claims finding: claims are page-level.** Neither the sidecar nor `openwiki_read` provenance records which section a claim belongs to, so "the section's claims" can't be read directly as KTD4 assumes. Options for the KTD4 revision (user decision before U8):
+  (a) attribute all of a page's claims to every section read from it (simple, but coarse: it can pull spans that have nothing to do with the section);
+  (b) read `statement` from the `.claims/` sidecar and keep a page's claims whose statement overlaps the section text (deterministic token overlap), falling back to (a) when none match;
+  (c) claims only for pages whose single read section is the whole page, otherwise the AST fallback only.
+
+KTD4 claims-first path: **feasible, but the section link has to be revised** (see the options above). It isn't verified on real output yet. The Goal Capsule stop condition (claims missing or not in `repo://path#Lx-Ly` form) is **not triggered** by the documentation. It gets confirmed or triggered by the fixture capture below.
 
 ## 5. Remaining steps (user runs OpenWiki; then fixtures are captured)
 
