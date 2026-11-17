@@ -10,7 +10,7 @@ question_set:
   path: data/questions/dev/flask.jsonl
   hash: null
 indexes:
-  code_index_id: pending-index-code   # set from 'dwb index-code' output
+  code_index_id: code-flask-4389daaac0e9   # text-embedding-3-large, 1358 chunks
   pdf_index_id: pending-index-pdf
 pdf_enabled: true
 models:

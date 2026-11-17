@@ -10,7 +10,7 @@ question_set:
   path: data/questions/dev/requests.jsonl
   hash: null
 indexes:
-  code_index_id: pending-index-code   # set from 'dwb index-code' output
+  code_index_id: code-requests-5e1db418bd6c   # text-embedding-3-large, 872 chunks
   pdf_index_id: pending-index-pdf
 pdf_enabled: true
 models:
