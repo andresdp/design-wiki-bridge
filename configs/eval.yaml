@@ -1,6 +1,6 @@
 # Offline evaluation config (U12). The judge is pinned separately from the generator (KTD10, KTD16).
 judge:
-  model: gpt-5.5-mini        # pin the exact judge model ID before the pilot; must differ from the generator
+  model: gpt-5.5-2026-04-23  # dated snapshot; differs from the generator (gpt-5.6-luna)
   temperature: 0.0
   prompts_dir: prompts       # judge_claim_v1.md, judge_support_v1.md
   cache: artifacts/judge_cache.jsonl
@@ -10,4 +10,4 @@ matching:                    # KTD15
   web_passage_overlap: 0.5
 deepeval:
   enabled: false             # diagnostics only: contextual recall, faithfulness
-  model: gpt-5.5-mini
+  model: gpt-5.5-2026-04-23
