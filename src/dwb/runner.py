@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,33 @@ async def run_questions(
     graph = build_graph(components, m)
     n_failed = n_empty = n_web = n_unresolved = 0
     t_run = time.perf_counter()
+    run_stages = list(run_stages or [])
+    async with AsyncExitStack() as stack:
+        wiki = components.wiki
+        if wiki is not None and hasattr(type(wiki), "__aenter__"):
+            await stack.enter_async_context(wiki)  # one MCP session for the whole run
+            if getattr(wiki, "startup_stage", None) is not None:
+                run_stages.append(wiki.startup_stage)
+        counts = await _run_all(graph, m, questions, run_dir, on_trace)
+    n_failed, n_empty, n_web, n_unresolved = counts
+    summary = {
+        "run_id": m.run_id,
+        "condition": m.condition,
+        "questions": len(questions),
+        "failed": n_failed,
+        "empty_context": n_empty,
+        "web_triggered": n_web,
+        "unresolved_citation_ids": n_unresolved,
+        "elapsed_s": round(time.perf_counter() - t_run, 3),
+        "run_stages": [s.model_dump() for s in run_stages],
+    }
+    run_dir.write_summary(summary)
+    return summary
+
+
+async def _run_all(graph, m: RunManifest, questions: list[QuestionRecord], run_dir: RunDir,
+                   on_trace: Callable[[TraceRecord], None] | None) -> tuple[int, int, int, int]:
+    n_failed = n_empty = n_web = n_unresolved = 0
     with run_dir.writer() as w:
         for q in questions:
             try:
@@ -64,19 +92,7 @@ async def run_questions(
             w.append(rec)
             if on_trace:
                 on_trace(rec)
-    summary = {
-        "run_id": m.run_id,
-        "condition": m.condition,
-        "questions": len(questions),
-        "failed": n_failed,
-        "empty_context": n_empty,
-        "web_triggered": n_web,
-        "unresolved_citation_ids": n_unresolved,
-        "elapsed_s": round(time.perf_counter() - t_run, 3),
-        "run_stages": [s.model_dump() for s in run_stages or []],
-    }
-    run_dir.write_summary(summary)
-    return summary
+    return n_failed, n_empty, n_web, n_unresolved
 
 
 def build_components(
@@ -85,6 +101,8 @@ def build_components(
     base_dir: Path,
     index_root: Path,
     tavily_root: Path,
+    wiki_root: Path = Path("artifacts/wikis"),
+    openwiki_bin: str | None = None,
 ) -> Components:
     """Real components for a manifest: Chroma retrievers, Tavily store, OpenAI models."""
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -113,10 +131,17 @@ def build_components(
         c.code_retriever = CodeRetriever(
             VectorIndex.open(index_root, m.indexes.code_index_id, emb))
     else:
-        raise NotImplementedError(
-            "condition B needs the OpenWiki client and resolver (U7, U8), which wait on the "
-            "U1 wiki generation and MCP fixtures"
-        )
+        from dwb.repo import RepoReader
+        from dwb.retrieval.openwiki_client import OpenWikiClient, restore_snapshot
+        from dwb.retrieval.resolver import WikiResolver
+
+        if not m.checkout:
+            raise ValueError("condition B needs manifest.checkout (git checkout at repo_sha)")
+        checkout = base_dir / m.checkout
+        restore_snapshot(wiki_root / m.indexes.wiki_snapshot_id, checkout)
+        c.wiki = OpenWikiClient(checkout, command=openwiki_bin)
+        c.resolver = WikiResolver(RepoReader.from_git(checkout, m.repo_sha),
+                                  max_span_tokens=m.budgets.max_span_tokens)
     return c
 
 
