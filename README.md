@@ -45,7 +45,7 @@ Put `OPENAI_API_KEY` (and `TAVILY_API_KEY` for web search) in a `.env` file in t
 
 ## Usage
 
-`dwb` works in two modes with the same commands. The full guide is **[docs/usage.md](docs/usage.md)**.
+`dwb` works in two modes with the same commands. The full guide is **[docs/usage.md](docs/usage.md)**. The architecture and design decisions are in **[docs/architecture.md](docs/architecture.md)**.
 
 **As a tool, inside any git repository:**
 
