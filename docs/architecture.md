@@ -369,5 +369,4 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 - **`gpt-5.6-luna` has no dated snapshot ID**, so the model behind the name could change during the study.
 - **A question that fails mid-graph keeps only its error,** not the stages that already ran (`ainvoke`, no streaming). Source failures no longer fail the question (see §4), so this now covers only generation-stage and replay-miss failures.
 - **Chunker version 2 (2026-11-17) changes condition A's indexes.** Class-body lines after the first method are now indexed, and lines are split on `\n` only. Indexes built before have `chunker_version` 1 and must be rebuilt; their IDs change, so the A manifests need the new IDs.
-- **Not done from the review:** a typed model for the chat defaults (`chat_config()` is still a plain dict).
 - **Parked:** an organic telemetry refactor (one callback handler per question attributed via LangGraph node metadata, separate telemetry records, pluggable sinks); see `docs/plans/2026-11-17-1830-refactor-organic-telemetry-plan.md` on `main`. Also deferred: a cross-encoder reranker backend, a matched-budget control run, and PDF-text-by-reference in traces.

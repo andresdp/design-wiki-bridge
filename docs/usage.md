@@ -229,7 +229,7 @@ Research configuration:
 | File | Contents |
 |---|---|
 | `configs/repos.yaml` | Repositories: URL, pinned SHA, checkout path |
-| `configs/chat.yaml` | `ask`/`chat --repo` defaults: models, sources, per-repo PDF corpus and excluded web domains |
+| `configs/chat.yaml` | `ask`/`chat --repo` defaults: models, sources, per-repo PDF corpus and excluded web domains. Validated when loaded: a misspelled key or invalid value stops with an error that names it |
 | `configs/pdfs/*.yaml` | PDF corpora |
 | `configs/manifests/*.yaml` | Experiment run manifests (one per repository and condition) |
 | `configs/eval.yaml` | Evaluation judge model and span-matching rules |

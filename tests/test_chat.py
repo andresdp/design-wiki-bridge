@@ -177,3 +177,11 @@ def test_failed_source_switch_keeps_the_old_session(ws):
 
     t = asyncio.run(go())
     assert not t.errors and t.claims
+
+
+def test_reranker_defaults_to_the_generator(ws):
+    (ws.root / "configs" / "chat.yaml").write_text(yaml.safe_dump({
+        "models": {"generator": "gen-x", "embedding": "emb-x"}, "sources": {"pdf": False}}))
+    m, _ = build_manifest(Workspace(root=ws.root), ChatSettings(repo="toy",
+                                                                 sources=Sources(pdf=False)))
+    assert m.models.reranker == "gen-x" and m.web.exclude_domains == []

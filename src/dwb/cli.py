@@ -96,7 +96,7 @@ def _fail(msg: str, code: int = 2) -> typer.Exit:
 
 
 def _default_embedding() -> str:
-    return (WS.chat_config().get("models") or {}).get("embedding", "text-embedding-3-large")
+    return WS.chat_config().models.embedding or "text-embedding-3-large"
 
 
 def _embedding(model: str, fake: bool):
@@ -135,10 +135,9 @@ def _settings(ws: Workspace, repo: str, wiki: bool | None, pdf: bool | None, web
               model: str | None):
     from dwb.chat import ChatSettings, Sources
 
-    d = ws.chat_config().get("sources") or {}
-    sources = Sources(wiki=d.get("wiki", False) if wiki is None else wiki,
-                      pdf=d.get("pdf", True) if pdf is None else pdf,
-                      web=d.get("web", False) if web is None else web)
+    d = ws.chat_config().sources
+    sources = Sources(wiki=d.wiki if wiki is None else wiki, pdf=d.pdf if pdf is None else pdf,
+                      web=d.web if web is None else web)
     return ChatSettings(repo=repo, sources=sources, generator=model)
 
 

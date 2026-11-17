@@ -1,8 +1,11 @@
 """Research-mode artifact discovery picks the newest matching index or snapshot."""
 
 import json
+from pathlib import Path
 
 from dwb.workspace import Workspace
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
 def _index(root, idx, kind, created, **parts):
@@ -38,3 +41,27 @@ def test_newest_wiki_snapshot_for_the_sha(tmp_path):
     assert ws.find_wiki_snapshot("r", "s")["snapshot_id"] == "w2"
     assert ws.find_wiki_snapshot("r", "nope") is None
     assert ws.history_path == tmp_path / "artifacts/chat_history"
+
+
+def test_chat_defaults_load_the_shipped_config():
+    from dwb.workspace import ChatDefaults
+
+    d = ChatDefaults.load(ROOT_DIR / "configs" / "chat.yaml")
+    assert d.models.embedding and d.sources.pdf and not d.sources.wiki
+    assert d.repo("flask").pdf_corpus == "configs/pdfs/flask.yaml"
+    assert "github.com" in d.repo("flask").web_exclude_domains
+    assert d.repo("unknown").web_exclude_domains == [] and d.budgets.context_tokens == 8000
+
+
+def test_chat_defaults_missing_file_and_bad_keys(tmp_path):
+    import pytest
+
+    from dwb.workspace import ChatDefaults, WorkspaceError
+
+    assert ChatDefaults.load(tmp_path / "none.yaml") == ChatDefaults()
+    bad = tmp_path / "chat.yaml"
+    bad.write_text("sources:\n  pdfs: true\nweb:\n  search_depth: deep\n")
+    with pytest.raises(WorkspaceError) as e:
+        ChatDefaults.load(bad)
+    assert "sources.pdfs" in str(e.value) and "web.search_depth" in str(e.value)
+

@@ -27,7 +27,7 @@ from dwb.log import get_logger
 from dwb.prompts import GENERATE_PROMPT
 from dwb.repo import GIT_TIMEOUT_S
 from dwb.retrieval.openwiki_client import openwiki_version  # noqa: F401  (re-exported)
-from dwb.workspace import RepoInfo, Workspace, WorkspaceError
+from dwb.workspace import ChatDefaults, RepoInfo, Workspace, WorkspaceError
 
 LOG = get_logger("project")
 
@@ -298,19 +298,19 @@ class ProjectWorkspace(Workspace):
     def repo(self, name: str | None = None) -> RepoInfo:
         return self.repos()[self.config.name]
 
-    def chat_config(self) -> dict[str, Any]:
+    def chat_config(self) -> ChatDefaults:
         c = self.config
-        return {
-            "models": {"generator": c.models.chat, "reranker": c.models.chat,
-                       "embedding": c.models.embedding, "temperature": c.models.temperature},
-            "sources": c.sources.model_dump(),
-            "web": {"max_results": c.web.max_results, "search_depth": c.web.search_depth},
-            "prompt": str(GENERATE_PROMPT),
+        return ChatDefaults(
+            models={"generator": c.models.chat, "reranker": c.models.chat,
+                    "embedding": c.models.embedding, "temperature": c.models.temperature},
+            sources=c.sources.model_dump(),
+            web={"max_results": c.web.max_results, "search_depth": c.web.search_depth},
+            prompt=str(GENERATE_PROMPT),
             # the span size the code index was cut with (checked when chat opens the index)
-            "budgets": {"max_span_tokens": c.code.max_span_tokens},
-            "repos": {c.name: {"pdf_corpus": str(self.dir / "pdf_corpus.yaml"),
-                               "web_exclude_domains": c.web.exclude_domains}},
-        }
+            budgets={"max_span_tokens": c.code.max_span_tokens},
+            repos={c.name: {"pdf_corpus": str(self.dir / "pdf_corpus.yaml"),
+                            "web_exclude_domains": c.web.exclude_domains}},
+        )
 
     @property
     def history_path(self) -> Path:

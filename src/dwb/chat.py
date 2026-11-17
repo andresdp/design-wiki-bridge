@@ -18,7 +18,7 @@ from typing import Any
 
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
-from dwb.manifest import Budgets, Indexes, Models, PromptRef, QuestionSetRef, RunManifest, WebConfig
+from dwb.manifest import Indexes, Models, PromptRef, QuestionSetRef, RunManifest, WebConfig
 from dwb.prompts import GENERATE_PROMPT
 from dwb.trace import TraceRecord
 from dwb.workspace import Workspace, WorkspaceError
@@ -67,13 +67,15 @@ def build_manifest(ws: Workspace, s: ChatSettings) -> tuple[RunManifest, list[st
             f"checkout for {s.repo} not found at {repo.checkout}. Clone {repo.url} and check out "
             f"{repo.sha} there (see docs/usage.md, 'Adding a repository')."
         )
-    mcfg = cfg.get("models", {})
-    gen = s.generator or mcfg.get("generator")
-    emb = s.embedding or mcfg.get("embedding")
+    gen = s.generator or cfg.models.generator
+    emb = s.embedding or cfg.models.embedding
     if not gen or not emb:
         raise WorkspaceError("set models.generator and models.embedding in configs/chat.yaml")
-    models = Models(generator=gen, reranker=mcfg.get("reranker") if not s.generator else gen,
-                    embedding=emb, temperature=mcfg.get("temperature", 0.0))
+    # --model replaces both chat models; otherwise rerank with the configured reranker
+    reranker = gen if s.generator else (cfg.models.reranker or gen)
+    models = Models(generator=gen, reranker=reranker, embedding=emb,
+                    temperature=cfg.models.temperature)
+    rcfg = cfg.repo(s.repo)
 
     indexes = Indexes()
     sources = s.sources
@@ -98,27 +100,25 @@ def build_manifest(ws: Workspace, s: ChatSettings) -> tuple[RunManifest, list[st
         corpus = ws.pdf_corpus_id(s.repo)
         pdf = ws.find_pdf_index(corpus, emb) if corpus else None
         if pdf is None:
-            corpus_path = ws.repo_chat_config(s.repo).get("pdf_corpus", "configs/pdfs/<repo>.yaml")
+            corpus_path = rcfg.pdf_corpus or "configs/pdfs/<repo>.yaml"
             notes.append(f"PDFs skipped: no PDF index for {s.repo} (build one with: dwb index pdf "
                          f"{corpus_path} --embedding-model {emb})")
             sources = replace(sources, pdf=False)
         else:
             indexes.pdf_index_id = pdf
 
-    rcfg = ws.repo_chat_config(s.repo)
-    wcfg = cfg.get("web", {})
     excl = s.web_exclude_domains if s.web_exclude_domains is not None else \
-        rcfg.get("web_exclude_domains", [])
+        rcfg.web_exclude_domains
     web = WebConfig(enabled=sources.web, mode="record", store_id=f"chat-{s.repo}",
-                    max_results=wcfg.get("max_results", 5),
-                    search_depth=wcfg.get("search_depth", "basic"), exclude_domains=excl)
+                    max_results=cfg.web.max_results, search_depth=cfg.web.search_depth,
+                    exclude_domains=list(excl))
     m = RunManifest(
         run_id=f"chat-{s.repo}", condition="B" if sources.wiki else "A", repo=s.repo,
         repo_sha=repo.sha, checkout=str(repo.checkout),
         question_set=QuestionSetRef(id="chat", path="-"), indexes=indexes,
         pdf_enabled=sources.pdf, models=models,
-        prompts={"generate": PromptRef(path=cfg.get("prompt") or str(GENERATE_PROMPT))},
-        budgets=Budgets(**(cfg.get("budgets") or {})), web=web,
+        prompts={"generate": PromptRef(path=cfg.prompt or str(GENERATE_PROMPT))},
+        budgets=cfg.budgets.model_copy(), web=web,
     )
     return m, notes
 
