@@ -1,0 +1,39 @@
+# Example run manifest, condition B (Flask). Placeholder IDs and models must be replaced
+# before the pilot; KTD14 budgets are the proposed defaults, frozen after the U11 pilot.
+run_id: flask-B-dev-001
+condition: B
+repo: flask
+repo_sha: 2c1b30d0503cfb064f1cb252e6614a06915a362a
+checkout: artifacts/checkouts/flask-3.1.2
+question_set:
+  id: flask-dev
+  path: data/questions/dev/flask.jsonl
+  hash: null
+indexes:
+  wiki_snapshot_id: pending-wiki-snapshot   # set from 'dwb wiki-snapshot' output
+  pdf_index_id: pending-index-pdf
+pdf_enabled: true
+models:
+  generator: gpt-5.5        # KTD10: pin the exact model ID before the pilot
+  reranker: gpt-5.5         # same pinned model as the generator
+  embedding: text-embedding-3-large
+  temperature: 0.0
+prompts:
+  generate:
+    path: prompts/generate_v1.md
+budgets:
+  code_top_k: 20
+  wiki_search_k: 10
+  wiki_read_sections: 5
+  wiki_max_spans: 20
+  max_span_tokens: 1500
+  pdf_top_k: 10
+  rerank_pool: 40
+  rerank_top_n: 12
+  context_tokens: 8000
+web:
+  enabled: true
+  mode: replay
+  store_id: tavily-flask-v1
+  max_results: 5
+  search_depth: basic
