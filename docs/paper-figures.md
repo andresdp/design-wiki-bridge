@@ -1,6 +1,6 @@
 # Paper figures
 
-Conceptual diagrams for the journal paper, drawn at the level of the method rather than the code. Figure 1 suits the introduction or the start of the method section, Figure 2 the method section (wiki search, section reads, span resolution, and citation assembly), and Figure 3 the benchmark and study design section. The implementation view is in `architecture.md` on the implementation branch.
+Conceptual diagrams for the journal paper, drawn at the level of the method rather than the code. Figure 1 suits the introduction or the start of the method section, Figure 2 the method section (wiki search, section reads, span resolution, and citation assembly), and Figure 3 the benchmark and study design section. The implementation view is in [`architecture.md`](architecture.md).
 
 Each figure is mermaid with a draft caption. To export a vector figure, paste the block into [mermaid.live](https://mermaid.live) and download SVG, or run `mmdc -i fig.mmd -o fig.pdf` with the mermaid CLI. The colors are placeholders. Redraw in the journal's style if needed, keeping the same elements.
 

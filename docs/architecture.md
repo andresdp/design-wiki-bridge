@@ -5,7 +5,7 @@
 - a **user tool** you run inside any git repository (`dwb init` → `dwb index` → `dwb chat`);
 - a **research harness** that compares two ways of finding repository evidence, vector search (condition A) and OpenWiki-guided search (condition B), on a frozen question set, with offline evaluation.
 
-This document describes the components, how data flows through them, and the design decisions behind them. Usage is in [`usage.md`](usage.md), the study design in [`journal-extension-plan.md`](journal-extension-plan.md), the implementation plan in [`plans/`](plans/), and the empirical findings behind several decisions in [`spikes/2026-11-openwiki-swe-qa-spike.md`](spikes/2026-11-openwiki-swe-qa-spike.md) (cited below as *spike §n*).
+This document describes the components, how data flows through them, and the design decisions behind them. Usage is in [`usage.md`](usage.md), the study design in [`journal-extension-plan.md`](journal-extension-plan.md), the implementation plan in [`plans/`](plans/), and the empirical findings behind several decisions in [`spikes/2026-11-openwiki-swe-qa-spike.md`](spikes/2026-11-openwiki-swe-qa-spike.md) (cited below as *spike §n*).  Conceptual figures for the paper are in [`paper-figures.md`](paper-figures.md).
 
 ## 1. System context
 
