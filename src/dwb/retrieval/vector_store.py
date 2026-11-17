@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,9 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
 from dwb.evidence import EvidenceItem, parse_locator
+from dwb.log import get_logger
+
+LOG = get_logger("index")
 
 BATCH = 256
 
@@ -93,15 +97,22 @@ class VectorIndex:
         existing = cls.load_info(root, index_id)
         if existing is not None:
             existing.reused = True
+            LOG.info("Index [bold]%s[/] already exists (%d items); reusing it, not rebuilding",
+                     index_id, existing.n_items)
             return cls(root, existing, embedding)
         info = IndexInfo(index_id=index_id, kind=kind, embedding_model=embedding_model,
                          n_items=len(items), parts=parts)
         idx = cls(root, info, embedding)
         docs = [_flat(i) for i in items]
+        LOG.info("Embedding %d items into [bold]%s[/] with %s", len(docs), index_id,
+                 embedding_model)
+        t0 = time.perf_counter()
         for s in range(0, len(docs), BATCH):
             batch = docs[s : s + BATCH]
             idx._store.add_documents(batch, ids=[d.id for d in batch])
+            LOG.info("  embedded %d/%d", min(s + BATCH, len(docs)), len(docs))
         (root / index_id / "index.json").write_text(json.dumps(asdict(info), indent=2))
+        LOG.info("Index [bold]%s[/] built in %.1f s", index_id, time.perf_counter() - t0)
         return idx
 
     @staticmethod

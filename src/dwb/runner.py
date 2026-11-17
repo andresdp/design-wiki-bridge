@@ -12,8 +12,11 @@ from typing import Any
 from dwb.benchmark.freeze import file_hash
 from dwb.benchmark.schemas import QuestionRecord, load_records
 from dwb.graph import Components, build_graph, trace_from_state
+from dwb.log import get_logger
 from dwb.manifest import RunManifest
 from dwb.trace import RunDir, StageRecord, TraceRecord
+
+LOG = get_logger("run")
 
 
 class QuestionSetError(ValueError):
@@ -51,12 +54,17 @@ async def run_questions(
     n_failed = n_empty = n_web = n_unresolved = 0
     t_run = time.perf_counter()
     run_stages = list(run_stages or [])
+    LOG.info("Run [bold]%s[/]: condition %s, %s @ %s, %d questions → %s", m.run_id, m.condition,
+             m.repo, m.repo_sha[:12], len(questions), run_dir.root)
     async with AsyncExitStack() as stack:
         wiki = components.wiki
         if wiki is not None and hasattr(type(wiki), "__aenter__"):
+            LOG.info("Starting the OpenWiki MCP server")
             await stack.enter_async_context(wiki)  # one MCP session for the whole run
             if getattr(wiki, "startup_stage", None) is not None:
                 run_stages.append(wiki.startup_stage)
+                LOG.info("OpenWiki MCP server ready in %.0f ms",
+                         wiki.startup_stage.latency_ms)
         counts = await _run_all(graph, m, questions, run_dir, on_trace)
     n_failed, n_empty, n_web, n_unresolved = counts
     summary = {
@@ -71,20 +79,28 @@ async def run_questions(
         "run_stages": [s.model_dump() for s in run_stages],
     }
     run_dir.write_summary(summary)
+    style = "red" if n_failed else "green"
+    LOG.info("[%s]Done[/]: %d questions, %d failed, %d empty context, %d with web, "
+             "%d unresolved citation IDs, %.1f s. Traces: %s", style, len(questions), n_failed,
+             n_empty, n_web, n_unresolved, summary["elapsed_s"], run_dir.traces_path)
     return summary
 
 
 async def _run_all(graph, m: RunManifest, questions: list[QuestionRecord], run_dir: RunDir,
                    on_trace: Callable[[TraceRecord], None] | None) -> tuple[int, int, int, int]:
     n_failed = n_empty = n_web = n_unresolved = 0
+    total = len(questions)
     with run_dir.writer() as w:
-        for q in questions:
+        for i, q in enumerate(questions, start=1):
+            LOG.info("[cyan][%d/%d][/] %s: %s", i, total, q.id, _short(q.question))
+            t0 = time.perf_counter()
             try:
                 state = await graph.ainvoke({"question": q})
                 rec = trace_from_state(state, m)
             except Exception as e:
                 rec = TraceRecord(question_id=q.id, run_id=m.run_id, condition=m.condition,
                                   errors=[f"{type(e).__name__}: {e}"])
+            _log_trace(rec, time.perf_counter() - t0)
             n_failed += bool(rec.errors)
             n_empty += rec.empty_context
             n_web += rec.web_triggered
@@ -93,6 +109,39 @@ async def _run_all(graph, m: RunManifest, questions: list[QuestionRecord], run_d
             if on_trace:
                 on_trace(rec)
     return n_failed, n_empty, n_web, n_unresolved
+
+
+def _short(text: str, n: int = 90) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def _log_trace(rec: TraceRecord, elapsed: float) -> None:
+    for s in rec.stages:
+        tokens = f"  {s.input_tokens}+{s.output_tokens} tok" if s.input_tokens or s.output_tokens \
+            else ""
+        LOG.debug("    %-17s %7.0f ms  n=%-3d%s", s.name, s.latency_ms, s.count, tokens)
+    if rec.errors:
+        LOG.warning("    [red]✗ failed[/] after %.1f s: %s", elapsed, _short(rec.errors[0], 200))
+        return
+    if rec.empty_context:
+        LOG.warning("    [yellow]∅ empty context[/] (no candidates from the enabled branches), "
+                    "%.1f s", elapsed)
+        return
+    n_unres = rec.validation.get("n_unresolved_ids", 0)
+    cited = sum(1 for c in rec.claims if c.evidence_ids)
+    extra = []
+    if rec.wiki_section_refs:
+        extra.append(f"{len(rec.wiki_section_refs)} wiki hits")
+    if rec.unresolved_refs:
+        extra.append(f"{len(rec.unresolved_refs)} unresolved refs")
+    if rec.web_triggered:
+        extra.append("web")
+    LOG.info("    [green]✓[/] %d candidates → %d in context → %d claim(s) (%d cited, %s unresolved "
+             "IDs)%s, %.1f s", sum(len(rec.candidates.get(k, [])) for k in ("repo", "pdf", "web")),
+             len(rec.final_context_ids), len(rec.claims), cited,
+             f"[red]{n_unres}[/]" if n_unres else "0",
+             f" [{', '.join(extra)}]" if extra else "", elapsed)
 
 
 def build_components(
@@ -114,6 +163,8 @@ def build_components(
     from dwb.retrieval.vector_store import VectorIndex
     from dwb.web.tavily_store import TavilyStore
 
+    LOG.info("Models: generator %s, reranker %s, embeddings %s (temperature %s)",
+             m.models.generator, m.models.reranker, m.models.embedding, m.models.temperature)
     emb = OpenAIEmbeddings(model=m.models.embedding)
     gen_llm = ChatOpenAI(model=m.models.generator, temperature=m.models.temperature)
     rr_llm = ChatOpenAI(model=m.models.reranker, temperature=m.models.temperature)
@@ -124,10 +175,13 @@ def build_components(
                             model_id=m.models.generator),
     )
     if m.pdf_enabled:
+        LOG.info("PDF index: %s", m.indexes.pdf_index_id)
         c.pdf_retriever = PdfRetriever(VectorIndex.open(index_root, m.indexes.pdf_index_id, emb))
     if m.web.enabled:
+        LOG.info("Web: Tavily store %s in [bold]%s[/] mode", m.web.store_id, m.web.mode)
         c.web_store = TavilyStore(tavily_root, m.web.store_id or "live", mode=m.web.mode)
     if m.condition == "A":
+        LOG.info("Repository branch A: code index %s", m.indexes.code_index_id)
         c.code_retriever = CodeRetriever(
             VectorIndex.open(index_root, m.indexes.code_index_id, emb))
     else:
@@ -138,6 +192,8 @@ def build_components(
         if not m.checkout:
             raise ValueError("condition B needs manifest.checkout (git checkout at repo_sha)")
         checkout = base_dir / m.checkout
+        LOG.info("Repository branch B: restoring wiki snapshot %s into %s",
+                 m.indexes.wiki_snapshot_id, checkout)
         restore_snapshot(wiki_root / m.indexes.wiki_snapshot_id, checkout)
         c.wiki = OpenWikiClient(checkout, command=openwiki_bin)
         c.resolver = WikiResolver(RepoReader.from_git(checkout, m.repo_sha),
@@ -156,6 +212,8 @@ def run_manifest(
 ) -> dict[str, Any]:
     """Check the question set before anything else, then process every question."""
     questions = load_question_set(m, base_dir)
+    LOG.info("Question set %s: %d questions (%s)", m.question_set.id, len(questions),
+             "frozen, hash verified" if m.question_set.hash else "not frozen (dev)")
     m = m.resolve_prompts(base_dir)
     run_dir = RunDir.start(m, runs_dir, overwrite=overwrite)
     return asyncio.run(run_questions(m, components, questions, run_dir, run_stages=run_stages))

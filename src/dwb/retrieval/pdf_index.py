@@ -10,7 +10,10 @@ from langchain_core.embeddings import Embeddings
 from pydantic import BaseModel, ConfigDict
 
 from dwb.evidence import EvidenceItem, PdfLocator
+from dwb.log import get_logger
 from dwb.retrieval.vector_store import VectorIndex, make_index_id
+
+LOG = get_logger("index")
 
 
 class PdfDoc(BaseModel):
@@ -71,8 +74,13 @@ def build_pdf_index(
 ) -> VectorIndex:
     index_id = pdf_index_id(corpus, base_dir, embedding_model)
     if VectorIndex.load_info(root, index_id) is not None:
+        LOG.info("Index [bold]%s[/] already exists; reusing it, not rebuilding", index_id)
         return VectorIndex.open(root, index_id, embedding)
-    items = [it for d in corpus.documents for it in pdf_pages(d, base_dir)]
+    items = []
+    for d in corpus.documents:
+        pages = pdf_pages(d, base_dir)
+        LOG.info("Read %s (%s): %d pages with text", d.doc_id, d.version, len(pages))
+        items.extend(pages)
     return VectorIndex.build(
         root, index_id=index_id, kind="pdf", items=items, embedding=embedding,
         embedding_model=embedding_model,

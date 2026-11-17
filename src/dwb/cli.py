@@ -10,6 +10,9 @@ from pathlib import Path
 
 import yaml
 
+from dwb.log import get_logger, setup_logging
+
+LOG = get_logger("cli")
 REPOS_YAML = Path("configs/repos.yaml")
 INDEX_ROOT = Path("artifacts/indexes")
 
@@ -43,6 +46,8 @@ def cmd_index_code(args: argparse.Namespace) -> int:
         rc = _repo_cfg(args.repo)
         reader = RepoReader.from_git(rc["checkout"], rc["sha"])
         repo = args.repo
+    LOG.info("Indexing code for [bold]%s[/] at %s with %s", repo, reader.sha[:12],
+             args.embedding_model)
     cfg = ChunkingConfig(max_span_tokens=args.max_span_tokens)
     idx = build_code_index(args.root, reader, repo, _embedding(args.embedding_model, args.fake),
                            args.embedding_model, cfg)
@@ -55,6 +60,8 @@ def cmd_index_pdf(args: argparse.Namespace) -> int:
 
     corpus = PdfCorpus.load(args.corpus)
     base = Path(args.base_dir) if args.base_dir else Path(args.corpus).parent
+    LOG.info("Indexing PDF corpus [bold]%s[/] (%d documents) with %s", corpus.corpus_id,
+             len(corpus.documents), args.embedding_model)
     idx = build_pdf_index(args.root, corpus, base, _embedding(args.embedding_model, args.fake),
                           args.embedding_model)
     print(json.dumps(asdict(idx.info), indent=2))
@@ -77,11 +84,15 @@ def cmd_wiki_snapshot(args: argparse.Namespace) -> int:
         exe = shutil.which("openwiki")
         pkg = Path(exe).resolve().parents[2] / "package.json" if exe else None
         version = json.loads(pkg.read_text())["version"] if pkg and pkg.exists() else "unknown"
+    LOG.info("Registering the OpenWiki tree in %s (openwiki %s, %s/%s)", rc["checkout"], version,
+             args.provider, args.model)
     snap = register_snapshot(
         rc["checkout"], args.repo, rc["sha"], args.root, provider=args.provider,
         model=args.model, version=version, effort=args.effort, elapsed_s=args.elapsed_s,
         cost_usd=args.cost_usd,
     )
+    LOG.info("Snapshot [bold]%s[/]: %d pages, %d claims", snap.snapshot_id, snap.pages,
+             snap.claims)
     print(snap.model_dump_json(indent=2))
     return 0
 
@@ -108,6 +119,11 @@ def cmd_check_paired(args: argparse.Namespace) -> int:
     from dwb.manifest import check_paired, load_manifest
 
     res = check_paired(load_manifest(args.a), load_manifest(args.b))
+    for f in res.failures:
+        LOG.error("Shared-stage difference: %s", f)
+    for n in res.notes:
+        LOG.info("Note: %s", n)
+    LOG.info("Paired check %s", "[green]passed[/]" if res.ok else "[red]failed[/]")
     print(json.dumps(res.model_dump(), indent=2))
     return 0 if res.ok else 1
 
@@ -124,6 +140,9 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dwb")
+    p.add_argument("-v", "--verbose", action="count", default=0,
+                   help="more progress detail (per-stage timings); repeatable")
+    p.add_argument("-q", "--quiet", action="store_true", help="warnings and errors only")
     sub = p.add_subparsers(dest="command", required=True)
 
     ic = sub.add_parser("index-code", help="build the condition A code index")
@@ -181,18 +200,21 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _load_dotenv() -> None:
+def _load_dotenv() -> bool:
     """Load API keys from ./.env (gitignored). Variables already set in the shell win."""
     try:
         from dotenv import load_dotenv
     except ImportError:
-        return
-    load_dotenv(Path(".env"), override=False)
+        return False
+    return load_dotenv(Path(".env"), override=False)
 
 
 def main(argv: list[str] | None = None) -> int:
-    _load_dotenv()
     args = build_parser().parse_args(argv)
+    setup_logging(-1 if args.quiet else args.verbose)
+    loaded = _load_dotenv()
+    if loaded:
+        LOG.debug("Loaded environment from .env")
     return args.func(args)
 
 

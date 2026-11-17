@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from dwb.evidence import EvidenceItem, WebLocator
+from dwb.log import get_logger
+
+LOG = get_logger("web")
 
 Mode = Literal["record", "replay", "live"]
 
@@ -91,9 +94,13 @@ class TavilyStore:
         if self.mode in ("replay", "record") and path.exists():
             rec = json.loads(path.read_text())
             self.last_call = {"key": key, "source": "store", "latency_ms": 0.0}
+            LOG.info("    web: replayed %s (captured %s)", key[:12], rec["captured_at"][:10])
             return rec
         if self.mode == "replay":
+            LOG.warning("    web: [red]replay miss[/] for %s (rerun with --web-mode record)",
+                        key[:12])
             raise ReplayMiss(key, request)
+        LOG.info("    web: live Tavily %s (%s mode)", request["op"], self.mode)
         client = self._get_client()
         params = {k: v for k, v in request.items() if k != "op"}
         if request["op"] == "search":

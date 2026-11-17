@@ -11,8 +11,11 @@ from dwb.benchmark.schemas import QuestionRecord, load_records
 from dwb.eval.claims_judge import ClaimsJudge
 from dwb.eval.matching import MatchRules
 from dwb.eval.report import question_row, write_report
+from dwb.log import get_logger
 from dwb.manifest import load_manifest
 from dwb.trace import TraceRecord, read_traces
+
+LOG = get_logger("eval")
 
 
 def _records_for(run_dir: Path, base_dir: Path) -> dict[str, QuestionRecord]:
@@ -49,15 +52,26 @@ def evaluate_runs(
     rows: dict[str, list[dict]] = {}
     traces: dict[str, list[TraceRecord]] = {}
     diagnostics: list[dict] = []
+    LOG.info("Evaluating A=%s vs B=%s (judge: %s)", run_a, run_b,
+             cfg["judge"]["model"] if judge else "off, recall and cost only")
     for label, rd in (("A", run_a), ("B", run_b)):
         records = _records_for(rd, base_dir)
         traces[label] = read_traces(rd / "traces.jsonl")
         rows[label] = []
-        for t in traces[label]:
+        LOG.info("Condition %s: %d traces", label, len(traces[label]))
+        for i, t in enumerate(traces[label], start=1):
             rec = records.get(t.question_id)
             if rec is None:
+                LOG.warning("  %s not in the question set; skipped", t.question_id)
                 continue
-            rows[label].append(question_row(rec, t, judge, rules))
+            calls0 = judge.stats.calls if judge else 0
+            row = question_row(rec, t, judge, rules)
+            rows[label].append(row)
+            LOG.info("  [%d/%d] %s: recall %s/%s, correctness %s, support %s, coverage %s%s",
+                     i, len(traces[label]), t.question_id, _fmt(row["recall_candidates"]),
+                     _fmt(row["recall_final"]), _fmt(row["correctness"]),
+                     _fmt(row["citation_support"]), _fmt(row["coverage"]),
+                     f" ({judge.stats.calls - calls0} judge calls)" if judge else "")
             if run_deepeval:
                 from dwb.eval.deepeval_diag import run_diagnostics
 
@@ -67,5 +81,14 @@ def evaluate_runs(
               "judge_prompt_hashes": ({"claim": judge.claim_hash, "support": judge.support_hash}
                                       if judge else None),
               "runs": {"A": str(run_a), "B": str(run_b)}}
-    return write_report(out, rows["A"], rows["B"], traces["A"], traces["B"], config, judge,
-                        diagnostics if run_deepeval else None)
+    result = write_report(out, rows["A"], rows["B"], traces["A"], traces["B"], config, judge,
+                          diagnostics if run_deepeval else None)
+    LOG.info("Report written to [bold]%s[/]: %d paired questions, %d judge calls, %d cache hits",
+             out, result["paired"], result["judge_calls"], result["judge_cache_hits"])
+    if result["missing_from_one_side"]:
+        LOG.warning("Not paired (missing from one run): %s", result["missing_from_one_side"])
+    return result
+
+
+def _fmt(x) -> str:
+    return "–" if x is None else f"{x:.2f}"

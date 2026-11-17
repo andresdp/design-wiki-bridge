@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-All of these run in the `taxonomy` env. The package is installed editable (`pip install --no-deps -e .`).
+All of these run in the `taxonomy` env, from the repo root (paths and `.env` are resolved relative to the current folder). The package is installed editable (`pip install --no-deps -e .`). Every `dwb` command logs progress to stderr (rich); `dwb -v ...` adds per-stage timings, and `dwb -q ...` shows warnings only. JSON results go to stdout.
 
 - Tests (offline; `live` tests are skipped): `conda run -n taxonomy pytest`
 - Live checks (need `OPENAI_API_KEY`): `conda run -n taxonomy pytest -m live`
