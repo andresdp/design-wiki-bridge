@@ -74,6 +74,9 @@ class WebConfig(_Strict):
     store_id: str | None = None
     max_results: int = 5
     search_depth: Literal["basic", "advanced"] = "basic"
+    # The project's own docs/source sites restate (unpinned) code behavior and would let
+    # either condition answer without finding the original code; see the spike doc §8.
+    exclude_domains: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _store_needed(self) -> WebConfig:

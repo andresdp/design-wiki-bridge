@@ -11,3 +11,4 @@ __pycache__/
 # Their manifests are committed elsewhere (configs/, data/).
 artifacts/
 runs/
+reports/

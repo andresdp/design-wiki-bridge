@@ -103,11 +103,27 @@ def test_public_item_never_triggers_web():
 
 def test_custom_item_allowing_web_triggers_replay():
     c = components("A", web_store=TavilyStore(FIXTURE_STORE, "fixture-store", mode="replay"))
-    m = manifest("A", max_results=3)
+    m = manifest("A", max_results=3, exclude_domains=[])  # the fixture was recorded without
     t = run(m, c, custom_q("flask redirect status code http semantics"))
     assert t.web_triggered and "web_retrieve" in names(t)
     assert t.candidates["web"]
     assert any(t.evidence[i]["source_type"] == "web" for i in t.candidates["reranked"])
+
+
+def test_manifest_exclude_domains_reach_tavily_and_the_replay_key(tmp_path):
+    from test_tavily_store import StubClient
+
+    stub = StubClient()
+    store = TavilyStore(tmp_path, "s", mode="record", client=stub)
+    m = manifest("A")
+    assert "flask.palletsprojects.com" in m.web.exclude_domains
+    run(m, components("A", web_store=store), custom_q())
+    assert stub.calls[0][2]["exclude_domains"] == sorted(m.web.exclude_domains)
+    # a replay without the exclusions does not match the recorded request
+    unfiltered = manifest("A", exclude_domains=[])
+    with pytest.raises(ReplayMiss):
+        run(unfiltered, components("A", web_store=TavilyStore(tmp_path, "s", mode="replay")),
+            custom_q())
 
 
 def test_replay_miss_raises_for_runner_to_record(tmp_path):

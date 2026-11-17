@@ -143,7 +143,7 @@ def build_graph(c: Components, m: RunManifest):
         t0 = time.perf_counter()
         items = await asyncio.to_thread(
             c.web_store.search, s["query"], max_results=m.web.max_results,
-            search_depth=m.web.search_depth,
+            search_depth=m.web.search_depth, exclude_domains=m.web.exclude_domains,
         )
         return {"web_candidates": items, "web_triggered": True,
                 "stages": [_stage("web_retrieve", t0, items, mode=m.web.mode,

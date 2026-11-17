@@ -101,3 +101,15 @@ Generated in `artifacts/checkouts/requests-v2.32.5`. `.last-update.json` records
 - **U8 coverage on the Flask snapshot (`wiki-flask-52e1119f2d9c`):** 70 of 72 sections resolve to ≥ 1 original span (median 6, max 17). Spans by method: claim_section 357, claim_page 88, inline_link 25, path 11, ast 6. Every claim resource resolves. The 12 unresolved references are all fallback-step names with no matching definition or path. In the end-to-end condition B smoke test (`tests/test_condition_b_e2e.py`), the q1 candidates include `src/flask/app.py#L879-L920`.
 
 **Decision (user, 2026-11-17): wiki generation cost is not reported in the paper.** It depends on OpenWiki rather than on the retrieval method. Snapshots keep `cost_usd: null`; elapsed time, model, and effort stay recorded.
+
+## 8. Web evidence excludes the project's own sites (user decision, 2026-11-17)
+
+**Pilot finding.** On `flask-dev-cus-002`, condition B's context had no Flask code (the wiki has no page covering `redirect`), yet the answer correctly said "302 by default". It cited a Tavily passage from `flask.palletsprojects.com/en/stable/api`, Flask's own documentation. Code-evidence recall still showed the miss, because a code requirement can only be met by a code span, but answer correctness and citation support did not.
+
+**Decision (option A).** Web search excludes the project's own documentation and source hosts, so web evidence stays external to the code under study:
+- Flask: `flask.palletsprojects.com`, `github.com`, `pypi.org`
+- Requests: `requests.readthedocs.io`, `docs.python-requests.org`, `github.com`, `pypi.org`
+
+Rationale: (1) those pages restate the code's behavior, so either condition can answer without retrieving original code, which masks the RQ2 comparison; (2) they are not pinned (`/stable/` docs and GitHub `main` can differ from the pinned SHA); (3) the in-repository sources of those docs (`docs/*.rst`) are already indexed at the pinned SHA. Dependency docs (Werkzeug, Jinja, urllib3) and third-party pages (RFCs, MDN, articles) stay allowed. `exclude_domains` filters whole domains, so excluding `github.com` also drops third-party GitHub threads; this was accepted.
+
+**Mechanics.** `web.exclude_domains` is a manifest field passed to every Tavily `search`, so it is part of the replay key and is covered by `check_paired` (A and B must match). The Flask store moved to `tavily-flask-v2`, because `v1` holds captures made before the exclusion.

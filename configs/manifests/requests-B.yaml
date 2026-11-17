@@ -37,3 +37,8 @@ web:
   store_id: tavily-requests-v1
   max_results: 5
   search_depth: basic
+  exclude_domains:           # the project's own docs and source hosts (spike doc §8)
+    - requests.readthedocs.io
+    - docs.python-requests.org
+    - github.com
+    - pypi.org
