@@ -12,7 +12,7 @@ from dwb.retrieval.wiki_types import ResolveResult, Section, SectionRef, Unresol
 from fakes import FakeStructuredChat
 
 ROOT = Path(__file__).resolve().parents[1]
-PROMPT = ROOT / "src" / "dwb" / "prompt_files" / "generate_v1.md"
+PROMPT = ROOT / "src" / "dwb" / "prompt_files" / "generate_v2.md"
 SHA = "2c1b30d0503cfb064f1cb252e6614a06915a362a"
 
 

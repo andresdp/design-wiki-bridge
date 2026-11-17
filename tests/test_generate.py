@@ -6,7 +6,7 @@ from dwb.evidence import code_item
 from dwb.generate import GeneratedAnswer, Generator, render_answer, validate_claims
 from fakes import FakeStructuredChat
 
-PROMPT = Path(__file__).resolve().parents[1] / "src" / "dwb" / "prompt_files" / "generate_v1.md"
+PROMPT = Path(__file__).resolve().parents[1] / "src" / "dwb" / "prompt_files" / "generate_v2.md"
 
 
 def ctx():
@@ -65,3 +65,21 @@ def test_prompt_receives_question_and_context():
     asyncio.run(Generator(fake, PROMPT).agenerate("Where is a?", ctx()))
     human = fake.calls[0][-1].content
     assert "Where is a?" in human and "[E1] code a.py" in human
+
+
+def test_gap_claims_are_kept_and_flag_abstention():
+    c = ctx()
+    claims, report = validate_claims(GeneratedAnswer(claims=[
+        {"text": "The evidence does not show the default.", "kind": "gap"}]), c)
+    assert claims[0].kind == "gap" and claims[0].is_gap
+    assert report["abstained"] and report["gap_claims"] == [0]
+    assert report["uncited_claims"] == []  # a gap is not an uncited factual claim
+    claims, report = validate_claims(GeneratedAnswer(claims=[
+        {"text": "a is defined", "evidence_ids": ["E1"]},
+        {"text": "B's default is not shown.", "kind": "gap"}]), c)
+    assert not report["abstained"] and report["gap_claims"] == [1]
+    assert "(not established by the evidence) B's default" in render_answer(claims)
+
+
+def test_prompt_v2_asks_for_gap_claims():
+    assert '"gap"' in PROMPT.read_text() and PROMPT.name == "generate_v2.md"

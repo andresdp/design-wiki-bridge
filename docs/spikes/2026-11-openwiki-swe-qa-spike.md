@@ -113,3 +113,28 @@ Generated in `artifacts/checkouts/requests-v2.32.5`. `.last-update.json` records
 Rationale: (1) those pages restate the code's behavior, so either condition can answer without retrieving original code, which masks the RQ2 comparison; (2) they are not pinned (`/stable/` docs and GitHub `main` can differ from the pinned SHA); (3) the in-repository sources of those docs (`docs/*.rst`) are already indexed at the pinned SHA. Dependency docs (Werkzeug, Jinja, urllib3) and third-party pages (RFCs, MDN, articles) stay allowed. `exclude_domains` filters whole domains, so excluding `github.com` also drops third-party GitHub threads; this was accepted.
 
 **Mechanics.** `web.exclude_domains` is a manifest field passed to every Tavily `search`, so it is part of the replay key and is covered by `check_paired` (A and B must match). The Flask store moved to `tavily-flask-v2`, because `v1` holds captures made before the exclusion.
+
+## 9. Dev-pilot findings and frozen pipeline decisions (user-approved, 2026-11-17)
+
+Pilot: 3 dev questions per repository, both conditions, Web excluding the project's own sites (§8). No failures and no unresolved citations; A and B saw identical Web passages.
+
+| Question | Recall (final) A → B | Correctness A → B | Context tokens A → B |
+|---|---|---|---|
+| flask cus-001 (OPTIONS) | 0.67 → 0.33 | 0.67 → 0.83 | 3.7k → 7.8k |
+| flask cus-002 (redirect default) | 1.00 → 0.50 | 0.75 → 0.25 | 4.4k → 6.8k |
+| flask pub-000 | – | 0.50 → 1.00 | 2.1k → 7.2k |
+| requests cus-001 (redirect methods) | 1.00 → 1.00 | 0.62 → 0.62 | 5.0k → 7.8k |
+| requests cus-002 (generator body) | 0.50 → 1.00 | 0.67 → 1.00 | 5.3k → 6.7k |
+| requests pub-001 (test_pragmas) | – | 1.00 → 0.00 | 1.3k → 5.7k |
+
+Findings:
+- Condition B's outcome depends on wiki coverage. Where the wiki covers the topic, its claims resolve exactly the right span (`prepare_body`). Where it doesn't (OPTIONS, `redirect`, `test_pragmas`), lexical wiki search returns sections that only share words with the question, and B declines to answer.
+- With a count-based `top_n` of 12, B's context was 1.3–4.3× larger. Wiki-resolved spans are whole claim ranges, and both conditions stayed under the 8,000-token budget.
+- Correct refusals scored like wrong answers (an uncited claim gives correctness 0 and coverage 0).
+
+Decisions (apply identically to both conditions):
+1. **The context is sized by tokens, not by count.** `rerank_top_n` = `rerank_pool` = 40, so the 8,000-token budget is the binding limit and A and B give the generator comparable amounts of text (A as more, smaller chunks; B as fewer, larger spans). The reranker already ranked the full pool, so its cost is unchanged. `context_items` is reported per question.
+2. **Abstention is explicit.** Prompt `generate_v2.md` adds a claim `kind`: `answer`, or `gap` ("the evidence does not establish …", with no citations). Gap claims are excluded from citation support and coverage and reported as `gap_claims` and `abstained` (every claim is a gap), so declining is distinguishable from hallucinating. Correctness still scores a gap as `missing`.
+3. **The wiki search query is the normalized question text**, with no `paths` hints and no identifier extraction. This is the neutral rule; it is frozen, with no per-item tuning.
+
+The dev runs must be redone after these changes (new prompt hash and `top_n`).

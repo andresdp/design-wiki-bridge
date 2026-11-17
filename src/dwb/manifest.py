@@ -54,7 +54,7 @@ class Budgets(_Strict):
     max_span_tokens: int = 1500
     pdf_top_k: int = 10
     rerank_pool: int = 40
-    rerank_top_n: int = 12
+    rerank_top_n: int = 40  # = pool: the context token budget is the binding limit
     context_tokens: int = 8000
 
 

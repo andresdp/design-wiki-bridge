@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
@@ -21,6 +21,11 @@ class GeneratedClaim(BaseModel):
     text: str = Field(description="A short, independently checkable claim.")
     evidence_ids: list[str] = Field(
         default_factory=list, description='Supporting evidence IDs, e.g. ["E1", "E3"].'
+    )
+    kind: Literal["answer", "gap"] = Field(
+        default="answer",
+        description='"answer": supported by the cited evidence. "gap": states what the '
+                    "evidence does not establish (no evidence IDs).",
     )
 
 
@@ -86,11 +91,14 @@ def validate_claims(
                 missing.append(ref)
         if missing:
             unresolved.append({"claim_index": idx, "aliases": missing})
-        claims.append(AnswerClaim(text=c.text, cited_aliases=list(c.evidence_ids),
+        claims.append(AnswerClaim(text=c.text, kind=c.kind, cited_aliases=list(c.evidence_ids),
                                   evidence_ids=resolved, unresolved_aliases=missing))
+    gaps = [i for i, c in enumerate(claims) if c.kind == "gap"]
     report = {
         "n_claims": len(claims),
-        "uncited_claims": [i for i, c in enumerate(claims) if c.uncited],
+        "uncited_claims": [i for i, c in enumerate(claims) if c.uncited and c.kind != "gap"],
+        "gap_claims": gaps,
+        "abstained": bool(claims) and len(gaps) == len(claims),
         "unresolved": unresolved,
         "n_unresolved_ids": sum(len(u["aliases"]) for u in unresolved),
     }
@@ -103,5 +111,6 @@ def render_answer(claims: list[AnswerClaim], summary: str | None = None,
     parts = [summary.strip()] if summary else []
     for c in claims:
         cites = [inv.get(i, i) for i in c.evidence_ids]
-        parts.append(f"- {c.text}" + (f" [{', '.join(cites)}]" if cites else ""))
+        prefix = "- (not established by the evidence) " if c.kind == "gap" else "- "
+        parts.append(f"{prefix}{c.text}" + (f" [{', '.join(cites)}]" if cites else ""))
     return "\n".join(parts)

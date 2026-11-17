@@ -102,7 +102,8 @@ class ClaimsJudge:
                          + record.reference_answer, 1.0)]
         else:
             return {"score": None, "verdicts": {}}
-        answer = "\n".join(f"- {c.text}" for c in trace.claims)
+        answer = "\n".join(f"- {'(the evidence does not establish) ' if c.kind == 'gap' else ''}"
+                           f"{c.text}" for c in trace.claims)
         verdicts = {}
         for cid, text, _w in required:
             if not trace.claims:
@@ -117,10 +118,15 @@ class ClaimsJudge:
         return {"score": score, "verdicts": verdicts}
 
     def support(self, trace: TraceRecord) -> dict[str, Any]:
-        """Citation support (cited claims supported) and coverage (all claims supported)."""
+        """Citation support (cited claims supported) and coverage (answer claims supported).
+
+        Gap claims ("the evidence does not establish …") assert nothing about the system, so
+        they are neither judged nor counted; they are reported as abstention instead.
+        """
         trace_key = f"{trace.run_id}:{trace.question_id}"
+        answer_claims = [c for c in trace.claims if c.kind != "gap"]
         per_claim = []
-        for c in trace.claims:
+        for c in answer_claims:
             if not c.evidence_ids:
                 per_claim.append(False)
                 continue
@@ -131,10 +137,11 @@ class ClaimsJudge:
             v = self._call("support", trace_key, c.text, self._support,
                            {"claim": c.text, "passages": passages}, self.support_hash)
             per_claim.append(bool(v["supported"]))
-        cited = [ok for c, ok in zip(trace.claims, per_claim, strict=True) if c.evidence_ids]
+        cited = [ok for c, ok in zip(answer_claims, per_claim, strict=True) if c.evidence_ids]
         return {
             "citation_support": (sum(cited) / len(cited)) if cited else None,
             "coverage": (sum(per_claim) / len(per_claim)) if per_claim else None,
             "n_claims": len(per_claim),
             "n_cited": len(cited),
+            "n_gap": len(trace.claims) - len(answer_claims),
         }

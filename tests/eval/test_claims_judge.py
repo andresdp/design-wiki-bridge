@@ -51,3 +51,15 @@ def test_second_evaluation_uses_cache(tmp_path, record):
     j2.correctness(record, make_trace())
     j2.support(make_trace())
     assert j2.stats.calls == 0 and j2.stats.cache_hits == 4
+
+
+def test_gap_claims_are_not_judged_or_counted_in_coverage():
+    from dwb.trace import AnswerClaim
+
+    t = make_trace(claims=[
+        AnswerClaim(text="B returns C", cited_aliases=["E1", "E2"], evidence_ids=["i1", "i2"]),
+        AnswerClaim(text="The default is not shown.", kind="gap")])
+    j = make_judge()
+    sup = j.support(t)
+    assert sup["coverage"] == 1.0 and sup["n_gap"] == 1 and sup["n_claims"] == 1
+    assert j.stats.calls == 1

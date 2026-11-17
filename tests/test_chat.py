@@ -151,3 +151,14 @@ def test_every_command_has_help(cmd):
 
     r = CliRunner().invoke(cli.app, cmd)
     assert r.exit_code in (0, 2) and "Usage" in r.output
+
+
+def test_render_shows_gap_claims():
+    from dwb.trace import AnswerClaim, TraceRecord
+
+    t = TraceRecord(question_id="q", run_id="r", condition="B", aliases={},
+                    final_context_ids=["x"], evidence={},
+                    claims=[AnswerClaim(text="the default status code", kind="gap")])
+    con = Console(record=True, width=120)
+    render_answer(t, console=con)
+    assert "Not established by the evidence" in con.export_text()

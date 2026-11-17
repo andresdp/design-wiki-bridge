@@ -136,6 +136,7 @@ The defaults come from `sources:` in the config. **Vector search or wiki?** Vect
   - `wiki (inline_link)`: a line link in a wiki section.
   - `wiki (claim_section)` / `wiki (claim_page)`: OpenWiki evidence attached to the section or page.
   - `wiki (ast)` / `wiki (path)`: a code name or path mentioned in the wiki text.
+- ⚠ *Not established by the evidence* marks a part of the question the retrieved evidence doesn't answer. `dwb` says so instead of guessing; try other sources.
 - A red `[E7?]` marks a citation that doesn't match any passage.
 - *No evidence* means none of the enabled sources returned anything. Enable more sources, or switch between `/wiki on` and `/wiki off`.
 

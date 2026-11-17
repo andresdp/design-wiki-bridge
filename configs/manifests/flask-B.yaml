@@ -20,7 +20,7 @@ models:
   temperature: 0.0
 prompts:
   generate:
-    path: src/dwb/prompt_files/generate_v1.md
+    path: src/dwb/prompt_files/generate_v2.md
 budgets:
   code_top_k: 20
   wiki_search_k: 10
@@ -29,7 +29,7 @@ budgets:
   max_span_tokens: 1500
   pdf_top_k: 10
   rerank_pool: 40
-  rerank_top_n: 12
+  rerank_top_n: 40          # = rerank_pool: the token budget, not a count, sizes the context
   context_tokens: 8000
 web:
   enabled: true

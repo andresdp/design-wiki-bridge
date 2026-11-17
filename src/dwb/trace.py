@@ -29,6 +29,7 @@ class AnswerClaim(BaseModel):
     """One generated claim after validation (KTD9)."""
 
     text: str
+    kind: str = "answer"  # "answer" | "gap" (the evidence does not establish this part)
     cited_aliases: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)  # resolved stable IDs
     unresolved_aliases: list[str] = Field(default_factory=list)
@@ -36,6 +37,10 @@ class AnswerClaim(BaseModel):
     @property
     def uncited(self) -> bool:
         return not self.cited_aliases
+
+    @property
+    def is_gap(self) -> bool:
+        return self.kind == "gap"
 
 
 class TraceRecord(BaseModel):

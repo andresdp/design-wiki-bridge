@@ -17,8 +17,10 @@ from dwb.trace import TraceRecord
 
 METRICS = ("recall_candidates", "recall_final", "recall_candidates_jaccard",
            "recall_final_jaccard", "correctness", "citation_support", "coverage",
-           "context_tokens", "total_tokens", "latency_ms")
-LOWER_IS_BETTER = {"context_tokens", "total_tokens", "latency_ms"}
+           "abstained", "gap_claims", "context_items", "context_tokens", "total_tokens",
+           "latency_ms")
+# abstaining / gap claims are not errors, but fewer of them means more of the question answered
+LOWER_IS_BETTER = {"abstained", "gap_claims", "context_tokens", "total_tokens", "latency_ms"}
 TIE_EPS = 1e-9
 
 
@@ -34,6 +36,10 @@ def question_row(record: QuestionRecord, trace: TraceRecord, judge: ClaimsJudge 
         "empty_context": trace.empty_context, "web_triggered": trace.web_triggered,
         "failed": bool(trace.errors),
         "unresolved_citation_ids": trace.validation.get("n_unresolved_ids", 0),
+        # whole-answer abstention (every claim is a gap) and partial gaps, separate from errors
+        "abstained": float(bool(trace.claims) and all(c.kind == "gap" for c in trace.claims)),
+        "gap_claims": float(sum(1 for c in trace.claims if c.kind == "gap")),
+        "context_items": float(len(trace.final_context_ids)),
         "context_tokens": next((s.input_tokens for s in trace.stages
                                 if s.name == "assemble_context"), 0),
         "total_tokens": sum(s.input_tokens + s.output_tokens for s in trace.stages

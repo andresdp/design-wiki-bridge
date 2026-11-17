@@ -233,6 +233,9 @@ def render_answer(trace: TraceRecord, *, show_context: bool = False, console=Non
     inv = {v: k for k, v in trace.aliases.items()}
     lines = [trace.summary.strip(), ""] if trace.summary else []
     for c in trace.claims:
+        if c.kind == "gap":
+            lines.append(f"- ⚠ *Not established by the evidence:* {c.text}")
+            continue
         cites = " ".join(f"`[{inv.get(i, i)}]`" for i in c.evidence_ids)
         bad = " ".join(f"`[{a}?]`" for a in c.unresolved_aliases)
         lines.append(f"- {c.text} {cites} {bad}".rstrip())

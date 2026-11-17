@@ -77,3 +77,14 @@ def test_evaluator_never_imports_graph_or_generator():
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                        cwd=ROOT, env={"PYTHONPATH": str(ROOT / "src"), "PATH": ""})
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_abstention_reported_separately(record):
+    from dwb.trace import AnswerClaim
+
+    gap = make_trace(claims=[AnswerClaim(text="Not in the evidence.", kind="gap")])
+    row = question_row(record, gap, make_judge(), MatchRules())
+    assert row["abstained"] == 1.0 and row["gap_claims"] == 1.0
+    assert row["coverage"] is None and row["citation_support"] is None  # nothing to judge
+    normal = question_row(record, make_trace(), make_judge(), MatchRules())
+    assert normal["abstained"] == 0.0 and normal["context_items"] == 1.0
