@@ -54,7 +54,8 @@ Invariants to preserve:
 - **Reproducibility:** a manifest-driven batch runner persists the repo SHA, document and wiki snapshots, models and prompts, retrieval limits, candidate lists, final context, answer, citations, timing, failures, and usage. Pin one OpenWiki snapshot per checkout and record its generator version, config, cost, and time.
 - **Evaluation is a separate command** that runs over saved traces (DeepEval plus a custom claim/cited-span evaluator). It never runs inline with generation.
 - **Web:** the quality comparison uses frozen/replayed Tavily passages (exact requests, URLs, capture dates). Web retrieval runs only when the run manifest enables it *and* the item's `allowed_sources` includes `web`. Public SWE-QA items never allow `web`, so the system cannot retrieve published benchmark answers. Web searches also exclude the project's own docs and source hosts (`web.exclude_domains`; spike doc §8).
-- If wiki retrieval returns nothing, the other enabled branches must still contribute evidence.
+- If wiki retrieval returns nothing, the other enabled branches must still contribute evidence. The same holds when a source raises: the node records a `warnings` entry and the question is answered from the rest (degraded, not failed); a Tavily replay miss is the one exception.
+- Evaluation pairs A and B over the same questions. A failed question scores correctness 0 rather than dropping out, and `experiment evaluate` refuses runs that are not A then B under `check_paired` (unless `--allow-unpaired`).
 
 ## Project skills and where they conflict with the plan
 
