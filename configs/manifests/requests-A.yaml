@@ -14,8 +14,8 @@ indexes:
   pdf_index_id: pdf-requests-v1-2fbd3b7d3bdb   # rfc9110 + rfc9112, 240 pages
 pdf_enabled: true
 models:
-  generator: gpt-5.5        # KTD10: pin the exact model ID before the pilot
-  reranker: gpt-5.5         # same pinned model as the generator
+  generator: gpt-5.6-luna   # KTD10: same model as the wiki generator and the reranker
+  reranker: gpt-5.6-luna    # same pinned model as the generator
   embedding: text-embedding-3-large
   temperature: 0.0
 prompts:
