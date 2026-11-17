@@ -8,14 +8,11 @@ from typing import Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
-from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from dwb.budget import Context
-from dwb.manifest import prompt_hash
+from dwb.prompts import load_prompt
 from dwb.trace import AnswerClaim, StageRecord
-
-USER_MARKER = "---user---"
 
 
 class GeneratedClaim(BaseModel):
@@ -32,18 +29,6 @@ class GeneratedAnswer(BaseModel):
 
     claims: list[GeneratedClaim]
     summary: str | None = Field(default=None, description="Optional one-sentence summary.")
-
-
-def load_prompt(path: str | Path) -> tuple[ChatPromptTemplate, str]:
-    text = Path(path).read_text()
-    if USER_MARKER not in text:
-        raise ValueError(f"prompt {path} lacks the {USER_MARKER} separator")
-    system, user = (p.strip() for p in text.split(USER_MARKER, 1))
-    # literal braces in the system text must not be treated as template variables
-    system = system.replace("{", "{{").replace("}", "}}")
-    return ChatPromptTemplate.from_messages([("system", system), ("human", user)]), prompt_hash(
-        text
-    )
 
 
 class Generator:

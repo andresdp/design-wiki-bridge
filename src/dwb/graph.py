@@ -249,7 +249,9 @@ def trace_from_state(s: GraphState, m: RunManifest) -> TraceRecord:
     for key in ("repo_candidates", "pdf_candidates", "web_candidates", "merged", "reranked"):
         for it in s.get(key, []):
             if it.id not in evidence or it.id in final_ids:
-                evidence[it.id] = _evidence_dump(it, with_text=it.id in final_ids)
+                # text kept for final context (judge) and web passages (KTD15 matching)
+                keep = it.id in final_ids or it.source_type == "web"
+                evidence[it.id] = _evidence_dump(it, with_text=keep)
     answer = s.get("answer")
     return TraceRecord(
         question_id=q.id,

@@ -87,6 +87,16 @@ def cmd_check_paired(args: argparse.Namespace) -> int:
     return 0 if res.ok else 1
 
 
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    from dwb.eval.command import evaluate_runs
+
+    res = evaluate_runs(Path(args.run_a), Path(args.run_b), Path(args.out),
+                        config_path=Path(args.config), use_judge=not args.no_judge,
+                        deepeval=args.deepeval or None)
+    print(json.dumps(res, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dwb")
     sub = p.add_subparsers(dest="command", required=True)
@@ -123,6 +133,15 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("a")
     cp.add_argument("b")
     cp.set_defaults(func=cmd_check_paired)
+
+    ev = sub.add_parser("evaluate", help="offline evaluation of saved A and B traces")
+    ev.add_argument("--run-a", required=True, help="run directory of condition A")
+    ev.add_argument("--run-b", required=True, help="run directory of condition B")
+    ev.add_argument("--out", required=True, help="report directory")
+    ev.add_argument("--config", default="configs/eval.yaml")
+    ev.add_argument("--no-judge", action="store_true", help="recall and cost only")
+    ev.add_argument("--deepeval", action="store_true", help="also run DeepEval diagnostics")
+    ev.set_defaults(func=cmd_evaluate)
     return p
 
 
