@@ -91,10 +91,21 @@ class RepoInfo:
     checkout: Path
     tag: str | None = None
     role: str | None = None
+    swe_qa_split: str | None = None  # this repository's SWE-QA split (file stem)
 
     @property
     def checkout_ok(self) -> bool:
         return (self.checkout / ".git").exists()
+
+
+@dataclass
+class SweQaPin:
+    """The pinned SWE-QA dataset: revision, local folder, and sha256 per split file."""
+
+    dataset: str
+    revision: str
+    local_dir: Path  # workspace-relative
+    sha256: dict[str, str]
 
 
 @dataclass
@@ -130,9 +141,19 @@ class Workspace:
         return {
             name: RepoInfo(name=name, url=r["url"], sha=r["sha"],
                            checkout=self.resolve(Path(r["checkout"])), tag=r.get("tag"),
-                           role=r.get("role"))
+                           role=r.get("role"), swe_qa_split=r.get("swe_qa_split"))
             for name, r in cfg.items()
         }
+
+    def swe_qa_pin(self) -> SweQaPin:
+        """The ``swe_qa`` section of ``configs/repos.yaml``."""
+        self.repos()  # same not-found message as the repositories
+        cfg = yaml.safe_load(self.resolve(self.repos_yaml).read_text()).get("swe_qa") or {}
+        missing = [k for k in ("dataset", "revision", "local_dir") if not cfg.get(k)]
+        if missing:
+            raise WorkspaceError(f"configs/repos.yaml: swe_qa is missing {', '.join(missing)}")
+        return SweQaPin(dataset=cfg["dataset"], revision=cfg["revision"],
+                        local_dir=Path(cfg["local_dir"]), sha256=dict(cfg.get("sha256") or {}))
 
     def repo(self, name: str) -> RepoInfo:
         repos = self.repos()

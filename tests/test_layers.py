@@ -14,6 +14,7 @@ LAYERS: dict[str, tuple[int, str]] = {
     "cli": (1, ""), "chat": (1, ""), "init_wizard": (1, ""),
     # 2 application
     "project": (2, ""), "workspace": (2, ""), "runner": (2, ""), "eval.command": (2, ""),
+    "curation": (2, ""),
     # 3 pipeline | evaluation (siblings)
     "graph": (3, "pipeline"), "merge": (3, "pipeline"), "rerank": (3, "pipeline"),
     "budget": (3, "pipeline"), "generate": (3, "pipeline"),
