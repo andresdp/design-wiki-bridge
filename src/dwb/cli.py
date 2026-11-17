@@ -61,6 +61,32 @@ def cmd_index_pdf(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    from dwb.manifest import load_manifest
+    from dwb.runner import build_components, run_manifest
+
+    m = load_manifest(args.manifest)
+    if args.web_mode:
+        m = m.model_copy(update={"web": m.web.model_copy(update={"mode": args.web_mode})})
+        if args.web_mode == "live":
+            m = m.model_copy(update={"run_id": f"{m.run_id}-live"})
+    base = Path(".")
+    comps = build_components(m, base_dir=base, index_root=Path(args.index_root),
+                             tavily_root=Path(args.tavily_root))
+    summary = run_manifest(m, comps, base_dir=base, runs_dir=Path(args.runs_dir),
+                           overwrite=args.overwrite)
+    print(json.dumps(summary, indent=2))
+    return 0 if summary["failed"] == 0 else 1
+
+
+def cmd_check_paired(args: argparse.Namespace) -> int:
+    from dwb.manifest import check_paired, load_manifest
+
+    res = check_paired(load_manifest(args.a), load_manifest(args.b))
+    print(json.dumps(res.model_dump(), indent=2))
+    return 0 if res.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dwb")
     sub = p.add_subparsers(dest="command", required=True)
@@ -82,6 +108,21 @@ def build_parser() -> argparse.ArgumentParser:
     ip.add_argument("--root", default=str(INDEX_ROOT))
     ip.add_argument("--fake", action="store_true")
     ip.set_defaults(func=cmd_index_pdf)
+
+    rn = sub.add_parser("run", help="run one manifest (one condition) over its question set")
+    rn.add_argument("--manifest", required=True)
+    rn.add_argument("--runs-dir", default="runs")
+    rn.add_argument("--index-root", default=str(INDEX_ROOT))
+    rn.add_argument("--tavily-root", default="artifacts/tavily")
+    rn.add_argument("--web-mode", choices=["record", "replay", "live"],
+                    help="override web.mode; 'live' is the latency flag and renames the run")
+    rn.add_argument("--overwrite", action="store_true")
+    rn.set_defaults(func=cmd_run)
+
+    cp = sub.add_parser("check-paired", help="paired-configuration gate for an A/B pair")
+    cp.add_argument("a")
+    cp.add_argument("b")
+    cp.set_defaults(func=cmd_check_paired)
     return p
 
 
