@@ -14,9 +14,9 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 - Live checks (need `OPENAI_API_KEY`): `conda run -n taxonomy pytest -m live`
 - Lint: `conda run -n taxonomy ruff check src tests`
 - User guide: `docs/usage.md`. The CLI is typer (`src/dwb/cli.py`); `dwb --help` lists commands.
-- Readiness of each repo: `conda run -n taxonomy dwb status`
-- Ask / chat: `dwb ask <repo> "<question>" [--wiki/--no-wiki] [--pdf/--no-pdf] [--web/--no-web]`, `dwb chat <repo>` (defaults in `configs/chat.yaml`; the repo is always on, and the wiki replaces vector search when enabled)
-- Code index: `dwb index code <repo> [--embedding-model <model>]`
+- Two modes, same commands. **User tool**: inside any git repo, `dwb init` writes `<repo>/.dwb/config.yaml`, `dwb index` builds every listed source for HEAD, then `dwb ask "<q>"` / `dwb chat` / `dwb status` (code in `src/dwb/project.py`, `src/dwb/init_wizard.py`). **Research harness**: from this folder, `ask`/`chat` take `--repo <name>` (configs/repos.yaml, `configs/chat.yaml`); the wiki replaces vector search when enabled.
+- Readiness: `conda run -n taxonomy dwb status`
+- Research code index: `dwb index code <repo> [--embedding-model <model>]`
 - PDF index: `dwb index pdf configs/pdfs/<repo>.yaml`
 - Register a generated wiki: `dwb wiki snapshot <repo> --provider openai --model <model> --effort <effort> --elapsed-s <s>`
 - Paired gate: `dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml`

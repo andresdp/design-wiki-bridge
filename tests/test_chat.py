@@ -133,10 +133,10 @@ def test_cli_ask_and_status(ws, monkeypatch):
     monkeypatch.chdir(ws.root)
     monkeypatch.setattr(cli, "WS", Workspace())
     monkeypatch.setattr(runner, "build_components", lambda m, **kw: components("A"))
-    r = CliRunner().invoke(cli.app, ["ask", "toy", "How does the app run?", "--no-pdf"])
+    r = CliRunner().invoke(cli.app, ["ask", "How does the app run?", "--repo", "toy", "--no-pdf"])
     assert r.exit_code == 0, r.output
     assert "Answer" in r.output and "Sources" in r.output
-    r = CliRunner().invoke(cli.app, ["ask", "toy", "q?", "--wiki"])
+    r = CliRunner().invoke(cli.app, ["ask", "q?", "--repo", "toy", "--wiki"])
     assert r.exit_code == 2 and "dwb wiki snapshot toy" in r.output
     r = CliRunner().invoke(cli.app, ["status", "--embedding-model", "emb-x"])
     assert r.exit_code == 0 and "code-toy-1" in r.output

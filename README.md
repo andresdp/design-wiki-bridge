@@ -45,18 +45,24 @@ Put `OPENAI_API_KEY` (and `TAVILY_API_KEY` for web search) in a `.env` file in t
 
 ## Usage
 
-The full guide is **[docs/usage.md](docs/usage.md)**. In short:
+`dwb` works in two modes with the same commands. The full guide is **[docs/usage.md](docs/usage.md)**.
+
+**As a tool, inside any git repository:**
 
 ```bash
-dwb status                                             # repositories and which sources are ready
-dwb ask flask "How does Flask answer an OPTIONS request?"
-dwb ask requests "How does Requests handle a 303 redirect?" --wiki --pdf --web
-dwb chat flask                                         # interactive; /wiki /pdf /web on|off
+cd ~/code/some-repo
+dwb init                      # guided setup → writes .dwb/config.yaml (models, PDFs, web, wiki, keys)
+dwb index                     # indexes everything the config lists, for the HEAD commit
+dwb chat                      # interactive; /wiki /pdf /web on|off
+dwb ask "How are redirects followed?" --pdf --web
+dwb status                    # what is indexed, and whether HEAD moved since
+```
 
-dwb index code flask                                   # build what a repository needs
-dwb index pdf configs/pdfs/flask.yaml
-dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium --elapsed-s 1054.9
+**As the research harness, from this folder:**
 
+```bash
+dwb ask "How does Flask answer OPTIONS?" --repo flask --wiki
+dwb index code flask   ·   dwb index pdf configs/pdfs/flask.yaml   ·   dwb wiki snapshot flask …
 dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
 dwb experiment run configs/manifests/flask-A.yaml --web-mode record
 dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/flask-dev

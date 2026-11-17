@@ -152,6 +152,7 @@ def build_components(
     tavily_root: Path,
     wiki_root: Path = Path("artifacts/wikis"),
     openwiki_bin: str | None = None,
+    restore_wiki: bool = True,
 ) -> Components:
     """Real components for a manifest: Chroma retrievers, Tavily store, OpenAI models."""
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -192,9 +193,12 @@ def build_components(
         if not m.checkout:
             raise ValueError("condition B needs manifest.checkout (git checkout at repo_sha)")
         checkout = base_dir / m.checkout
-        LOG.info("Repository branch B: restoring wiki snapshot %s into %s",
-                 m.indexes.wiki_snapshot_id, checkout)
-        restore_snapshot(wiki_root / m.indexes.wiki_snapshot_id, checkout)
+        if restore_wiki:
+            LOG.info("Repository branch B: restoring wiki snapshot %s into %s",
+                     m.indexes.wiki_snapshot_id, checkout)
+            restore_snapshot(wiki_root / m.indexes.wiki_snapshot_id, checkout)
+        else:
+            LOG.info("Repository branch B: OpenWiki in %s", checkout / "openwiki")
         c.wiki = OpenWikiClient(checkout, command=openwiki_bin)
         c.resolver = WikiResolver(RepoReader.from_git(checkout, m.repo_sha),
                                   max_span_tokens=m.budgets.max_span_tokens)

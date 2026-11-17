@@ -152,7 +152,8 @@ class ChatSession:
             LOG.warning(n)
         c = self._injected or build_components(
             self.manifest, base_dir=self.ws.root, index_root=self.ws._p(self.ws.index_root),
-            tavily_root=self.ws._p(self.ws.tavily_root), wiki_root=self.ws._p(self.ws.wiki_root))
+            tavily_root=self.ws._p(self.ws.tavily_root), wiki_root=self.ws._p(self.ws.wiki_root),
+            restore_wiki=getattr(self.ws, "restores_wiki", True))
         self._stack = AsyncExitStack()
         if c.wiki is not None and hasattr(type(c.wiki), "__aenter__"):
             LOG.info("Starting the OpenWiki MCP server")

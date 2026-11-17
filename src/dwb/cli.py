@@ -30,7 +30,9 @@ app = typer.Typer(
          "code, PDFs and web pages. Also runs the A/B retrieval experiments.\n\n"
          "Run from the design-wiki-bridge folder. Guide: docs/usage.md",
 )
-index_app = typer.Typer(no_args_is_help=True, help="Build the search indexes used to answer.")
+index_app = typer.Typer(invoke_without_command=True,
+                        help="Build the search indexes used to answer. Inside a project: "
+                             "[bold]dwb index[/] builds everything .dwb/config.yaml lists.")
 wiki_app = typer.Typer(no_args_is_help=True, help="Register OpenWiki snapshots.")
 exp_app = typer.Typer(no_args_is_help=True,
                       help="Run and evaluate the paired A/B experiments (research workflow).")
@@ -38,16 +40,23 @@ app.add_typer(index_app, name="index")
 app.add_typer(wiki_app, name="wiki")
 app.add_typer(exp_app, name="experiment")
 
-WS = Workspace()
+WS = Workspace()  # research mode (design-wiki-bridge: configs/repos.yaml)
 
 
-def _load_dotenv() -> bool:
-    """Load API keys from ./.env (gitignored). Variables already set in the shell win."""
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return False
-    return load_dotenv(Path(".env"), override=False)
+def _workspace(repo: str | None) -> tuple[Workspace, str]:
+    """User mode inside a repo with .dwb/config.yaml; research mode with --repo."""
+    from dwb.project import ProjectWorkspace, find_project
+
+    if repo is None:
+        root = find_project()
+        if root is None:
+            raise WorkspaceError(
+                "this folder is not a dwb project. Run `dwb init` inside the repository you want "
+                "to ask about. (Research mode: run from design-wiki-bridge with --repo <name>.)")
+        pws = ProjectWorkspace(root)
+        pws.require_indexed()
+        return pws, pws.config.name
+    return WS, repo
 
 
 @app.callback()
@@ -56,9 +65,30 @@ def _main(
                                          help="More detail (per-stage timings). Repeatable.")] = 0,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Warnings and errors only.")] = False,
 ) -> None:
+    from dwb.project import load_env
+
     setup_logging(-1 if quiet else verbose)
-    if _load_dotenv():
-        LOG.debug("Loaded environment from .env")
+    for p in load_env():
+        LOG.debug("Loaded environment from %s", p)
+
+
+@app.command()
+def init(
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Accept every default, no prompts.")]
+    = False,
+    force: Annotated[bool, typer.Option(help="Overwrite an existing .dwb/config.yaml.")] = False,
+) -> None:
+    """Set up the repository in the current folder: writes .dwb/config.yaml.
+
+    Asks about models, PDF documents, web search, the OpenWiki source and API keys.
+    Then run [bold]dwb index[/] and [bold]dwb chat[/].
+    """
+    from dwb.init_wizard import run_init
+
+    try:
+        run_init(Path.cwd(), out, yes=yes, force=force)
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
 
 
 def _fail(msg: str, code: int = 2) -> typer.Exit:
@@ -84,6 +114,9 @@ def _embedding(model: str, fake: bool):
 
 RepoArg = Annotated[str, typer.Argument(help="Repository name from configs/repos.yaml "
                                              "(see: dwb status).")]
+RepoOpt = Annotated[str | None, typer.Option(
+    "--repo", "-r", help="Research mode: a repository from configs/repos.yaml. Omit it inside a "
+                         "project set up with `dwb init`.")]
 WikiOpt = Annotated[bool | None, typer.Option(
     "--wiki/--no-wiki", help="Find repository evidence through the OpenWiki snapshot instead "
                              "of vector search. [dim]Default: configs/chat.yaml[/]")]
@@ -97,11 +130,11 @@ ModelOpt = Annotated[str | None, typer.Option(
                           "configs/chat.yaml[/]")]
 
 
-def _settings(repo: str, wiki: bool | None, pdf: bool | None, web: bool | None,
+def _settings(ws: Workspace, repo: str, wiki: bool | None, pdf: bool | None, web: bool | None,
               model: str | None):
     from dwb.chat import ChatSettings, Sources
 
-    d = WS.chat_config().get("sources") or {}
+    d = ws.chat_config().get("sources") or {}
     sources = Sources(wiki=d.get("wiki", False) if wiki is None else wiki,
                       pdf=d.get("pdf", True) if pdf is None else pdf,
                       web=d.get("web", False) if web is None else web)
@@ -110,24 +143,27 @@ def _settings(repo: str, wiki: bool | None, pdf: bool | None, web: bool | None,
 
 @app.command()
 def ask(
-    repo: RepoArg,
     question: Annotated[str, typer.Argument(help="The question, in quotes.")],
+    repo: RepoOpt = None,
     wiki: WikiOpt = None, pdf: PdfOpt = None, web: WebOpt = None, model: ModelOpt = None,
     show_context: Annotated[bool, typer.Option(
         "--show-context", help="Also print every passage given to the model.")] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Print the full trace as JSON.")] = False,
 ) -> None:
-    """Answer one question about REPO, citing the code, PDF pages and web pages it used.
+    """Answer one question about the repository, citing the code, PDF pages and web pages used.
 
-    [dim]Example:[/] dwb ask flask "How does Flask answer an OPTIONS request?" --pdf
+    [dim]Examples:[/] dwb ask "How are requests routed?"   (inside a project set up with dwb init)
+              dwb ask "How does Flask answer OPTIONS?" --repo flask   (research mode)
     """
     from dwb.chat import ChatSession, render_answer
 
-    async def go():
-        async with ChatSession(WS, _settings(repo, wiki, pdf, web, model)) as s:
-            return await s.ask(question)
-
     try:
+        ws, name = _workspace(repo)
+
+        async def go():
+            async with ChatSession(ws, _settings(ws, name, wiki, pdf, web, model)) as s:
+                return await s.ask(question)
+
         trace = asyncio.run(go())
     except WorkspaceError as e:
         raise _fail(str(e)) from None
@@ -140,21 +176,24 @@ def ask(
 
 
 @app.command()
-def chat(repo: RepoArg, wiki: WikiOpt = None, pdf: PdfOpt = None, web: WebOpt = None,
+def chat(repo: RepoOpt = None, wiki: WikiOpt = None, pdf: PdfOpt = None, web: WebOpt = None,
          model: ModelOpt = None) -> None:
-    """Interactive session: ask questions about REPO, switch sources with /wiki, /pdf, /web.
+    """Interactive session about the repository; switch sources with /wiki, /pdf, /web.
 
     Each question is answered on its own, from the evidence retrieved for it.
     """
     from dwb.chat import ChatSession, repl
 
-    async def go():
-        async with ChatSession(WS, _settings(repo, wiki, pdf, web, model)) as s:
-            hist = WS._p(Path("artifacts/chat_history"))
-            hist.parent.mkdir(parents=True, exist_ok=True)
-            await repl(s, out, history=hist)
-
     try:
+        ws, name = _workspace(repo)
+
+        async def go():
+            async with ChatSession(ws, _settings(ws, name, wiki, pdf, web, model)) as s:
+                hist = getattr(ws, "dir", None)
+                hist = (hist / "chat_history") if hist else ws._p(Path("artifacts/chat_history"))
+                hist.parent.mkdir(parents=True, exist_ok=True)
+                await repl(s, out, history=hist)
+
         asyncio.run(go())
     except WorkspaceError as e:
         raise _fail(str(e)) from None
@@ -162,14 +201,28 @@ def chat(repo: RepoArg, wiki: WikiOpt = None, pdf: PdfOpt = None, web: WebOpt = 
 
 @app.command()
 def status(embedding_model: Annotated[str | None, typer.Option(
-        help="Embedding model the indexes must match. [dim]Default: configs/chat.yaml[/]")]
-           = None) -> None:
-    """Show the configured repositories and which sources are ready for each."""
+        help="Research mode: embedding model the indexes must match.")] = None) -> None:
+    """Show which sources are ready: for this project, or for every research repository."""
+    from dwb.project import ProjectWorkspace, find_project
+
+    root = find_project()
+    if root is not None:
+        pws = ProjectWorkspace(root)
+        t = Table(title=f"{pws.config.name} ({root})")
+        for col in ("Source", "State", "Detail"):
+            t.add_column(col)
+        style = {"ok": "green", "on": "green", "missing": "red", "stale": "yellow", "off": "dim"}
+        for src, state, detail in pws.status_rows():
+            t.add_row(src, f"[{style.get(state, 'white')}]{state}[/]", detail)
+        out.print(t)
+        if not pws.state or any(s in ("missing", "stale") for _, s, _ in pws.status_rows()):
+            out.print("Run [bold]dwb index[/] to build what is missing.")
+        return
+    if not WS._p(WS.repos_yaml).exists():
+        raise _fail("not a dwb project (run `dwb init` here) and not the design-wiki-bridge "
+                    "folder (configs/repos.yaml).")
     emb = embedding_model or _default_embedding()
-    try:
-        rows = WS.status(emb)
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    rows = WS.status(emb)
 
     def mark(v):
         return f"[green]✓[/] {v}" if v and v is not True else ("[green]✓[/]" if v else "[red]✗[/]")
@@ -189,6 +242,36 @@ def status(embedding_model: Annotated[str | None, typer.Option(
 
 
 # ------------------------------------------------------------------------------ index
+
+
+@index_app.callback()
+def index_all(
+    ctx: typer.Context,
+    generate_wiki: Annotated[bool | None, typer.Option(
+        "--generate-wiki/--no-generate-wiki",
+        help="Run OpenWiki when openwiki/ is missing or older than HEAD. "
+             "[dim]Default: wiki.generate in .dwb/config.yaml[/]")] = None,
+    fake: Annotated[bool, typer.Option(hidden=True)] = False,
+) -> None:
+    """Index everything the project's .dwb/config.yaml lists, for the HEAD commit."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from dwb.project import ProjectWorkspace, find_project, index_project
+
+    root = find_project()
+    if root is None:
+        raise _fail("this folder is not a dwb project: run `dwb init` first. "
+                    "(Research mode: dwb index code <repo> / dwb index pdf <corpus>.)")
+    pws = ProjectWorkspace(root)
+    try:
+        state = index_project(pws, embedding=_embedding("fake", True) if fake else None,
+                              generate_wiki=generate_wiki)
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
+    out.print(f"[green]Indexed[/] {pws.config.name} at {state['sha'][:12]}: code"
+              + (", PDFs" if state.get("pdf_index_id") else "")
+              + (", wiki" if state.get("wiki_snapshot_id") else "")
+              + ". Next: [bold]dwb chat[/]")
 
 
 @index_app.command("code")

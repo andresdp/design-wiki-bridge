@@ -1,113 +1,122 @@
 # Using `dwb`
 
-`dwb` answers questions about a software repository. Every claim in an answer cites the original evidence it rests on: code at a pinned commit, PDF pages, or web pages. You can use it two ways:
+`dwb` answers questions about a software repository. Every claim in an answer cites the original evidence it rests on: code at a commit, PDF pages, or web pages. It works in two modes, with the same commands:
 
-- **Ask and chat** (`dwb ask`, `dwb chat`): question answering over one repository, with sources you can switch on and off.
-- **Experiments** (`dwb experiment …`): the research workflow that compares vector search (condition A) with OpenWiki-guided search (condition B) on a frozen question set.
+| Mode | Where you run it | Configured by | For |
+|---|---|---|---|
+| **User tool** | inside any git repository | `<repo>/.dwb/config.yaml`, written by `dwb init` | asking and chatting about that repository |
+| **Research harness** | in the `design-wiki-bridge` folder | `configs/` (repos, manifests, eval) | the A/B experiments; `ask`/`chat` take `--repo <name>` |
 
-Run every command from the `design-wiki-bridge` folder. Configuration (`configs/`), built artifacts (`artifacts/`), and API keys (`.env`) are all resolved relative to it.
+`dwb` picks the mode from the folder: a repository with `.dwb/config.yaml` is a project, otherwise `--repo` selects a research repository.
 
 ## Contents
 
-1. [Setup](#setup)
-2. [Quick start](#quick-start)
-3. [Sources](#sources)
-4. [Asking questions](#asking-questions)
-5. [Chatting](#chatting)
-6. [Reading an answer](#reading-an-answer)
-7. [Preparing a repository](#preparing-a-repository)
-8. [Adding a repository](#adding-a-repository)
-9. [Running the experiments](#running-the-experiments)
-10. [Configuration files](#configuration-files)
-11. [Troubleshooting](#troubleshooting)
+- [Install](#install)
+- [User tool](#user-tool)
+  - [1. dwb init](#1-dwb-init): configure the repository
+  - [2. dwb index](#2-dwb-index): build every source
+  - [3. dwb chat / dwb ask](#3-dwb-chat--dwb-ask)
+  - [Sources](#sources)
+  - [Reading an answer](#reading-an-answer)
+  - [The project file](#the-project-file-dwbconfigyaml)
+- [Research harness](#research-harness)
+- [Logging](#logging-and-output)
+- [Troubleshooting](#troubleshooting)
 
-## Setup
-
-```sh
-conda activate taxonomy                 # Python 3.11 environment with the dependencies
-pip install --no-deps -e .              # installs the `dwb` command
-```
-
-Create a `.env` file in the `design-wiki-bridge` folder (it is gitignored):
-
-```
-OPENAI_API_KEY=sk-...        # required: embeddings, answering, reranking, evaluation
-TAVILY_API_KEY=tvly-...      # only for web search
-```
-
-Keys already exported in your shell take precedence over `.env`.
-
-The OpenWiki source also needs [OpenWiki](https://github.com/langchain-ai/openwiki) **0.9.0** (`npm install -g openwiki@0.9.0`, Node ≥ 22.22) and `git` on the `PATH`.
-
-Every command has help: `dwb --help`, `dwb ask --help`, `dwb index code --help`, and so on.
-
-## Quick start
+## Install
 
 ```sh
-dwb status                                   # which repositories are ready, and what is missing
-dwb ask flask "How does Flask answer an OPTIONS request?"
-dwb chat requests --pdf --web                # interactive session with PDFs and web search
+conda activate taxonomy                  # Python 3.11 environment with the dependencies
+pip install --no-deps -e <path-to>/design-wiki-bridge     # installs the `dwb` command
 ```
 
-## Sources
+API keys: `OPENAI_API_KEY` is required, and `TAVILY_API_KEY` is needed only for web search. `dwb init` offers to save them in `~/.config/dwb/.env` (readable only by you), which `dwb` reads from any folder. A `.env` file in the current folder also works, and keys exported in your shell always take precedence.
 
-The **repository** is always a source. Three more can be switched on or off:
+For the wiki source you also need [OpenWiki](https://github.com/langchain-ai/openwiki) **0.9.0** (`npm install -g openwiki@0.9.0`, Node ≥ 22.22) and `git` on the `PATH`.
 
-| Source | Option | What it adds | Needs |
-|---|---|---|---|
-| Repository | always on | Code, tests and in-repo docs at the pinned commit. Found by **vector search**, or by the **wiki** when it is on. | `dwb index code <repo>` (vector search) |
-| Wiki | `--wiki` / `--no-wiki` | Repository evidence found through the OpenWiki snapshot. The wiki is searched and read, and the code it references is retrieved and cited. **Wiki text itself is never cited.** It replaces vector search for the repository. | a registered wiki snapshot |
-| PDFs | `--pdf` / `--no-pdf` | Pages from the repository's PDF corpus (specifications, papers, manuals). | `dwb index pdf configs/pdfs/<repo>.yaml` |
-| Web | `--web` / `--no-web` | Live Tavily web search. The project's own docs and GitHub are excluded, so web evidence stays external to the code. | `TAVILY_API_KEY` |
+Every command has help: `dwb --help`, `dwb init --help`, `dwb ask --help`, and so on.
 
-The defaults are in `configs/chat.yaml` (`sources:`). Out of the box: vector search, PDFs on, web off. If a PDF index is missing, `dwb` warns you and answers without PDFs. If the wiki is requested but no snapshot exists, it stops and prints the command that creates one.
-
-**Vector search or wiki?** Vector search finds code that looks similar to the question. The wiki follows the generated documentation to the code it describes, which helps for questions about how parts fit together across files. It can miss topics the wiki doesn't cover. Try both on the same question.
-
-## Asking questions
+## User tool
 
 ```sh
-dwb ask REPO "QUESTION" [--wiki/--no-wiki] [--pdf/--no-pdf] [--web/--no-web] [--model MODEL]
-                        [--show-context] [--json]
+cd ~/code/some-repo
+dwb init        # 1. answer a few questions → writes .dwb/config.yaml
+dwb index       # 2. index everything the config lists (code at HEAD, PDFs, wiki)
+dwb chat        # 3. ask away
 ```
 
-Examples:
+### 1. `dwb init`
+
+Run it anywhere inside the repository. It shows the commit that will be indexed (HEAD) and asks about:
+
+- **Models:** the chat model (answering and reranking) and the embedding model (indexes). Both are OpenAI models.
+- **PDF documents:** specifications, papers, or manuals that explain what the code implements. Give local paths (relative to the repository) or URLs. URLs are downloaded during `dwb index`.
+- **Web search:** whether to use it by default, and which domains to exclude. `init` suggests the project's own hosts (its git host, the docs URLs in `pyproject.toml`/`package.json`, PyPI/npm), so web evidence stays external to the code. Edit the list as you like.
+- **OpenWiki:** whether to use the wiki source. If `openwiki/` is missing or older than HEAD, `init` asks whether `dwb index` should generate or update it. That makes model calls (about 15 minutes for a mid-size repository) and writes `openwiki/`, `AGENTS.md`, and a GitHub workflow into the repository.
+- **API keys:** if a key is missing, paste it (hidden input) to save it in `~/.config/dwb/.env`.
+
+The result is **`.dwb/config.yaml`**, a plain YAML file you can edit at any time (see [below](#the-project-file-dwbconfigyaml)). Everything `dwb` writes stays in `.dwb/`, which is hidden from git through `.git/info/exclude`; your `.gitignore` is not touched. `dwb init --yes` accepts every default without asking, and `--force` overwrites an existing config.
+
+### 2. `dwb index`
+
+Builds every source the config lists, for the **HEAD commit**:
+
+- **Code (always):** the committed code, read through git. Functions, methods, and classes become one chunk each; other files are split into line windows; the chunks are embedded. Uncommitted changes are **not** indexed, and `dwb` warns about them. Commit first if they matter.
+- **PDFs:** one entry per page, with each file's hash as its version.
+- **Wiki:** registered when `openwiki/` matches HEAD. It is generated or updated first if `wiki.generate` is on (or with `--generate-wiki`).
+
+Rerunning is cheap: an index that already exists for the same commit, settings, and model is reused, not rebuilt. After new commits, run `dwb index` again. Until you do, chat warns that the index is stale and keeps citing the indexed commit.
+
+`dwb status` shows what is ready:
+
+```
+ Source  State  Detail
+ commit  ok     indexed 3c7baaa05ab4, HEAD 3c7baaa05ab4
+ code    ok     code-requests-ab97677c8e84
+ pdf     ok     2 documents, pdf-requests-pdfs-…
+ wiki    off    disabled in config
+ web     off    excluding github.com, requests.readthedocs.io, pypi.org
+```
+
+### 3. `dwb chat` / `dwb ask`
+
+`dwb chat` and `dwb ask` refuse to run until `dwb index` has finished.
 
 ```sh
-dwb ask flask "Which status code does flask.redirect use by default?"
-dwb ask flask "How are request contexts pushed and popped?" --wiki
-dwb ask requests "How does Requests change the method when it follows a 303?" --pdf --web
-dwb ask requests "How is a generator body sent?" --show-context     # also print the passages
-dwb ask flask "..." --json > answer.json                             # the full trace, for scripts
+dwb chat                                   # interactive
+dwb ask "How are redirects followed?"      # one question
+dwb ask "How is a streamed body sent?" --pdf --web --show-context
 ```
 
-- `--model` overrides the answering and reranking model from `configs/chat.yaml`.
-- `--show-context` prints every passage the model was given, not just the cited ones.
-- `--json` prints the full trace: every retrieval stage with its timing and tokens, the candidates, the final context, the claims, and the citation check.
+Options (both commands): `--wiki/--no-wiki`, `--pdf/--no-pdf`, `--web/--no-web`, and `--model`. `ask` also has `--show-context` (print every passage the model saw) and `--json` (the full trace, for scripts).
 
-Each question is answered independently. There is no conversation memory, so every answer rests only on the evidence retrieved for that question.
-
-## Chatting
-
-```sh
-dwb chat REPO [--wiki/--no-wiki] [--pdf/--no-pdf] [--web/--no-web] [--model MODEL]
-```
-
-Type questions at the `repo>` prompt. Commands:
+Inside `dwb chat`:
 
 | Command | Effect |
 |---|---|
 | `/wiki on` · `/wiki off` | Repository evidence through the wiki, or through vector search |
-| `/pdf on` · `/pdf off` | Use the PDF corpus |
+| `/pdf on` · `/pdf off` | Use the PDF documents |
 | `/web on` · `/web off` | Use web search |
 | `/sources` | Show the active sources |
 | `/context` | Show every passage behind the last answer |
-| `/help` | List the commands |
-| `/quit` (or Ctrl-D) | Leave |
+| `/help` · `/quit` (or Ctrl-D) | Help · leave |
 
-The prompt keeps a history (arrow up/down), stored in `artifacts/chat_history`. Web results are cached in `artifacts/tavily/chat-<repo>/`, so asking the same thing again doesn't repeat the search.
+Each question is answered on its own, from the evidence retrieved for it. There is no conversation memory, so make follow-up questions self-contained. The prompt keeps a history (arrow keys) in `.dwb/chat_history`. Web results are cached in `.dwb/tavily/`, so repeating a question doesn't repeat the search.
 
-## Reading an answer
+### Sources
+
+The **repository is always a source**. The others are optional:
+
+| Source | What it adds | Needs |
+|---|---|---|
+| Repository: vector search (default) | Code, tests, and in-repo docs at the indexed commit, found by similarity to the question | `dwb index` |
+| Repository: **wiki** (`--wiki`) | The same code, found by following the generated OpenWiki documentation to the code it describes. Wiki text itself is never cited. It replaces vector search while on. | `wiki.enabled` and a wiki matching HEAD |
+| **PDFs** (`--pdf`) | Pages from your PDF documents | `pdfs:` in the config |
+| **Web** (`--web`) | Live Tavily web search, minus the excluded domains | `TAVILY_API_KEY` |
+
+The defaults come from `sources:` in the config. **Vector search or wiki?** Vector search finds code that looks similar to the question. The wiki helps with "how do these parts fit together" questions that span files, but it can miss topics the wiki doesn't cover. Try both on the same question.
+
+### Reading an answer
 
 ```
 ╭─ Answer ─────────────────────────────────────────────────────────────╮
@@ -121,103 +130,93 @@ The prompt keeps a history (arrow up/down), stored in `artifacts/chat_history`. 
 ```
 
 - **Claims** are short statements, each followed by the evidence IDs that support it.
-- **Sources** lists every cited passage. *Location* is `path:lines` at the pinned commit, `doc p.N` for a PDF page, or a URL. *Found via* says how the passage was retrieved:
-  - `vector search` means the repository vector index.
-  - `wiki (inline_link)` means a line link in a wiki section.
-  - `wiki (claim_section)` means OpenWiki evidence attached to the section.
-  - `wiki (claim_page)` means evidence attached to the page.
-  - `wiki (ast)` / `wiki (path)` means a code name or path mentioned in the wiki text.
-- A red `[E7?]` marks a citation that doesn't match any passage. The status line counts these.
+- **Location** is `path:lines` at the indexed commit, `doc p.N` for a PDF page, or a URL.
+- **Found via** says how the passage was retrieved:
+  - `vector search`: the code index.
+  - `wiki (inline_link)`: a line link in a wiki section.
+  - `wiki (claim_section)` / `wiki (claim_page)`: OpenWiki evidence attached to the section or page.
+  - `wiki (ast)` / `wiki (path)`: a code name or path mentioned in the wiki text.
+- A red `[E7?]` marks a citation that doesn't match any passage.
 - *No evidence* means none of the enabled sources returned anything. Enable more sources, or switch between `/wiki on` and `/wiki off`.
 
-## Preparing a repository
+### The project file (`.dwb/config.yaml`)
 
-A repository needs a pinned checkout, plus an index for each source you want. `dwb status` shows what is missing:
-
-```sh
-dwb index code flask                                  # vector search over the code (needed without --wiki)
-dwb index pdf configs/pdfs/flask.yaml                 # PDF corpus
-dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium --elapsed-s 1054.9
+```yaml
+version: 1
+name: requests
+models:
+  chat: gpt-5.6-luna              # answering and reranking
+  embedding: text-embedding-3-large
+  temperature: 0.0
+sources:                          # defaults for ask/chat; the repository is always on
+  wiki: false
+  pdf: true
+  web: false
+code:
+  extensions: [.py, .md, .rst, …] # which files to index
+  exclude: [openwiki/, .dwb/]     # path prefixes to skip
+  max_span_tokens: 1500
+pdfs:
+  - source: https://www.rfc-editor.org/rfc/rfc9110.pdf
+    title: "RFC 9110: HTTP Semantics"
+  - source: docs/spec.pdf         # relative to the repository root
+    title: Internal spec
+web:
+  exclude_domains: [github.com, requests.readthedocs.io, pypi.org]
+  max_results: 5
+  search_depth: basic
+wiki:
+  enabled: false
+  generate: false                 # let `dwb index` run OpenWiki when openwiki/ is missing or stale
+  provider: openai
+  model: gpt-5.6-luna
 ```
 
-- **Code index**: chunks the code at the pinned commit (functions, methods, classes; other files in line windows) and embeds the chunks. Rerunning reuses an existing index; it is never silently rebuilt.
-- **PDF index**: one entry per page. A corpus file lists the documents:
-  ```yaml
-  corpus_id: flask-v1
-  documents:
-    - doc_id: rfc9110
-      version: rfc9110-2022-06          # change it when the file changes
-      path: artifacts/pdfs/rfc9110.pdf  # relative to the design-wiki-bridge folder
-      title: "RFC 9110: HTTP Semantics"
-  ```
-- **Wiki snapshot**: generate the wiki inside the checkout first, then register it. Registration pins the wiki to the commit and records the OpenWiki version and model.
-  ```sh
-  cd artifacts/checkouts/flask-3.1.2
-  OPENWIKI_TELEMETRY_DISABLED=1 OPENWIKI_PROVIDER=openai OPENWIKI_MODEL_ID=gpt-5.6-luna \
-    /usr/bin/time -p openwiki code --init
-  cd -
-  dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium --elapsed-s <real>
-  ```
+After editing it, run `dwb index` again. Changing the embedding model or the code settings builds a new index; the old one stays in `.dwb/index/`. To remove dwb from a repository, delete `.dwb/`.
 
-All indexes use the embedding model in `configs/chat.yaml` unless you pass `--embedding-model`. Questions must be embedded with the same model the index was built with; `dwb status --embedding-model …` checks a different one.
+## Research harness
 
-## Adding a repository
-
-1. Clone it and check out the commit you want to study:
-   ```sh
-   git clone https://github.com/<org>/<repo>.git artifacts/repos/<repo>
-   git -C artifacts/repos/<repo> worktree add --detach ../../checkouts/<repo>-<tag> <tag-or-sha>
-   ```
-2. Add it to `configs/repos.yaml`:
-   ```yaml
-   repos:
-     myrepo:
-       url: https://github.com/<org>/<repo>.git
-       tag: v1.2.3
-       sha: <full commit sha>
-       checkout: artifacts/checkouts/myrepo-v1.2.3
-   ```
-3. Optionally, add PDF and web settings to `configs/chat.yaml` under `repos:`:
-   ```yaml
-   myrepo:
-     pdf_corpus: configs/pdfs/myrepo.yaml
-     web_exclude_domains: [myrepo.readthedocs.io, github.com, pypi.org]
-   ```
-4. Build what you need (`dwb index code myrepo`, and so on), check `dwb status`, then `dwb ask myrepo "…"`.
-
-## Running the experiments
-
-The study compares condition **A** (vector search) with condition **B** (OpenWiki-guided search). Everything else is identical: PDFs, the web policy, the reranker, the context budget, the generator, and the citation format. Run manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets.
+Run from the `design-wiki-bridge` folder. Repositories are pinned in `configs/repos.yaml`, and their checkouts live in `artifacts/checkouts/`.
 
 ```sh
-dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml   # A/B differ only in the repository branch
-dwb experiment run configs/manifests/flask-A.yaml --web-mode record    # records live web results
-dwb experiment run configs/manifests/flask-B.yaml --web-mode record    # replays what A recorded
+dwb status                                             # every research repository and its sources
+dwb ask "How does Flask answer OPTIONS?" --repo flask --wiki --pdf
+dwb chat --repo requests
+
+dwb index code flask                                   # code index for a research repository
+dwb index pdf configs/pdfs/flask.yaml                  # PDF corpus
+dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium --elapsed-s 1054.9
+
+dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
+dwb experiment run configs/manifests/flask-A.yaml --web-mode record
+dwb experiment run configs/manifests/flask-B.yaml --web-mode record
 dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/flask-dev
 ```
 
-- **`run`** writes `runs/<run_id>/` with a frozen copy of the manifest, `traces.jsonl` (one record per question: stages, candidates, context, claims, citations, timings, tokens), and `run_summary.json`. A test set must be frozen (its hash is in the manifest), and the run refuses to start if the hash differs. Add `--overwrite` to replace a previous run.
+- **Conditions:** condition **A** uses vector search and **B** uses OpenWiki-guided search. Everything else is identical: PDFs, the web policy, the reranker, the context budget, the generator, and the citation format. `experiment check` verifies this for each manifest pair.
+- **Manifests:** manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets.
+- **Run:** `experiment run` writes `runs/<run_id>/`, containing the frozen manifest, `traces.jsonl` (one record per question), and `run_summary.json`. A test set must be frozen; its hash is in the manifest. `--overwrite` replaces a previous run.
 - **Web modes:**
-  - `record` calls Tavily for searches it hasn't stored yet and saves them.
-  - `replay` uses only stored results; a missing one is an error for that question.
+  - `record` calls Tavily for searches that aren't stored yet and saves them.
+  - `replay` uses stored results only.
   - `live` stores nothing and is for latency measurements.
   
   Run A with `record` first, so B replays identical web results.
-- **`evaluate`** scores two runs offline (it never calls the answering pipeline). It reports:
-  - evidence recall for the candidates and for the final context;
-  - required-claim correctness and citation support and coverage, from an LLM judge configured in `configs/eval.yaml`;
+- **Evaluate:** `experiment evaluate` scores two runs offline:
+  - evidence recall for the candidates and the final context;
+  - required-claim correctness and citation support and coverage, from the judge in `configs/eval.yaml`;
   - per-stage cost.
 
-  Results are paired by question as A/B differences, with improved/tied/regressed counts. Judge verdicts are cached, so re-evaluating unchanged traces is free. `--no-judge` gives recall and cost only.
+  Results are paired A/B differences with improved/tied/regressed counts. Judge verdicts are cached. `--no-judge` gives recall and cost only.
+- **Wiki snapshots:** the research harness copies a pinned snapshot into each checkout before a condition B run. In user mode the wiki is used in place.
+- **Question records** live in `data/questions/{test,dev}/`; see `data/questions/README.md`.
 
-Question records live in `data/questions/{test,dev}/`. See `data/questions/README.md` and the record schema in `src/dwb/benchmark/schemas.py`.
-
-## Configuration files
+Research configuration:
 
 | File | Contents |
 |---|---|
 | `configs/repos.yaml` | Repositories: URL, pinned SHA, checkout path |
-| `configs/chat.yaml` | `ask`/`chat` defaults: models, default sources, web settings, per-repo PDF corpus and excluded web domains |
+| `configs/chat.yaml` | `ask`/`chat --repo` defaults: models, sources, per-repo PDF corpus and excluded web domains |
 | `configs/pdfs/*.yaml` | PDF corpora |
 | `configs/manifests/*.yaml` | Experiment run manifests (one per repository and condition) |
 | `configs/eval.yaml` | Evaluation judge model and span-matching rules |
@@ -226,17 +225,19 @@ Question records live in `data/questions/{test,dev}/`. See `data/questions/READM
 
 ## Logging and output
 
-Progress messages go to stderr, and results (answers, JSON) go to stdout. `dwb -v <command>` adds per-stage timings and token counts, and `dwb -q <command>` shows only warnings and errors. Options like `-v` go **before** the command.
+Progress messages go to stderr, and results (answers, JSON) go to stdout. `dwb -v <command>` adds per-stage timings and token counts, and `dwb -q <command>` shows only warnings and errors. Put these options **before** the command.
 
 ## Troubleshooting
 
 | Message | Fix |
 |---|---|
-| `configs/repos.yaml not found` | Run `dwb` from the `design-wiki-bridge` folder. |
-| `Missing credentials … OPENAI_API_KEY` | Add the key to `.env` in that folder, or export it. |
-| `no code index for <repo> …` | `dwb index code <repo>` (or use `--wiki`). |
-| `no OpenWiki snapshot for <repo> …` | Generate and register the wiki (see [Preparing a repository](#preparing-a-repository)), or use `--no-wiki`. |
-| `PDFs skipped: no PDF index …` | `dwb index pdf configs/pdfs/<repo>.yaml`. |
+| `this folder is not a dwb project` | `dwb init` inside the repository (or `--repo <name>` in design-wiki-bridge). |
+| `… has not been indexed yet` | `dwb index`. |
+| `The index is for commit … but HEAD is …` | `dwb index` to update; until then answers cite the indexed commit. |
+| `not inside a git repository` | dwb indexes committed code: `git init` and commit, or cd into a repository. |
+| `OPENAI_API_KEY is not set` | Rerun `dwb init` to save it, export it, or put it in `~/.config/dwb/.env`. |
+| `Wiki not available: openwiki/ missing…` | Set `wiki.generate: true` and `dwb index`, or run `openwiki code --init` yourself, then `dwb index`. |
 | `OpenWiki MCP server lacks … (needs 0.9.0)` | `npm install -g openwiki@0.9.0`, then `hash -r`. |
-| `The OpenWiki root must be inside a Git repository` | The checkout path in `configs/repos.yaml` must be a git checkout. |
+| `did not return a PDF` | Download the file in a browser and list the local path under `pdfs:`. |
+| `no code index for <repo> …` (research mode) | `dwb index code <repo>`. |
 | `replay miss` during an experiment | Run that manifest with `--web-mode record` first. |

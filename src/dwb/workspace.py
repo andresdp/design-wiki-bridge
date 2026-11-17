@@ -47,6 +47,7 @@ class Workspace:
     wiki_root: Path = WIKI_ROOT
     tavily_root: Path = TAVILY_ROOT
     _chat: dict[str, Any] = field(default_factory=dict, repr=False)
+    restores_wiki = True  # research mode copies the pinned snapshot into the checkout
 
     def _p(self, p: Path) -> Path:
         return p if p.is_absolute() else self.root / p
