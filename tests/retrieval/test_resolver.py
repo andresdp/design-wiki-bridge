@@ -50,6 +50,14 @@ def test_bad_claim_logged_unresolved(res):
     assert out.unresolved and out.unresolved[0].raw == res
 
 
+def test_whole_file_claim_resource_resolves_to_file():
+    sec = section("The app runs handlers.", [claim("c1", ["repo://src/toy/wsgi.py"])])
+    [item] = resolver().resolve([sec], 20).items
+    n = RepoReader.from_dir(TOY).line_count("src/toy/wsgi.py")
+    assert (item.locator.start_line, item.locator.end_line) == (1, n)
+    assert item.provenance["whole_file"] is True
+
+
 def test_inline_links_first_and_relative_to_page():
     text = "Run is at [`app.py`](../../src/toy/app.py#L23-L25). The app runs handlers."
     sec = section(text, [claim("c1", ["repo://src/toy/app.py#L1-L5"])])

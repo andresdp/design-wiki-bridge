@@ -27,7 +27,7 @@ from dwb.repo import RepoReader
 from dwb.retrieval.chunking import Span, split_span
 from dwb.retrieval.wiki_types import ResolveResult, Section, UnresolvedRef
 
-REPO_RES = re.compile(r"^repo://(.+)#L(\d+)-L(\d+)$")
+REPO_RES = re.compile(r"^repo://([^#]+)(?:#L(\d+)-L(\d+))?$")  # whole-file form seen in 0.9.0
 MD_LINK = re.compile(r"\]\(([^)\s]+)\)")
 BACKTICK = re.compile(r"`([^`\n]{2,120})`")
 DOTTED = re.compile(r"^[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)*(\(\))?$")
@@ -200,10 +200,14 @@ class WikiResolver:
                     m = REPO_RES.match(res)
                     if not m:
                         unresolved.append(UnresolvedRef(section=sec.ref.ref, raw=res,
-                                                        reason="not a repo://path#Lx-Ly"))
+                                                        reason="not a repo:// resource"))
                         continue
-                    items += self._span(m[1], int(m[2]), int(m[3]), method, sec, order,
-                                        unresolved, res, claim_id=c["id"])
+                    if m[2] is None:  # whole-file evidence
+                        a, b = 1, self.reader.line_count(m[1]) or 1
+                    else:
+                        a, b = int(m[2]), int(m[3])
+                    items += self._span(m[1], a, b, method, sec, order, unresolved, res,
+                                        claim_id=c["id"], whole_file=m[2] is None)
                     order += 1
 
         # 4. AST / path fallback, only when nothing above resolved

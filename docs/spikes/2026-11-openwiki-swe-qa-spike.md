@@ -78,6 +78,10 @@ KTD4 claims-first path: **feasible, but the section link has to be revised** (se
 
 U7 and U8 stay blocked until step 3. U2–U6 and U9–U11 (condition A) don't depend on it.
 
+## 7. Requests wiki (2026-11-17)
+
+Generated in `artifacts/checkouts/requests-v2.32.5`. `.last-update.json` records `gitHead` = the pinned SHA, `gpt-5.6-luna`, and `status: complete`. 11 pages and 115 claims with 296 evidence resources: **294 valid line ranges at the pinned SHA, and 2 whole-file resources** (`repo://tests/test_hooks.py`, `repo://tests/test_packages.py`). That contradicts the source-reading claim in §4 that evidence must be line ranges, so the resolver now accepts whole-file resources as whole-file spans (`whole_file: true`, split with the shared helper). Resolver coverage: **all 59 sections resolve to ≥ 1 span** (median 7, max 21; claim_section 342, claim_page 91, path 26, ast 1). The 16 unresolved references are fallback-step names. Elapsed time, effort, and cost still need recording before registration.
+
 ## 6. Flask snapshot and fixture results (2026-11-17)
 
 **Generation.** `openwiki` 0.9.0 (global nvm install at `~/.nvm/versions/node/v22.22.3/bin/openwiki`; the old 0.3.0 at `/usr/local` was removed). `OPENWIKI_PROVIDER=openai`. The model wasn't set on the command line and came from the saved config: **`gpt-5.6-luna`, effort medium**. Run in `artifacts/checkouts/flask-3.1.2`. Result: 12 pages (72 `##` sections), 227 reads and 118 searches by the agent, **16 min 47 s** wall time (`real 1054.92`). `openwiki/.last-update.json` records `gitHead` = the pinned SHA, `model`, and `status: complete`. One page (`architecture/configuration-and-state.md`) is still marked `openwiki_generated: true` and has no description. Cost: **to be read from the provider dashboard.** The checkout also got `AGENTS.md` and `.github/workflows/openwiki-update.yml`. Neither matters, because resolution reads through `git show <sha>:<path>`.
