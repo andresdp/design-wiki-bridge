@@ -1,0 +1,18 @@
+{
+  "snapshot_id": "wiki-flask-52e1119f2d9c",
+  "repo": "flask",
+  "sha": "2c1b30d0503cfb064f1cb252e6614a06915a362a",
+  "generator": "openwiki",
+  "version": "0.9.0",
+  "provider": "openai",
+  "model": "gpt-5.6-luna",
+  "effort": "medium",
+  "config": {},
+  "elapsed_s": 1054.92,
+  "cost_usd": null,
+  "tree_sha256": "829323e6baed19c61abcbcdd052e09d63bd8ef687043806d3eff33eb746192ee",
+  "pages": 12,
+  "claims": 132,
+  "generated_at": "2026-11-17T13:50:10.908Z",
+  "registered_at": "2026-11-17T14:02:26.082522+00:00"
+}

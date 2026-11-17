@@ -10,7 +10,7 @@ question_set:
   path: data/questions/dev/flask.jsonl
   hash: null
 indexes:
-  wiki_snapshot_id: pending-wiki-snapshot   # set from 'dwb wiki-snapshot' output
+  wiki_snapshot_id: wiki-flask-52e1119f2d9c   # configs/wikis/wiki-flask-52e1119f2d9c.json
   pdf_index_id: pending-index-pdf
 pdf_enabled: true
 models:

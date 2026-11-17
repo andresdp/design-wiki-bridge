@@ -61,6 +61,31 @@ def cmd_index_pdf(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_wiki_snapshot(args: argparse.Namespace) -> int:
+    """Register the openwiki/ tree generated in a pinned checkout as a snapshot (KTD6, R11).
+
+    Generation itself is run by hand with the pinned environment (see the U1 spike doc):
+    OPENWIKI_TELEMETRY_DISABLED=1 OPENWIKI_PROVIDER=... OPENWIKI_MODEL_ID=... openwiki code --init
+    """
+    import shutil
+
+    from dwb.retrieval.openwiki_client import register_snapshot
+
+    rc = _repo_cfg(args.repo)
+    version = args.version
+    if version is None:
+        exe = shutil.which("openwiki")
+        pkg = Path(exe).resolve().parents[2] / "package.json" if exe else None
+        version = json.loads(pkg.read_text())["version"] if pkg and pkg.exists() else "unknown"
+    snap = register_snapshot(
+        rc["checkout"], args.repo, rc["sha"], args.root, provider=args.provider,
+        model=args.model, version=version, effort=args.effort, elapsed_s=args.elapsed_s,
+        cost_usd=args.cost_usd,
+    )
+    print(snap.model_dump_json(indent=2))
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     from dwb.manifest import load_manifest
     from dwb.runner import build_components, run_manifest
@@ -118,6 +143,17 @@ def build_parser() -> argparse.ArgumentParser:
     ip.add_argument("--root", default=str(INDEX_ROOT))
     ip.add_argument("--fake", action="store_true")
     ip.set_defaults(func=cmd_index_pdf)
+
+    ws = sub.add_parser("wiki-snapshot", help="register a generated OpenWiki tree as a snapshot")
+    ws.add_argument("--repo", required=True, help="name in configs/repos.yaml")
+    ws.add_argument("--provider", required=True)
+    ws.add_argument("--model", required=True)
+    ws.add_argument("--effort")
+    ws.add_argument("--version", help="openwiki version (default: read from the installed CLI)")
+    ws.add_argument("--elapsed-s", type=float)
+    ws.add_argument("--cost-usd", type=float)
+    ws.add_argument("--root", default="artifacts/wikis")
+    ws.set_defaults(func=cmd_wiki_snapshot)
 
     rn = sub.add_parser("run", help="run one manifest (one condition) over its question set")
     rn.add_argument("--manifest", required=True)
