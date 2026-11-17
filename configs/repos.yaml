@@ -1,0 +1,36 @@
+# Pinned repository revisions (U1). Checkouts live under artifacts/checkouts/<name>/ (gitignored).
+# SHA selection: release tag whose content best matches SWE-QA answer line citations;
+# see docs/spikes/2026-11-openwiki-swe-qa-spike.md.
+repos:
+  flask:
+    url: https://github.com/pallets/flask.git
+    tag: 3.1.2
+    sha: 2c1b30d0503cfb064f1cb252e6614a06915a362a
+    swe_qa_split: flask
+    checkout: artifacts/checkouts/flask-3.1.2
+    role: primary
+  requests:
+    url: https://github.com/psf/requests.git
+    tag: v2.32.5
+    sha: b25c87d7cb8d6a18a37fa12442b5f883f9e41741
+    swe_qa_split: requests
+    checkout: artifacts/checkouts/requests-v2.32.5
+    role: primary
+  pytest:
+    url: https://github.com/pytest-dev/pytest.git
+    tag: 8.4.2
+    sha: bfae4224fd554d3d7f2c277a4cc092b6ec6af3ae
+    swe_qa_split: pytest
+    checkout: artifacts/checkouts/pytest-8.4.2
+    role: reserve
+
+swe_qa:
+  dataset: swe-qa/SWE-QA-Benchmark
+  revision: f048f07da234b39e32937f115d027c5b71acd54e
+  local_dir: artifacts/swe-qa
+  sha256:
+    flask.jsonl: 8e0ecf2163bcbb57282dac291c3801421ef4a7424a721159685945d7b836cb69
+    requests.jsonl: 01606b45b6e92120f4ed429f402e01d173272902baf04353616090c13e3d0ad6
+    pytest.jsonl: cbb235270f2a4a223493621a172978a2349a6e998cefec66e97be324d1c23c80
+  # Rows have only {question, answer}; no upstream IDs. Row ID = "<split>:<0-based line index>".
+  row_id_scheme: split_line_index
