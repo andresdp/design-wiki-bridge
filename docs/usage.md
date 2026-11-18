@@ -1,42 +1,74 @@
 # Using `dwb`
 
-`dwb` answers questions about a software repository. Every claim in an answer cites the original evidence it rests on: code at a commit, PDF pages, or web pages. It works in two modes, with the same commands:
+`dwb` answers questions about a software repository. Every claim in an answer cites the original evidence it rests on: code at a commit, PDF pages, or web pages.
 
-| Mode | Where you run it | Configured by | For |
-|---|---|---|---|
-| **User tool** | inside any git repository | `<repo>/.dwb/config.yaml`, written by `dwb init` | asking and chatting about that repository |
-| **Research harness** | in the `design-wiki-bridge` folder | `configs/` (repos, manifests, eval) | the A/B experiments; `ask`/`chat` take `--repo <name>` |
+`dwb` has **two modes**. They share the query pipeline, the answer format, and most command names, but they differ in who uses them, where they run, and where their files live.
 
-`dwb` picks the mode from the folder: a repository with `.dwb/config.yaml` is a project, otherwise `--repo` selects a research repository.
+| | **User mode** | **Research mode** (experimenter) |
+|---|---|---|
+| For | Anyone asking questions about their own repository | The study: paired A/B experiments on pinned repositories |
+| Run from | Inside any git repository (any subfolder) | The `design-wiki-bridge` folder |
+| Set up with | `dwb init` | `configs/repos.yaml`, `configs/chat.yaml`, `configs/manifests/`, `configs/eval.yaml` |
+| Repository | The one you are in, at its HEAD commit | Pinned checkouts in `artifacts/checkouts/`, selected with `--repo <name>` |
+| Build sources | `dwb index` (everything the config lists) | `dwb index code <repo>`, `dwb index pdf <corpus>`, `dwb wiki snapshot <repo>` |
+| Files written | `<repo>/.dwb/` (hidden from git) | `artifacts/` (indexes, wikis, Tavily store), `runs/`, `reports/` |
+| Ask | `dwb ask "…"`, `dwb chat` | `dwb ask "…" --repo flask`, `dwb chat --repo flask` |
+| Experiments | No | `dwb experiment check / run / evaluate` |
+| Question sets | No | `dwb benchmark draft / validate / freeze / check` |
+| API keys | `~/.config/dwb/.env`; a repository's `.env` gives only `OPENAI_API_KEY` and `TAVILY_API_KEY` | `design-wiki-bridge/.env`, read in full |
+
+**Which mode runs?** `dwb` decides from the current folder and the options:
+
+1. `--repo <name>` given: research mode. Run from `design-wiki-bridge`, where `configs/repos.yaml` is.
+2. Otherwise, inside a git repository whose root has `.dwb/config.yaml`: user mode for that repository.
+3. Otherwise `dwb` stops and says which of the two to set up (`dwb init`, or `--repo`).
+
+A pinned checkout under `artifacts/checkouts/` is a normal git repository, so it can also be set up in user mode (see [Trying user mode on a pinned checkout](#trying-user-mode-on-a-pinned-checkout)). The two modes never share indexes: user mode builds its own in `.dwb/`.
 
 ## Contents
 
 - [Install](#install)
-- [User tool](#user-tool)
-  - [1. dwb init](#1-dwb-init): configure the repository
-  - [2. dwb index](#2-dwb-index): build every source
-  - [3. dwb chat / dwb ask](#3-dwb-chat--dwb-ask)
-  - [Sources](#sources)
-  - [Reading an answer](#reading-an-answer)
+- [User mode](#user-mode)
+  - [1. dwb init](#1-dwb-init-configure-the-repository)
+  - [2. dwb index](#2-dwb-index-build-every-source)
+  - [3. dwb chat / dwb ask](#3-dwb-chat--dwb-ask-ask-questions)
+  - [Sources](#sources-both-modes)
+  - [Reading an answer](#reading-an-answer-both-modes)
   - [The project file](#the-project-file-dwbconfigyaml)
-- [Research harness](#research-harness)
+- [Research mode](#research-mode)
+  - [Asking questions about a research repository](#asking-questions-about-a-research-repository)
+  - [Building the sources](#building-the-sources)
+  - [Running and evaluating experiments](#running-and-evaluating-experiments)
+  - [Building the test set](#building-the-test-set)
+  - [Adding a research repository](#adding-a-research-repository)
+  - [Research configuration](#research-configuration)
+  - [Trying user mode on a pinned checkout](#trying-user-mode-on-a-pinned-checkout)
 - [Logging](#logging-and-output)
 - [Troubleshooting](#troubleshooting)
 
 ## Install
+
+Both modes use the same installation:
 
 ```sh
 conda activate taxonomy                  # Python 3.11 environment with the dependencies
 pip install --no-deps -e <path-to>/design-wiki-bridge     # installs the `dwb` command
 ```
 
-API keys: `OPENAI_API_KEY` is required, and `TAVILY_API_KEY` is needed only for web search. `dwb init` offers to save them in `~/.config/dwb/.env` (readable only by you), which `dwb` reads from any folder. A `.env` file in the current folder also works, and keys exported in your shell always take precedence. Inside a project, `dwb` reads only `OPENAI_API_KEY` and `TAVILY_API_KEY` from the repository's `.env`; other settings there (for example `OPENAI_BASE_URL`) are ignored, so a cloned repository cannot redirect your key. Put such settings in your shell or `~/.config/dwb/.env`.
+Run `dwb` in your own terminal with the environment activated. `conda run` does not pass keyboard input through, so `dwb init` and `dwb chat` cannot read your answers under it.
+
+API keys: `OPENAI_API_KEY` is required, and `TAVILY_API_KEY` is needed only for web search. Keys exported in your shell always take precedence. Beyond that, the modes read keys from different places:
+
+- **User mode:** `dwb init` offers to save the keys in `~/.config/dwb/.env` (readable only by you), which `dwb` reads from any folder. From a repository's own `.env`, `dwb` reads only `OPENAI_API_KEY` and `TAVILY_API_KEY`; other settings there (for example `OPENAI_BASE_URL`) are ignored, so a cloned repository cannot redirect your key. Put such settings in your shell or `~/.config/dwb/.env`.
+- **Research mode:** `design-wiki-bridge/.env` is read in full, then `~/.config/dwb/.env`.
 
 For the wiki source you also need [OpenWiki](https://github.com/langchain-ai/openwiki) **0.9.0** (`npm install -g openwiki@0.9.0`, Node ≥ 22.22) and `git` on the `PATH`.
 
 Every command has help: `dwb --help`, `dwb init --help`, `dwb ask --help`, and so on.
 
-## User tool
+## User mode
+
+For asking questions about your own repository. Everything happens inside that repository:
 
 ```sh
 cd ~/code/some-repo
@@ -45,7 +77,7 @@ dwb index       # 2. index everything the config lists (code at HEAD, PDFs, wiki
 dwb chat        # 3. ask away
 ```
 
-### 1. `dwb init`
+### 1. `dwb init`: configure the repository
 
 Run it anywhere inside the repository. It shows the commit that will be indexed (HEAD) and asks about:
 
@@ -57,7 +89,7 @@ Run it anywhere inside the repository. It shows the commit that will be indexed 
 
 The result is **`.dwb/config.yaml`**, a plain YAML file you can edit at any time (see [below](#the-project-file-dwbconfigyaml)). Everything `dwb` writes stays in `.dwb/`, which is hidden from git through `.git/info/exclude`; your `.gitignore` is not touched. `dwb init --yes` accepts every default without asking, and `--force` overwrites an existing config.
 
-### 2. `dwb index`
+### 2. `dwb index`: build every source
 
 Builds every source the config lists, for the **HEAD commit**:
 
@@ -78,7 +110,7 @@ Rerunning is cheap: an index that already exists for the same commit, settings, 
  web     off    excluding github.com, requests.readthedocs.io, pypi.org
 ```
 
-### 3. `dwb chat` / `dwb ask`
+### 3. `dwb chat` / `dwb ask`: ask questions
 
 `dwb chat` and `dwb ask` refuse to run until `dwb index` has finished.
 
@@ -103,7 +135,7 @@ Inside `dwb chat`:
 
 Each question is answered on its own, from the evidence retrieved for it. There is no conversation memory, so make follow-up questions self-contained. The prompt keeps a history (arrow keys) in `.dwb/chat_history`. Web results are cached in `.dwb/tavily/`, so repeating a question doesn't repeat the search.
 
-### Sources
+### Sources (both modes)
 
 The **repository is always a source**. The others are optional:
 
@@ -116,7 +148,7 @@ The **repository is always a source**. The others are optional:
 
 The defaults come from `sources:` in the config. **Vector search or wiki?** Vector search finds code that looks similar to the question. The wiki helps with "how do these parts fit together" questions that span files, but it can miss topics the wiki doesn't cover. Try both on the same question.
 
-### Reading an answer
+### Reading an answer (both modes)
 
 ```
 ╭─ Answer ─────────────────────────────────────────────────────────────╮
@@ -175,19 +207,42 @@ wiki:
 
 After editing it, run `dwb index` again. Changing the embedding model or the code settings builds a new index; the old one stays in `.dwb/index/`. To remove dwb from a repository, delete `.dwb/`.
 
-## Research harness
+## Research mode
 
-Run from the `design-wiki-bridge` folder. Repositories are pinned in `configs/repos.yaml`, and their checkouts live in `artifacts/checkouts/`.
+For the experimenter: the paired A/B study on pinned repositories. Run every research command from the `design-wiki-bridge` folder: configuration (`configs/`), artifacts (`artifacts/`), and `.env` are resolved relative to it. Repositories are pinned in `configs/repos.yaml`, and their checkouts live in `artifacts/checkouts/`.
 
 ```sh
-dwb status                                             # every research repository and its sources
+cd ~/Documents/GitHub/design-wiki-bridge
+conda activate taxonomy
+dwb status                  # every research repository and which sources are ready
+```
+
+### Asking questions about a research repository
+
+`ask` and `chat` work as in user mode, but take `--repo <name>` and use the research indexes and wiki snapshots. Their defaults (models, sources, each repository's PDF corpus and excluded web domains) come from `configs/chat.yaml`.
+
+```sh
 dwb ask "How does Flask answer OPTIONS?" --repo flask --wiki --pdf
 dwb chat --repo requests
+```
 
-dwb index code flask                                   # code index for a research repository
+The chat commands, sources, and answer format are the ones described under [User mode](#3-dwb-chat--dwb-ask-ask-questions). Web results from research-mode chat are cached under `artifacts/tavily/chat-<repo>/`.
+
+### Building the sources
+
+Research mode builds each source separately, so a manifest can pin exactly which index or snapshot a run uses:
+
+```sh
+dwb index code flask                                   # code index for the pinned commit
 dwb index pdf configs/pdfs/flask.yaml                  # PDF corpus
 dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium --elapsed-s 1054.9
+```
 
+`dwb index code` and `dwb index pdf` print the new index ID; put it in the manifests (`indexes.code_index_id`, `indexes.pdf_index_id`). `dwb wiki snapshot` registers the `openwiki/` folder generated in the checkout as a pinned snapshot (`configs/wikis/`). The research harness copies that snapshot into the checkout before each condition B run; in user mode the wiki is used in place.
+
+### Running and evaluating experiments
+
+```sh
 dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
 dwb experiment run configs/manifests/flask-A.yaml --web-mode record
 dwb experiment run configs/manifests/flask-B.yaml --web-mode record
@@ -211,10 +266,12 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
   Results are paired A/B differences with improved/tied/regressed counts. Means and differences use only the questions scored in both runs, and `n_excluded` says how many were left out. A failed question scores correctness 0 and counts in the `failed` metric; its cost is left empty. Judge verdicts are cached per judge model and temperature. `--no-judge` gives recall and cost only.
 
   Pass the A run first. `evaluate` stops if the two saved manifests are not condition A then B or fail the `experiment check` rules; `--allow-unpaired` scores them anyway and records that in `evaluator_config.json`.
-- **Wiki snapshots:** the research harness copies a pinned snapshot into each checkout before a condition B run. In user mode the wiki is used in place.
 - **Question records** live in `data/questions/{test,dev}/`; see `data/questions/README.md`.
 
-**Building the test set.** People select SWE-QA rows, annotate them, and write the custom questions; the `dwb benchmark` commands only move and check records:
+
+### Building the test set
+
+People select SWE-QA rows, annotate them, and write the custom questions; the `dwb benchmark` commands only move and check records:
 
 ```sh
 dwb benchmark draft data/questions/selections/flask.yaml       # drafts/flask.public.jsonl + .excluded.jsonl
@@ -229,7 +286,9 @@ dwb benchmark check data/questions/dev/flask.jsonl data/questions/test/flask.jso
 - **Check:** fails on a shared ID, question text, or SWE-QA row, or when the test file changed after freezing. A missing test file counts as empty.
 - Exit codes: 1 means problems in the records; 2 means a setup or usage error.
 
-**Adding a research repository.** Pin a commit and fetch only that commit:
+### Adding a research repository
+
+Pin a commit and fetch only that commit:
 
 ```sh
 git init -q artifacts/checkouts/<repo>-<tag>
@@ -239,7 +298,8 @@ git -C artifacts/checkouts/<repo>-<tag> checkout --detach "<tag>^{commit}"
 
 Then add it to `configs/repos.yaml` (`url`, `tag`, `sha`, `checkout`), and optionally add a PDF corpus and excluded web domains to `configs/chat.yaml`. Build the indexes with `dwb index code <repo>` and the commands above. Choosing the commit to pin (as the U1 spike did by scoring tags against SWE-QA) needs the full history, so do that in a separate, temporary clone.
 
-Research configuration:
+
+### Research configuration
 
 | File | Contents |
 |---|---|
@@ -251,25 +311,38 @@ Research configuration:
 | `configs/wikis/*.json` | Registered wiki snapshot manifests |
 | `src/dwb/prompt_files/*.md` | Versioned prompts, shipped with the package; their hashes are recorded in every run |
 
+### Trying user mode on a pinned checkout
+
+The checkouts in `artifacts/checkouts/` are git repositories at the pinned commits, so you can try user mode on one without cloning anything:
+
+```sh
+cd artifacts/checkouts/requests-v2.32.5
+dwb init        # PDFs can point at ../../pdfs/rfc9110.pdf; the existing openwiki/ is detected
+dwb index       # builds new indexes in .dwb/; the research indexes are not touched
+dwb chat
+```
+
+The research harness reads committed files through git, so `.dwb/` (hidden from git) does not affect it. Do not let `dwb index` regenerate the wiki there (keep `wiki.generate: false`): the checkout's `openwiki/` is the pinned snapshot. To undo, delete `.dwb/`.
+
 ## Logging and output
 
 Progress messages go to stderr, and results (answers, JSON) go to stdout. `dwb -v <command>` adds per-stage timings and token counts, and `dwb -q <command>` shows only warnings and errors. Put these options **before** the command.
 
 ## Troubleshooting
 
-| Message | Fix |
-|---|---|
-| `this folder is not a dwb project` | `dwb init` inside the repository (or `--repo <name>` in design-wiki-bridge). |
-| `… has not been indexed yet` | `dwb index`. |
-| `The index is for commit … but HEAD is …` | `dwb index` to update; until then answers cite the indexed commit. |
-| `not inside a git repository` | dwb indexes committed code: `git init` and commit, or cd into a repository. |
-| `OPENAI_API_KEY is not set` | Rerun `dwb init` to save it, export it, or put it in `~/.config/dwb/.env`. |
-| `Wiki not available: openwiki/ missing…` | Set `wiki.generate: true` and `dwb index`, or run `openwiki code --init` yourself, then `dwb index`. |
-| `OpenWiki MCP server lacks … (needs 0.9.0)` | `npm install -g openwiki@0.9.0`, then `hash -r`. |
-| `did not return a PDF` | Download the file in a browser and list the local path under `pdfs:`. |
-| `no code index for <repo> …` (research mode) | `dwb index code <repo>`. |
-| `replay miss` during an experiment | Run that manifest with `--web-mode record` first. |
-| `code index … was built by chunker version 1` / `chunked with max_span_tokens=…` | Rebuild: `dwb index code <repo>` (research; then update the manifest's `code_index_id`) or `dwb index` (project). |
-| `runs are not a valid A/B pair` | Pass the A run first, or fix the manifests so `dwb experiment check` passes; `--allow-unpaired` only for exploration. |
-| `openwiki … changed since dwb index` | `dwb index` again, or ask with `--no-wiki`. |
-| `corrupt Tavily record` | Delete the named file and rerun with `--web-mode record`. |
+| Mode | Message | Fix |
+|---|---|---|
+| Both | `this folder is not a dwb project` | User mode: `dwb init` inside the repository. Research mode: run from design-wiki-bridge with `--repo <name>`. |
+| User | `… has not been indexed yet` | `dwb index`. |
+| User | `The index is for commit … but HEAD is …` | `dwb index` to update; until then answers cite the indexed commit. |
+| User | `not inside a git repository` | dwb indexes committed code: `git init` and commit, or cd into a repository. |
+| User | `OPENAI_API_KEY is not set` | Rerun `dwb init` to save it, export it, or put it in `~/.config/dwb/.env`. |
+| User | `Wiki not available: openwiki/ missing…` | Set `wiki.generate: true` and `dwb index`, or run `openwiki code --init` yourself, then `dwb index`. |
+| Both | `OpenWiki MCP server lacks … (needs 0.9.0)` | `npm install -g openwiki@0.9.0`, then `hash -r`. |
+| User | `did not return a PDF` | Download the file in a browser and list the local path under `pdfs:`. |
+| Research | `no code index for <repo> …` | `dwb index code <repo>`. |
+| Research | `replay miss` during an experiment | Run that manifest with `--web-mode record` first. |
+| Both | `code index … was built by chunker version 1` / `chunked with max_span_tokens=…` | Rebuild: `dwb index code <repo>` (research; then update the manifest's `code_index_id`) or `dwb index` (project). |
+| Research | `runs are not a valid A/B pair` | Pass the A run first, or fix the manifests so `dwb experiment check` passes; `--allow-unpaired` only for exploration. |
+| User | `openwiki … changed since dwb index` | `dwb index` again, or ask with `--no-wiki`. |
+| Research | `corrupt Tavily record` | Delete the named file and rerun with `--web-mode record`. |
