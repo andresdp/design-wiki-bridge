@@ -294,3 +294,99 @@ def test_public_items_without_spans_need_no_checkout(tmp_path):
 
     ws = make_ws(tmp_path)
     assert validate(ws, write_records(tmp_path, pub())).ok
+
+
+# ----------------------------------------------------------------------- U3: freeze, check
+
+
+def run_freeze(ws, path, **kw):
+    from dwb.curation import freeze_set
+
+    return freeze_set(ws, path, reader_for=toy_reader, **kw)
+
+
+def write_dev(tmp_path, *rows) -> Path:
+    p = tmp_path / "data" / "questions" / "dev" / "toy.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return p
+
+
+def test_freeze_writes_the_hash_the_runner_accepts(tmp_path):
+    from dwb.benchmark.freeze import records_hash
+    from dwb.benchmark.schemas import load_records
+    from dwb.runner import load_question_set
+    from test_graph import manifest
+
+    ws = make_ws(tmp_path)
+    with_corpus(tmp_path)
+    p = write_records(tmp_path, pub(), cus())
+    res = run_freeze(ws, p)
+    assert res.ok and res.digest == records_hash(load_records(p))
+    assert Path(f"{p}.sha256").read_text().strip() == res.digest
+    m = manifest("A")
+    m = m.model_copy(update={"repo_sha": SHA, "question_set": m.question_set.model_copy(
+        update={"path": str(p.relative_to(tmp_path)), "hash": res.digest})})
+    assert len(load_question_set(m, tmp_path)) == 2
+
+
+def test_freeze_refuses_a_set_with_problems(tmp_path):
+    ws = make_ws(tmp_path)
+    p = write_records(tmp_path, pub(), pub())
+    res = run_freeze(ws, p)
+    assert not res.ok and res.digest is None and "duplicate id" in res.report.problems[0]
+    assert not Path(f"{p}.sha256").exists()
+
+
+def test_freeze_refuses_overlap_with_the_dev_set(tmp_path):
+    ws = make_ws(tmp_path)
+    write_dev(tmp_path, pub(id="toy-dev-pub-001", question="dev wording?"))
+    p = write_records(tmp_path, pub())
+    res = run_freeze(ws, p)
+    assert not res.ok and any("toy:1" in x for x in res.report.problems)
+    assert not Path(f"{p}.sha256").exists()
+
+
+def test_check_passes_on_disjoint_sets_and_fails_on_overlap(tmp_path):
+    from dwb.curation import check_sets
+
+    dev = write_dev(tmp_path, pub(id="toy-dev-pub-001", question="dev?",
+                                  provenance={"upstream_split": "toy",
+                                              "upstream_row_id": "toy:0"}))
+    test = write_records(tmp_path, pub())
+    assert check_sets(dev, test).ok
+    test = write_records(tmp_path, pub(id="toy-pub-000", provenance={
+        "upstream_split": "toy", "upstream_row_id": "toy:0"}))
+    res = check_sets(dev, test)
+    assert not res.ok and "toy:0" in res.problems[0]
+
+
+def test_check_reports_a_stale_freeze(tmp_path):
+    from dwb.benchmark.freeze import freeze
+    from dwb.curation import check_sets
+
+    dev = write_dev(tmp_path, pub(id="toy-dev-pub-009", question="dev?", provenance={
+        "upstream_split": "toy", "upstream_row_id": "toy:9"}))
+    test = write_records(tmp_path, pub())
+    freeze(test)
+    assert check_sets(dev, test).ok
+    write_records(tmp_path, pub(question="edited after freezing?"))
+    res = check_sets(dev, test)
+    assert not res.ok and "sha256" in res.problems[0]
+    Path(f"{test}.sha256").unlink()
+    assert check_sets(dev, test).ok
+
+
+def test_check_treats_a_missing_test_file_as_empty(tmp_path):
+    from dwb.curation import check_sets
+
+    dev = write_dev(tmp_path, pub())
+    res = check_sets(dev, tmp_path / "data/questions/test/none.jsonl")
+    assert res.ok and "does not exist" in res.warnings[0]
+
+
+def test_check_needs_the_dev_file(tmp_path):
+    from dwb.curation import check_sets
+
+    with pytest.raises(WorkspaceError, match="not found"):
+        check_sets(tmp_path / "nope.jsonl", tmp_path / "also-nope.jsonl")

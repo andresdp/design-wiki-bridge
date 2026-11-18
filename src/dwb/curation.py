@@ -13,7 +13,13 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from dwb.benchmark.schemas import QuestionRecord, save_records, validate_against_checkout
+from dwb.benchmark.freeze import file_hash, find_overlaps, freeze
+from dwb.benchmark.schemas import (
+    QuestionRecord,
+    load_records,
+    save_records,
+    validate_against_checkout,
+)
 from dwb.benchmark.swe_qa import Selection, build_drafts, fetch_split, load_split
 from dwb.log import get_logger
 from dwb.repo import RepoReader
@@ -22,6 +28,7 @@ from dwb.workspace import RepoInfo, Workspace, WorkspaceError
 LOG = get_logger("curation")
 
 DRAFTS_DIR = Path("data/questions/drafts")
+DEV_DIR = Path("data/questions/dev")
 
 Fetcher = Callable[[str, str, Path], Path]
 ReaderFactory = Callable[[RepoInfo], RepoReader]
@@ -241,3 +248,67 @@ def validate(ws: Workspace, path: Path, *, reader_for: ReaderFactory = git_reade
         "expected_claims": sum(len(r.expected_claims) for r in records),
     }
     return report
+
+
+# -------------------------------------------------------------------------- freeze, check
+
+
+@dataclass
+class FreezeResult:
+    report: ValidationReport
+    digest: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.digest is not None
+
+
+def freeze_set(ws: Workspace, path: Path, *, reader_for: ReaderFactory = git_reader,
+               pdf_corpus: Path | None = None, dev_dir: Path = DEV_DIR) -> FreezeResult:
+    """Validate, check disjointness against each repository's dev set, then write the hash.
+
+    Nothing is written when any problem or overlap exists.
+    """
+    report = validate(ws, path, reader_for=reader_for, pdf_corpus=pdf_corpus)
+    for repo in sorted({r.repo for r in report.records}):
+        dev_path = ws.resolve(dev_dir) / f"{repo}.jsonl"
+        if dev_path.exists():
+            test = [r for r in report.records if r.repo == repo]
+            report.problems += [f"overlap with {dev_path.name} dev set: {o}"
+                                for o in find_overlaps(load_records(dev_path), test)]
+    if not report.ok:
+        return FreezeResult(report)
+    digest = freeze(path)
+    LOG.info("Froze %s: %s", path, digest)
+    return FreezeResult(report, digest)
+
+
+@dataclass
+class CheckResult:
+    problems: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.problems
+
+
+def check_sets(dev_path: Path, test_path: Path) -> CheckResult:
+    """Dev and test share no ID, question text, or SWE-QA row; a frozen test set is unchanged.
+
+    A missing test file counts as an empty set (the test set may not exist yet).
+    """
+    if not dev_path.exists():
+        raise WorkspaceError(f"dev set {dev_path} not found")
+    res = CheckResult()
+    if not test_path.exists():
+        res.warnings.append(f"test set {test_path} does not exist yet; nothing to compare")
+        return res
+    res.problems += find_overlaps(load_records(dev_path), load_records(test_path))
+    sidecar = Path(f"{test_path}.sha256")
+    if sidecar.exists():
+        frozen, actual = sidecar.read_text().strip(), file_hash(test_path)
+        if frozen != actual:
+            res.problems.append(f"{test_path} changed after it was frozen: {sidecar.name} has "
+                                f"{frozen}, the file hashes to {actual}")
+    return res

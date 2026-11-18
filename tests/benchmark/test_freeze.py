@@ -41,3 +41,25 @@ def test_dev_test_overlap_rejected():
         check_disjoint([rec(1)], [rec(1, q="other")])
     with pytest.raises(ValueError, match="overlap"):
         check_disjoint([rec(5, q="same")], [rec(6, q="same")])
+
+
+def test_shared_upstream_row_is_an_overlap():
+    dev = [rec(1)]
+    test = [QuestionRecord(id="other-id", kind="public", repo="toy", repo_sha="s",
+                           question="edited text",
+                           provenance={"upstream_split": "flask", "upstream_row_id": "flask:1"})]
+    with pytest.raises(ValueError, match="flask:1"):
+        check_disjoint(dev, test)
+
+
+def test_custom_items_never_collide_on_upstream_rows():
+    def custom(i):
+        return QuestionRecord(
+            id=f"c-{i}", kind="custom", repo="toy", repo_sha="s", question=f"cq{i}",
+            allowed_sources=["code", "pdf"], expected_claims=[{"id": "c1", "text": "t"}],
+            evidence=[{"id": "e1", "alternatives": [
+                {"source_type": "code", "path": "a.py", "start_line": 1, "end_line": 1},
+                {"source_type": "pdf", "doc_id": "d", "page": 1}]}],
+            provenance={"author": "a"})
+
+    check_disjoint([custom(1)], [custom(2)])
