@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-All of these run in the `taxonomy` env, from the repo root (paths and `.env` are resolved relative to the current folder). The package is installed editable (`pip install --no-deps -e .`). Every `dwb` command logs progress to stderr (rich); `dwb -v ...` adds per-stage timings, and `dwb -q ...` shows warnings only. JSON results go to stdout.
+All of these run in the `taxonomy` env, from the repo root (paths and `.env` are resolved relative to the current folder). The package is installed editable (`pip install --no-deps -e .`). Output contract: messages, progress and errors go to stderr; data commands (`status`, `index`, `wiki snapshot`, `experiment`, `benchmark`) print human output at a terminal and JSON on stdout when piped or with `--json` (`ask`/`chat` stay human). Global options go before the command: `-v` (timings, tracebacks), `-q`, `--no-color`/`NO_COLOR`. Exit codes: 0 ok, 1 problems/unexpected error, 2 setup or usage error, 130 Ctrl-C. `conda run` pipes output, so dwb behaves as piped (JSON, no progress, no prompts); for interactive or progress output (`init`, `chat`, `index`, `experiment run`) use an activated env or `conda run --no-capture-output -n taxonomy dwb ...`.
 
 - Tests (offline; `live` tests are skipped): `conda run -n taxonomy pytest`
 - Live checks (need `OPENAI_API_KEY`): `conda run -n taxonomy pytest -m live`

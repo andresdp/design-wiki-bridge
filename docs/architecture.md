@@ -96,7 +96,7 @@ flowchart TB
 | 3 Evaluation | `eval.*` (except `command`), `evidence_text` | Score saved traces: span recall, claim correctness, citation support and coverage, cost tables | DeepEval (optional diagnostics), LangChain chat model (judge) |
 | 4 Adapters | `retrieval.*`, `web.tavily_store` | Build and query the indexes, talk to OpenWiki over MCP and resolve wiki references to code spans, and record or replay Tavily | Chroma, OpenAI embeddings, langchain-mcp-adapters, tavily-python |
 | 5 Domain model | `evidence`, `trace`, `manifest`, `prompts`, `benchmark.*` | The shared vocabulary: evidence items and IDs, traces, run manifests, question records, and prompt versions (see §6) | pydantic |
-| 6 Foundation | `repo`, `tokens`, `usage`, `log`, `progress` | Read files at a commit through git, count tokens, collect usage from callbacks, and log. `progress` is the one event type (`ProgressEvent`) that indexing, the runner, OpenWiki generation and evaluation send to an optional `on_progress` callback; `ui` renders it, so no lower layer imports presentation code (KTD2) | tiktoken, LangChain callbacks, rich |
+| 6 Foundation | `repo`, `tokens`, `usage`, `log`, `progress` | Read files at a commit through git, count tokens, collect usage from callbacks, and log. `progress` is the one event type (`ProgressEvent`) that indexing, the runner, OpenWiki generation and evaluation send to an optional `on_progress` callback; `ui` renders it, so no lower layer imports presentation code (KTD2). OpenWiki generation writes its own output to `.dwb/openwiki.log` so a spinner can show meanwhile; `-v` streams it to the terminal instead (KTD7) | tiktoken, LangChain callbacks, rich |
 
 Two consequences of the layering:
 
