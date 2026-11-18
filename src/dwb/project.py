@@ -206,43 +206,58 @@ def suggest_exclude_domains(root: Path) -> list[str]:
 # --------------------------------------------------------------------------- keys
 
 
-# A repository's own .env is untrusted in user mode: a cloned repo could set
-# OPENAI_BASE_URL (or a proxy) and send the user's key elsewhere. Outside the research
-# harness folder only these names are read from ./.env.
+# The API keys a project stores in ``.dwb/.env``. Only these names are read from it: a
+# cloned repo could ship a ``.dwb/.env`` that sets OPENAI_BASE_URL (or a proxy) and send the
+# user's key elsewhere.
 LOCAL_ENV_KEYS = ("OPENAI_API_KEY", "TAVILY_API_KEY")
+ENV_NAME = ".env"
+
+
+def project_env(root: Path) -> Path:
+    """The project's key file: ``<repo>/.dwb/.env`` (hidden from git with ``.dwb/``)."""
+    return root / DWB_DIR / ENV_NAME
+
+
+def _project_root(start: Path) -> Path | None:
+    """The nearest folder at or above ``start`` holding ``.dwb/config.yaml`` (no git call)."""
+    for d in (start, *start.parents):
+        if (d / DWB_DIR / CONFIG_NAME).exists():
+            return d
+    return None
 
 
 def load_env(cwd: Path | None = None, global_env: Path | None = None) -> list[Path]:
-    """Load ./.env then ~/.config/dwb/.env. Variables already set (the shell) always win.
+    """Load the API keys for the current folder. Variables already set (the shell) always win.
 
-    ~/.config/dwb/.env is the user's own file and is loaded in full. ./.env is loaded in full
-    only in the research harness folder (it has configs/repos.yaml); anywhere else only
-    ``LOCAL_ENV_KEYS`` are taken from it."""
+    Research mode (the harness folder, with configs/repos.yaml): ./.env in full, then
+    ~/.config/dwb/.env. User mode: only ``<repo>/.dwb/.env``, and only ``LOCAL_ENV_KEYS``
+    from it; neither the repository's own .env nor ~/.config/dwb/.env is read."""
     try:
         from dotenv import dotenv_values, load_dotenv
     except ImportError:  # pragma: no cover
         return []
     cwd = cwd or Path.cwd()
-    global_env = global_env or GLOBAL_ENV
     loaded = []
-    local = cwd / ".env"
-    if local.exists():
-        if (cwd / "configs" / "repos.yaml").exists():
-            load_dotenv(local, override=False)
-        else:
-            for k, v in dotenv_values(local).items():
-                if k in LOCAL_ENV_KEYS and v and k not in os.environ:
-                    os.environ[k] = v
-                elif k not in LOCAL_ENV_KEYS:
-                    LOG.debug("Ignoring %s from %s (only %s are read from a project .env)", k,
-                              local, ", ".join(LOCAL_ENV_KEYS))
-        loaded.append(local)
-    if global_env.exists() and load_dotenv(global_env, override=False):
-        loaded.append(global_env)
+    if (cwd / "configs" / "repos.yaml").exists():
+        for env in (cwd / ".env", global_env or GLOBAL_ENV):
+            if env.exists() and load_dotenv(env, override=False):
+                loaded.append(env)
+        return loaded
+    root = _project_root(cwd)
+    env = project_env(root) if root else None
+    if env is None or not env.exists():
+        return loaded
+    for k, v in dotenv_values(env).items():
+        if k in LOCAL_ENV_KEYS and v and k not in os.environ:
+            os.environ[k] = v
+        elif k not in LOCAL_ENV_KEYS:
+            LOG.debug("Ignoring %s from %s (only %s are read from it)", k, env,
+                      ", ".join(LOCAL_ENV_KEYS))
+    loaded.append(env)
     return loaded
 
 
-def save_global_key(name: str, value: str, path: Path = GLOBAL_ENV) -> Path:
+def save_key(name: str, value: str, path: Path) -> Path:
     """Write the key with 0600 from the start (no window where it is world-readable)."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lines = [ln for ln in (path.read_text().splitlines() if path.exists() else [])
@@ -559,7 +574,8 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
                     sha[:12])
     if embedding is None:
         if not os.environ.get("OPENAI_API_KEY"):
-            raise WorkspaceError("OPENAI_API_KEY is not set (run dwb init, or export it)")
+            raise WorkspaceError("OPENAI_API_KEY is not set (run dwb init to save it in "
+                                 ".dwb/.env, or export it)")
         from langchain_openai import OpenAIEmbeddings
 
         from dwb.manifest import MODEL_NET

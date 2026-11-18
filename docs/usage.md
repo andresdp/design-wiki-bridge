@@ -15,7 +15,7 @@
 | Ask | `dwb ask "…"`, `dwb chat` | `dwb ask "…" --repo flask`, `dwb chat --repo flask` |
 | Experiments | No | `dwb experiment check / run / evaluate` |
 | Question sets | No | `dwb benchmark draft / validate / freeze / check` |
-| API keys | `~/.config/dwb/.env`; a repository's `.env` gives only `OPENAI_API_KEY` and `TAVILY_API_KEY` | `design-wiki-bridge/.env`, read in full |
+| API keys | `<repo>/.dwb/.env` (only `OPENAI_API_KEY` and `TAVILY_API_KEY`) | `design-wiki-bridge/.env`, read in full |
 
 **Which mode runs?** `dwb` decides from the current folder and the options:
 
@@ -65,8 +65,8 @@ Plain `conda run -n taxonomy dwb ...` pipes the output and does not pass keyboar
 
 API keys: `OPENAI_API_KEY` is required, and `TAVILY_API_KEY` is needed only for web search. Keys exported in your shell always take precedence. Beyond that, the modes read keys from different places:
 
-- **User mode:** `dwb init` offers to save the keys in `~/.config/dwb/.env` (readable only by you), which `dwb` reads from any folder. From a repository's own `.env`, `dwb` reads only `OPENAI_API_KEY` and `TAVILY_API_KEY`; other settings there (for example `OPENAI_BASE_URL`) are ignored, so a cloned repository cannot redirect your key. Put such settings in your shell or `~/.config/dwb/.env`.
-- **Research mode:** `design-wiki-bridge/.env` is read in full, then `~/.config/dwb/.env`.
+- **User mode:** keys belong to the project. `dwb init` saves them in `<repo>/.dwb/.env` (readable only by you, and hidden from git with the rest of `.dwb/`), and `dwb` reads them from there anywhere inside the repository. Nothing else is read: not the repository's own `.env`, and not `~/.config/dwb/.env`. Only `OPENAI_API_KEY` and `TAVILY_API_KEY` are taken from `.dwb/.env`; other settings (for example `OPENAI_BASE_URL`) are ignored, so a cloned repository cannot redirect your key. A key exported in your shell still wins over the file. Put other settings in your shell.
+- **Research mode:** `design-wiki-bridge/.env` is read in full, then `~/.config/dwb/.env` (unchanged).
 
 For the wiki source you also need [OpenWiki](https://github.com/langchain-ai/openwiki) **0.9.0** (`npm install -g openwiki@0.9.0`, Node ≥ 22.22) and `git` on the `PATH`.
 
@@ -92,7 +92,7 @@ Run it anywhere inside the repository. It needs a terminal (use `--yes` to run w
 3. **Web search:** whether to use it by default, and which domains to exclude. `init` suggests the project's own hosts (its git host, the docs URLs in `pyproject.toml`/`package.json`, PyPI/npm), so web evidence stays external to the code. Edit the list as you like.
 4. **OpenWiki:** whether to use the wiki source. If `openwiki/` is missing or older than HEAD, `init` asks whether `dwb index` should generate or update it. That makes model calls (about 15 minutes for a mid-size repository) and writes `openwiki/`, `AGENTS.md`, and a GitHub workflow into the repository.
 5. **Default sources:** which of wiki, PDFs, and web `ask` and `chat` use unless you override them.
-6. **API keys:** if a key is missing, paste it to save it in `~/.config/dwb/.env`. Typing shows `*` per character, and `init` confirms the key as `sk-*****xyz` (first and last three characters only).
+6. **API keys:** if a key is missing, paste it to save it in `.dwb/.env`. Typing shows `*` per character, and `init` confirms the key as `sk-*****xyz` (first and last three characters only). If the project already has a key, `init` shows where it is (`.dwb/.env` or your shell) with that masked preview and asks whether to keep it; a key in `.dwb/.env` can be replaced, a shell variable has to be changed in the shell.
 
 The result is **`.dwb/config.yaml`**, a plain YAML file you can edit at any time (see [below](#the-project-file-dwbconfigyaml)). Everything `dwb` writes stays in `.dwb/`, which is hidden from git through `.git/info/exclude`; your `.gitignore` is not touched. `dwb init --yes` accepts every default without asking, and `--force` overwrites an existing config.
 
@@ -415,7 +415,7 @@ Long commands say at the start what Ctrl-C does (for example `Ctrl-C stops; fini
 | User | `… has not been indexed yet` | `dwb index`. |
 | User | `The index is for commit … but HEAD is …` | `dwb index` to update; until then answers cite the indexed commit. |
 | User | `not inside a git repository` | dwb indexes committed code: `git init` and commit, or cd into a repository. |
-| User | `OPENAI_API_KEY is not set` | Rerun `dwb init` to save it, export it, or put it in `~/.config/dwb/.env`. |
+| User | `OPENAI_API_KEY is not set` | Rerun `dwb init` to save it in `.dwb/.env`, or export it. A key in `~/.config/dwb/.env` is not used in user mode. |
 | User | `Wiki not available: openwiki/ missing…` | Set `wiki.generate: true` and `dwb index`, or run `openwiki code --init` yourself, then `dwb index`. |
 | Both | `OpenWiki MCP server lacks … (needs 0.9.0)` | `npm install -g openwiki@0.9.0`, then `hash -r`. |
 | User | `did not return a PDF` | Download the file in a browser and list the local path under `pdfs:`. |

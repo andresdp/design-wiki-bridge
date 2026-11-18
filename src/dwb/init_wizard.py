@@ -15,17 +15,18 @@ from dwb import __version__, ui
 from dwb.project import (
     CONFIG_NAME,
     DWB_DIR,
-    GLOBAL_ENV,
     PdfEntry,
     ProjectConfig,
     folder_pdfs,
     git_root,
     head_sha,
+    hide_from_git,
     is_dirty,
     is_url,
     openwiki_status,
     openwiki_version,
-    save_global_key,
+    project_env,
+    save_key,
     suggest_exclude_domains,
     write_config,
 )
@@ -185,10 +186,13 @@ def run_init(start: Path, console: Console | None = None, *, yes: bool = False,
                                             default=False)
 
     _section(c, "API keys")
+    env = project_env(root)
     saved = []
-    if key := _ensure_key(c, ask, "OPENAI_API_KEY", "embeddings and answers", required=True):
+    if key := _ensure_key(c, ask, env, "OPENAI_API_KEY", "embeddings and answers",
+                          required=True):
         saved.append(key)
-    if web and (key := _ensure_key(c, ask, "TAVILY_API_KEY", "web search", required=False)):
+    if web and (key := _ensure_key(c, ask, env, "TAVILY_API_KEY", "web search",
+                                   required=False)):
         saved.append(key)
 
     cfg = ProjectConfig(
@@ -205,45 +209,46 @@ def run_init(start: Path, console: Console | None = None, *, yes: bool = False,
     c.print("\n[bold]Summary[/]")
     ui.bullet(f"{DWB_DIR}/ is hidden from git through .git/info/exclude", console=c)
     for k in saved:
-        ui.bullet(f"saved {k} to {GLOBAL_ENV}", console=c)
+        ui.bullet(f"saved {k} to {env}", console=c)
     ui.bullet("review or edit the configuration any time; after indexing: dwb chat", console=c)
     ui.outcome(f"Wrote {path}", "dwb index", console=c)
     return path
 
 
-def _saved_value(name: str) -> str | None:
-    """The value of ``name`` in the global .env, or None (missing file or key)."""
+def _saved_value(env: Path, name: str) -> str | None:
+    """The value of ``name`` in the project's .dwb/.env, or None (missing file or key)."""
     try:
         from dotenv import dotenv_values
     except ImportError:  # pragma: no cover
         return None
-    return dotenv_values(GLOBAL_ENV).get(name) if GLOBAL_ENV.exists() else None
+    return dotenv_values(env).get(name) if env.exists() else None
 
 
-def _ensure_key(c: Console, ask: Asker, name: str, purpose: str, *,
+def _ensure_key(c: Console, ask: Asker, env: Path, name: str, purpose: str, *,
                 required: bool) -> str | None:
-    """Offer to save a missing key in the global .env, or to replace the one saved there;
-    returns its name when a key was saved."""
+    """Offer to save a missing key in the project's .dwb/.env, or to replace the one saved
+    there; returns its name when a key was saved."""
     current = os.environ.get(name)
     if current:
-        saved_here = _saved_value(name) == current
-        where = GLOBAL_ENV if saved_here else "your environment (shell or a .env file)"
+        saved_here = _saved_value(env, name) == current
+        where = env if saved_here else "your shell environment"
         c.print(f"{name}: [green]found[/] in {where} ({mask_secret(current)})")
         if not saved_here:  # a shell variable wins over the file: a new key there would not apply
-            c.print("  [dim]To use another key, change it where it is set.[/]")
+            c.print("  [dim]To use another key, change or unset it in your shell.[/]")
             return None
         if ask.yes or ask.confirm(f"Use this {name}?", default=True):
             return None
-        prompt = f"Paste the new {name} to save it in {GLOBAL_ENV} (Enter to keep the current one)"
+        prompt = f"Paste the new {name} to save it in {env} (Enter to keep the current one)"
     else:
         c.print(f"{name} ({purpose}) is not set.")
-        prompt = f"Paste {name} to save it in {GLOBAL_ENV} (Enter to skip)"
+        prompt = f"Paste {name} to save it in {env} (Enter to skip)"
     value = ask.secret(prompt)
     if value:
-        save_global_key(name, value)
-        ui.keep(f"{name} in {GLOBAL_ENV}")
+        hide_from_git(env.parent.parent)  # before the key exists on disk
+        save_key(name, value, env)
+        ui.keep(f"{name} in {env}")
         ui.note_on_stop(_NOT_WRITTEN, key="init")
-        c.print(f"Saved to {GLOBAL_ENV} (readable only by you).")
+        c.print(f"Saved to {env} (readable only by you, hidden from git).")
         return name
     if required and not current:
-        c.print(f"[yellow]Set {name} before `dwb index`: export it, or put it in {GLOBAL_ENV}.[/]")
+        c.print(f"[yellow]Set {name} before `dwb index`: rerun dwb init, or put it in {env}.[/]")

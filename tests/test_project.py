@@ -19,7 +19,7 @@ from dwb.project import (
     find_project,
     hide_from_git,
     index_project,
-    save_global_key,
+    save_key,
     suggest_exclude_domains,
     write_config,
 )
@@ -156,11 +156,9 @@ def test_ctrl_d_at_an_init_prompt_is_a_stop_not_a_crash(repo, tty, monkeypatch):
 
 def test_ctrl_c_during_init_states_what_was_written(repo, tty, monkeypatch):
     import dwb.init_wizard as wiz
-    import dwb.project as project
 
     monkeypatch.delenv("OPENAI_API_KEY")
-    monkeypatch.setattr(project, "GLOBAL_ENV", repo / "no-global.env")  # not the user's file
-    monkeypatch.setattr(wiz, "save_global_key", lambda name, value: None)
+    monkeypatch.setattr(wiz, "save_key", lambda name, value, path: None)
     monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
 
     def stop(*a, **kw):
@@ -171,7 +169,8 @@ def test_ctrl_c_during_init_states_what_was_written(repo, tty, monkeypatch):
     answers = "\n".join(["myproj", "", "", "", "n", "", key]) + "\n" + "\n" * 10
     r = CliRunner().invoke(cli(), ["init"], input=answers)
     assert r.exit_code == 130, r.output
-    assert "! Stopped" in r.output and f"kept: OPENAI_API_KEY in {wiz.GLOBAL_ENV}" in r.output
+    env = repo / ".dwb" / ".env"
+    assert "! Stopped" in r.output and f"kept: OPENAI_API_KEY in {env}" in r.output
     assert "config.yaml was not written" in r.output and "SECRETVALUE" not in r.output
 
 
@@ -360,11 +359,11 @@ def test_suggest_exclude_domains(repo):
     assert suggest_exclude_domains(repo)[0] == "github.com"
 
 
-def test_save_global_key_is_private(tmp_path, monkeypatch):
+def test_save_key_is_private(tmp_path, monkeypatch):
     p = tmp_path / "dwb" / ".env"
     monkeypatch.delenv("DWB_TEST_KEY", raising=False)
-    save_global_key("DWB_TEST_KEY", "one", p)
-    save_global_key("DWB_TEST_KEY", "two", p)
+    save_key("DWB_TEST_KEY", "one", p)
+    save_key("DWB_TEST_KEY", "two", p)
     assert p.read_text() == "DWB_TEST_KEY=two\n"
     assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
     assert os.environ["DWB_TEST_KEY"] == "two"
@@ -381,19 +380,38 @@ def test_research_mode_still_needs_repo_flag_outside_projects(monkeypatch):
 # ------------------------------------------------------------------ review fixes
 
 
-def test_project_env_only_supplies_api_keys(tmp_path, monkeypatch):
+def test_user_mode_reads_keys_only_from_the_project_dwb_env(tmp_path, monkeypatch):
     from dwb.project import load_env
 
     proj = tmp_path / "cloned"
-    proj.mkdir()
-    (proj / ".env").write_text("OPENAI_API_KEY=from-repo\nOPENAI_BASE_URL=https://evil.example\n"
-                               "HTTPS_PROXY=http://evil.example:8080\n")
-    for k in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "HTTPS_PROXY"):
+    (proj / ".dwb").mkdir(parents=True)
+    (proj / ".dwb/config.yaml").write_text("name: x\n")
+    (proj / ".dwb/.env").write_text("OPENAI_API_KEY=from-project\n"
+                                    "OPENAI_BASE_URL=https://evil.example\n"
+                                    "HTTPS_PROXY=http://evil.example:8080\n")
+    (proj / ".env").write_text("TAVILY_API_KEY=from-repo-env\n")  # the repo's own .env
+    glob = tmp_path / "global.env"
+    glob.write_text("TAVILY_API_KEY=from-global\nDWB_T_GLOBAL=1\n")
+    (proj / "src").mkdir()
+    for k in ("OPENAI_API_KEY", "TAVILY_API_KEY", "OPENAI_BASE_URL", "HTTPS_PROXY",
+              "DWB_T_GLOBAL"):
         monkeypatch.delenv(k, raising=False)
-    loaded = load_env(cwd=proj, global_env=tmp_path / "none.env")
-    assert loaded == [proj / ".env"]
-    assert os.environ["OPENAI_API_KEY"] == "from-repo"
-    assert "OPENAI_BASE_URL" not in os.environ and "HTTPS_PROXY" not in os.environ
+    loaded = load_env(cwd=proj / "src", global_env=glob)  # from a subfolder too
+    assert loaded == [proj / ".dwb/.env"]
+    assert os.environ["OPENAI_API_KEY"] == "from-project"
+    for k in ("TAVILY_API_KEY", "OPENAI_BASE_URL", "HTTPS_PROXY", "DWB_T_GLOBAL"):
+        assert k not in os.environ  # not from the repo's .env, the global file, or non-key names
+
+
+def test_user_mode_outside_a_project_reads_no_env_file(tmp_path, monkeypatch):
+    from dwb.project import load_env
+
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-repo-env\n")
+    glob = tmp_path / "global.env"
+    glob.write_text("OPENAI_API_KEY=from-global\n")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert load_env(cwd=tmp_path, global_env=glob) == []
+    assert "OPENAI_API_KEY" not in os.environ
 
 
 def test_harness_env_and_global_env_load_in_full(tmp_path, monkeypatch):
@@ -419,7 +437,7 @@ def test_saved_key_is_never_world_readable(tmp_path, monkeypatch):
     monkeypatch.delenv("DWB_TEST_KEY", raising=False)
     old = os.umask(0o022)
     try:
-        save_global_key("DWB_TEST_KEY", "one", p)
+        save_key("DWB_TEST_KEY", "one", p)
     finally:
         os.umask(old)
     assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
@@ -659,12 +677,10 @@ def test_mask_secret_shows_only_the_ends():
 
 def test_init_echoes_a_masked_key_and_never_the_key(repo, tty, monkeypatch):
     import dwb.init_wizard as wiz
-    import dwb.project as project
 
     saved = {}
     monkeypatch.delenv("OPENAI_API_KEY")
-    monkeypatch.setattr(project, "GLOBAL_ENV", repo / "no-global.env")  # not the user's file
-    monkeypatch.setattr(wiz, "save_global_key", lambda name, value: saved.update({name: value}))
+    monkeypatch.setattr(wiz, "save_key", lambda name, value, path: saved.update({name: value}))
     monkeypatch.setattr(wiz, "openwiki_version", lambda: None)  # no wiki questions
     key = "sk-proj-SECRETVALUE123xyz"
     answers = "\n".join(["myproj", "", "", "", "n", "", key]) + "\n" + "\n" * 10
@@ -675,28 +691,28 @@ def test_init_echoes_a_masked_key_and_never_the_key(repo, tty, monkeypatch):
 
 
 def _saved_key_setup(repo, monkeypatch, value: str | None):
-    """A global .env (in tmp) holding ``value`` and the same value in the environment."""
+    """The project's .dwb/.env holding ``value`` (the environment is set by the caller)."""
     import dwb.init_wizard as wiz
 
-    env = repo / "global.env"
+    env = repo / ".dwb" / ".env"
     if value is not None:
+        env.parent.mkdir(exist_ok=True)
         env.write_text(f"OPENAI_API_KEY={value}\n")
-    monkeypatch.setattr(wiz, "GLOBAL_ENV", env)
     monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
     saved = {}
-    monkeypatch.setattr(wiz, "save_global_key", lambda name, v: saved.update({name: v}))
-    return wiz, saved
+    monkeypatch.setattr(wiz, "save_key", lambda name, v, path: saved.update({name: v}))
+    return env, saved
 
 
 @pytest.mark.parametrize("answer", ["", "y"])
 def test_init_shows_where_a_saved_key_is_and_keeps_it(repo, tty, monkeypatch, answer):
     old = "sk-proj-OLDSECRET0000abc"
     monkeypatch.setenv("OPENAI_API_KEY", old)
-    wiz, saved = _saved_key_setup(repo, monkeypatch, old)
+    env, saved = _saved_key_setup(repo, monkeypatch, old)
     answers = "\n".join(["myproj", "", "", "", "n", "", answer]) + "\n" + "\n" * 10
     r = CliRunner().invoke(cli(), ["init"], input=answers)
     assert r.exit_code == 0, r.output
-    assert f"found in {wiz.GLOBAL_ENV} (sk-*****abc)" in r.output
+    assert f"found in {env} (sk-*****abc)" in r.output
     assert "Use this OPENAI_API_KEY?" in r.output and "Paste" not in r.output
     assert saved == {} and "OLDSECRET" not in r.output
 
@@ -718,7 +734,7 @@ def test_init_does_not_offer_to_replace_a_shell_key(repo, tty, monkeypatch):
     answers = "\n".join(["myproj", "", "", "", "n", ""]) + "\n" + "\n" * 10
     r = CliRunner().invoke(cli(), ["init"], input=answers)
     assert r.exit_code == 0, r.output
-    assert "found in your environment" in r.output and "(sk-*****def)" in r.output
+    assert "found in your shell environment" in r.output and "(sk-*****def)" in r.output
     assert "Use this OPENAI_API_KEY?" not in r.output and saved == {}
 
 
@@ -848,3 +864,19 @@ def test_cli_index_interrupted_after_the_code_index_reports_it_kept(repo, monkey
     kept = [ln for ln in lines if ln.startswith("  • kept: ")]
     assert len(kept) == 1 and kept[0].startswith("  • kept: code index code-toy-")
     assert not (repo / ".dwb/state.json").exists()
+
+
+def test_init_saves_a_pasted_key_in_the_project_dwb_env(repo, tty, monkeypatch):
+    import dwb.init_wizard as wiz
+
+    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
+    key = "sk-proj-SECRETVALUE123xyz"
+    answers = "\n".join(["myproj", "", "", "", "n", "", key]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    env = repo / ".dwb" / ".env"
+    assert env.read_text() == f"OPENAI_API_KEY={key}\n"
+    assert stat.S_IMODE(os.stat(env).st_mode) == 0o600
+    assert "/.dwb/" in (repo / ".git/info/exclude").read_text()  # never committed
+    assert f"saved OPENAI_API_KEY to {env}" in r.output and "SECRETVALUE" not in r.output

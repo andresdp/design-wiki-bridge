@@ -14,7 +14,7 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 - Live checks (need `OPENAI_API_KEY`): `conda run -n taxonomy pytest -m live`
 - Lint: `conda run -n taxonomy ruff check src tests`
 - User guide: `docs/usage.md`. Architecture (mermaid diagrams + design decisions): `docs/architecture.md`; keep it current when components or decisions change. Its module layers (§2) are enforced by `tests/test_layers.py`; a new module needs a layer there. The CLI is typer (`src/dwb/cli.py`); `dwb --help` lists commands.
-- Two modes, same commands. **User tool**: inside any git repo, `dwb init` writes `<repo>/.dwb/config.yaml`, `dwb index` builds every listed source for HEAD, then `dwb ask "<q>"` / `dwb chat` / `dwb status` (code in `src/dwb/project.py`, `src/dwb/init_wizard.py`). **Research harness**: from this folder, `ask`/`chat` take `--repo <name>` (configs/repos.yaml, `configs/chat.yaml`); the wiki replaces vector search when enabled.
+- Two modes, same commands. **User tool**: inside any git repo, `dwb init` writes `<repo>/.dwb/config.yaml` and saves API keys in `<repo>/.dwb/.env` (user mode reads keys only from there or the shell, never `~/.config/dwb/.env`), `dwb index` builds every listed source for HEAD, then `dwb ask "<q>"` / `dwb chat` / `dwb status` (code in `src/dwb/project.py`, `src/dwb/init_wizard.py`). **Research harness**: from this folder, `ask`/`chat` take `--repo <name>` (configs/repos.yaml, `configs/chat.yaml`); the wiki replaces vector search when enabled.
 - Readiness: `conda run -n taxonomy dwb status`
 - Research code index: `dwb index code <repo> [--embedding-model <model>]`
 - PDF index: `dwb index pdf configs/pdfs/<repo>.yaml`
