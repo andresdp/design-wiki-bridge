@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -192,7 +193,90 @@ def test_cli_index_runs_from_a_subfolder(repo, monkeypatch):
     monkeypatch.chdir(repo / "src")
     r = CliRunner().invoke(cli(), ["index", "--fake"])
     assert r.exit_code == 0, r.output
-    assert "Indexed" in r.output and (repo / ".dwb/state.json").exists()
+    state = json.loads((repo / ".dwb/state.json").read_text())
+    assert r.stdout == json.dumps(state, indent=2) + "\n"  # piped: the state, as JSON
+
+
+def test_cli_index_at_a_terminal_prints_header_summary_and_outcome(repo, tty):
+    CliRunner().invoke(cli(), ["init", "--yes"])
+    sha = _git(repo, "rev-parse", "HEAD")[:12]
+    r = CliRunner().invoke(cli(), ["index", "--fake"])
+    assert r.exit_code == 0, r.output
+    assert r.stderr.startswith(f"toyproj · user mode · {sha}\n")
+    assert "{" not in r.stdout and re.search(r"^code\s+code-toyproj-", r.stdout, re.M)
+    assert re.search(r"^pdf\s+off$", r.stdout, re.M)
+    assert f"✓ Indexed toyproj at {sha} → next: dwb chat" in r.stderr
+    r = CliRunner().invoke(cli(), ["--json", "index", "--fake"])
+    assert r.exit_code == 0 and json.loads(r.stdout)["sha"].startswith(sha)
+    assert "user mode" not in r.stderr and "✓" not in r.stderr
+
+
+def test_cli_status_in_a_project_piped_and_at_a_terminal(repo, monkeypatch):
+    from dwb import ui
+
+    _project(repo)
+    r = CliRunner().invoke(cli(), ["status"])
+    assert r.exit_code == 0, r.output
+    data = json.loads(r.stdout)
+    assert data["name"] == "toy" and data["root"] == str(repo)
+    assert [s["source"] for s in data["sources"]] == ["commit", "code", "pdf", "wiki", "web"]
+    assert data["sources"][1] == {"source": "code", "state": "missing",
+                                  "detail": "run dwb index"}
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "200")
+    ui.force_terminal(True)
+    try:
+        r = CliRunner().invoke(cli(), ["status"])
+    finally:
+        ui.force_terminal(None)
+    assert r.exit_code == 0, r.output
+    assert r.stderr.startswith("toy · user mode · ")
+    assert re.search(r"^Source\s+State\s+Detail$", r.stdout, re.M)
+    assert re.search(r"^code\s+missing\s+run dwb index$", r.stdout, re.M)
+    assert "→ next: dwb index" in r.stderr
+
+
+def test_ask_with_no_question_exits_2_without_a_terminal(repo):
+    r = CliRunner().invoke(cli(), ["ask"])
+    assert r.exit_code == 2 and 'Usage: dwb ask "<question>"' in r.output
+
+
+def test_ask_at_a_terminal_prints_the_header_then_the_answer(repo, monkeypatch, tty):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    import dwb.runner as runner
+
+    ws = _project(repo)
+    state = index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    monkeypatch.setattr(runner, "build_components", lambda m, **kw: components("A"))
+    r = CliRunner().invoke(cli(), ["ask", "How does the app run?"])
+    assert r.exit_code == 0, r.output
+    head = f"toy · user mode · {state['sha'][:12]}"
+    assert r.stderr.startswith(head + "\n")
+    assert "Answer" in r.stdout and "Sources" in r.stdout
+    assert r.output.index(head) < r.output.index("Answer")
+    # with no question at a terminal, it asks for one
+    r = CliRunner().invoke(cli(), ["ask"], input="How does the app run?\n")
+    assert r.exit_code == 0, r.output
+    assert "Question:" in r.stderr and "Answer" in r.stdout
+
+
+def test_ask_stays_human_when_piped_and_json_prints_the_trace(repo, monkeypatch):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    import dwb.runner as runner
+    from dwb.trace import TraceRecord
+
+    ws = _project(repo)
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    monkeypatch.setattr(runner, "build_components", lambda m, **kw: components("A"))
+    r = CliRunner().invoke(cli(), ["ask", "How does the app run?"])
+    assert r.exit_code == 0 and "Answer" in r.stdout and "toy · user mode" in r.stderr
+    for flags in (["ask", "q?", "--json"], ["--json", "ask", "q?"]):
+        r = CliRunner().invoke(cli(), flags)
+        assert r.exit_code == 0, r.output
+        t = TraceRecord.model_validate_json(r.stdout)
+        assert r.stdout == t.model_dump_json(indent=2) + "\n" and "user mode" not in r.stderr
 
 
 def test_index_outside_project_points_to_init(tmp_path, monkeypatch):

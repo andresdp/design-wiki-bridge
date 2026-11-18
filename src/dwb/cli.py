@@ -7,8 +7,6 @@ Run every command from the design-wiki-bridge folder: configuration (``configs/`
 from __future__ import annotations
 
 import asyncio
-import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 
@@ -105,7 +103,22 @@ def _workspace(repo: str | None) -> tuple[Workspace, str]:
         pws = ProjectWorkspace(root)
         pws.require_indexed()
         return pws, pws.config.name
+    WS.repo(repo)  # an unknown name fails here, listing the configured repositories
     return WS, repo
+
+
+def _context(ws: Workspace, name: str) -> tuple[str, str, str]:
+    """The R2 header parts for a repository: name, mode, commit."""
+    from dwb.project import ProjectWorkspace
+
+    mode = "user mode" if isinstance(ws, ProjectWorkspace) else "research mode"
+    return name, mode, ws.repo(name).sha[:12]
+
+
+def _open(*parts: str) -> None:
+    """The opening header of a data command, shown only with human output."""
+    if ui.human():
+        ui.header(*parts)
 
 
 def _version(value: bool) -> None:
@@ -204,7 +217,8 @@ def _settings(ws: Workspace, repo: str, wiki: bool | None, pdf: bool | None, web
 
 @app.command()
 def ask(
-    question: Annotated[str, typer.Argument(help="The question, in quotes.")],
+    question: Annotated[str | None, typer.Argument(
+        help="The question, in quotes. Asked for at a terminal when omitted.")] = None,
     repo: RepoOpt = None,
     wiki: WikiOpt = None, pdf: PdfOpt = None, web: WebOpt = None, model: ModelOpt = None,
     show_context: Annotated[bool, typer.Option(
@@ -218,7 +232,19 @@ def ask(
     """
     from dwb.chat import ChatSession, print_answer
 
+    usage = ('no question given. Usage: dwb ask "<question>" (inside a project), or '
+             'dwb ask "<question>" --repo <name> (research mode).')
+    question = (question or "").strip()
+    if not question and not ui.interactive():
+        raise _fail(usage)
     ws, name = _workspace(repo)
+    as_json = as_json or ui.json_requested()
+    if not as_json:
+        ui.header(*_context(ws, name))
+    if not question:
+        question = typer.prompt("Question", err=True).strip()
+        if not question:
+            raise _fail(usage)
 
     async def go():
         async with ChatSession(ws, _settings(ws, name, wiki, pdf, web, model)) as s:
@@ -253,47 +279,77 @@ def chat(repo: RepoOpt = None, wiki: WikiOpt = None, pdf: PdfOpt = None, web: We
     asyncio.run(go())
 
 
+_STATE_STYLE = {"ok": "ok", "on": "ok", "missing": "fail", "stale": "warn", "off": "secondary"}
+
+
+def _status_table(title: str, rows: list[tuple[str, str, str]]) -> None:
+    """The one `dwb status` table shape, used in both modes: Source, State, Detail."""
+    ui.table(["Source", "State", "Detail"], [list(r) for r in rows], title=title,
+             styles={1: lambda v: _STATE_STYLE.get(v, "")})
+
+
+def _research_rows(r: dict) -> list[tuple[str, str, str]]:
+    """A `Workspace.status` row as (source, state, detail) rows."""
+    name = r["repo"]
+    rows = [("checkout", "ok" if r["checkout"] else "missing",
+             f"pinned {r['tag']}" if r["checkout"] else "clone it (configs/repos.yaml)"),
+            ("code", "ok" if r["code_index"] else "missing",
+             r["code_index"] or f"run dwb index code {name}")]
+    if not r["pdf_corpus"]:
+        rows.append(("pdf", "off", "no PDF corpus"))
+    else:
+        rows.append(("pdf", "ok" if r["pdf_index"] else "missing",
+                     f"{r['pdf_corpus']}, {r['pdf_index'] or 'run dwb index pdf <corpus file>'}"))
+    rows.append(("wiki", "ok" if r["wiki"] else "missing",
+                 r["wiki"] or f"no snapshot (dwb wiki snapshot {name})"))
+    return rows
+
+
 @app.command()
 def status(embedding_model: Annotated[str | None, typer.Option(
         help="Research mode: embedding model the indexes must match.")] = None) -> None:
     """Show which sources are ready: for this project, or for every research repository."""
     from dwb.project import ProjectWorkspace, find_project
 
-    out = ui.out()
     root = find_project()
     if root is not None:
         pws = ProjectWorkspace(root)
-        t = Table(title=f"{pws.config.name} ({root})")
-        for col in ("Source", "State", "Detail"):
-            t.add_column(col)
-        style = {"ok": "green", "on": "green", "missing": "red", "stale": "yellow", "off": "dim"}
-        for src, state, detail in pws.status_rows():
-            t.add_row(src, f"[{style.get(state, 'white')}]{state}[/]", detail)
-        out.print(t)
-        if not pws.state or any(s in ("missing", "stale") for _, s, _ in pws.status_rows()):
-            out.print("Run [bold]dwb index[/] to build what is missing.")
+        name = pws.config.name
+        rows = pws.status_rows()
+        _open(name, "user mode", pws.repo().sha[:12])
+
+        def show(_):
+            _status_table(f"{name} ({root})", rows)
+            if any(st in ("missing", "stale") for _, st, _ in rows):
+                ui.warning("Some sources are missing or stale.")
+                ui.next_step("dwb index")
+            else:
+                ui.outcome(f"{name} is ready", "dwb chat")
+
+        ui.emit({"name": name, "root": str(root),
+                 "sources": [{"source": src, "state": st, "detail": d} for src, st, d in rows]},
+                human=show)
         return
     if not WS.resolve(WS.repos_yaml).exists():
         raise _fail("not a dwb project (run `dwb init` here) and not the design-wiki-bridge "
                     "folder (configs/repos.yaml).")
     emb = embedding_model or _default_embedding()
+    _open("all repositories", "research mode", f"indexes built with {emb}")
     rows = WS.status(emb)
 
-    def mark(v):
-        return f"[green]✓[/] {v}" if v and v is not True else ("[green]✓[/]" if v else "[red]✗[/]")
+    def show_research(rows):
+        for i, r in enumerate(rows):
+            if i:
+                ui.out().print()
+            _status_table(f"{r['repo']} ({r['tag']})", _research_rows(r))
+        missing = [r["repo"] for r in rows if not (r["checkout"] and r["code_index"])]
+        if missing:
+            ui.warning(f"Not ready: {', '.join(missing)}.")
+            ui.next_step(f"dwb index code {missing[0]}")
+        else:
+            ui.outcome(f"{len(rows)} repositories ready", "dwb chat --repo <name>")
 
-    t = Table(title=f"Repositories (indexes built with {emb})")
-    for col in ("Repo", "Version", "Checkout", "Code index", "PDF index", "Wiki snapshot"):
-        t.add_column(col)
-    for r in rows:
-        t.add_row(r["repo"], r["tag"], mark(r["checkout"]), mark(r["code_index"]),
-                  mark(r["pdf_index"]) if r["pdf_corpus"] else "[dim]no corpus[/]",
-                  mark(r["wiki"]))
-    out.print(t)
-    missing = [r for r in rows if not (r["checkout"] and r["code_index"])]
-    for r in missing:
-        out.print(f"[yellow]{r['repo']}[/]: run [bold]dwb index code {r['repo']}[/] "
-                  "(and clone the checkout if it is missing)")
+    ui.emit(rows, human=show_research)
 
 
 # ------------------------------------------------------------------------------ index
@@ -311,19 +367,31 @@ def index_all(
     """Index everything the project's .dwb/config.yaml lists, for the HEAD commit."""
     if ctx.invoked_subcommand is not None:
         return
-    from dwb.project import ProjectWorkspace, find_project, index_project
+    from dwb.project import ProjectWorkspace, find_project, head_sha, index_project
 
     root = find_project()
     if root is None:
         raise _fail("this folder is not a dwb project: run `dwb init` first. "
                     "(Research mode: dwb index code <repo> / dwb index pdf <corpus>.)")
     pws = ProjectWorkspace(root)
+    name = pws.config.name
+    _open(name, "user mode", head_sha(root)[:12])
     state = index_project(pws, embedding=_embedding("fake", True) if fake else None,
                           generate_wiki=generate_wiki)
-    ui.out().print(f"[green]Indexed[/] {pws.config.name} at {state['sha'][:12]}: code"
-              + (", PDFs" if state.get("pdf_index_id") else "")
-              + (", wiki" if state.get("wiki_snapshot_id") else "")
-              + ". Next: [bold]dwb chat[/]")
+
+    def show(st):
+        ui.kv([("code", st.get("code_index_id")),
+               ("pdf", st.get("pdf_index_id") or ("not indexed" if pws.config.pdfs else "off")),
+               ("wiki", st.get("wiki_snapshot_id") or st.get("wiki_note")
+                or ("not indexed" if pws.config.wiki.enabled else "off"))])
+        ui.outcome(f"Indexed {name} at {st['sha'][:12]}", "dwb chat")
+
+    ui.emit(state, human=show)
+
+
+def _index_summary(info) -> None:
+    ui.kv([("index", info.index_id + (" (reused)" if info.reused else "")),
+           ("items", info.n_items), ("embedding", info.embedding_model)])
 
 
 @index_app.command("code")
@@ -351,10 +419,17 @@ def index_code(
         if not r.checkout_ok:
             raise WorkspaceError(f"checkout for {repo} not found at {r.checkout}")
         reader = RepoReader.from_git(r.checkout, r.sha)
+    _open(repo, "research mode", reader.sha[:12])
     LOG.info("Indexing code for [bold]%s[/] at %s with %s", repo, reader.sha[:12], model)
     idx = build_code_index(root, reader, repo, _embedding(model, fake), model,
                            ChunkingConfig(max_span_tokens=max_span_tokens))
-    print(json.dumps(asdict(idx.info), indent=2))
+
+    def show(info):
+        _index_summary(info)
+        ui.outcome(f"Indexed {repo} at {reader.sha[:12]}: {info.n_items} code spans",
+                   f"dwb chat --repo {repo}")
+
+    ui.emit(idx.info, human=show)
 
 
 @index_app.command("pdf")
@@ -376,10 +451,17 @@ def index_pdf(
     missing = [d.path for d in c.documents if not (base_dir / d.path).exists()]
     if missing:
         raise _fail(f"PDF files not found (relative to {base_dir}): {', '.join(missing)}")
+    _open(c.corpus_id, "research mode")
     LOG.info("Indexing PDF corpus [bold]%s[/] (%d documents) with %s", c.corpus_id,
              len(c.documents), model)
     idx = build_pdf_index(root, c, base_dir, _embedding(model, fake), model)
-    print(json.dumps(asdict(idx.info), indent=2))
+
+    def show(info):
+        _index_summary(info)
+        ui.outcome(f"Indexed {c.corpus_id}: {info.n_items} pages from {len(c.documents)} PDFs",
+                   "dwb status")
+
+    ui.emit(idx.info, human=show)
 
 
 # ------------------------------------------------------------------------------- wiki
@@ -407,6 +489,7 @@ def wiki_snapshot(
     from dwb.retrieval.openwiki_client import openwiki_version, register_snapshot
 
     r = WS.repo(repo)
+    _open(repo, "research mode", r.sha[:12])
     if version is None:
         version = openwiki_version() or "unknown"
     LOG.info("Registering the OpenWiki tree in %s (openwiki %s, %s/%s)", r.checkout, version,
@@ -416,7 +499,13 @@ def wiki_snapshot(
                              cost_usd=cost_usd)
     LOG.info("Snapshot [bold]%s[/]: %d pages, %d claims", snap.snapshot_id, snap.pages,
              snap.claims)
-    print(snap.model_dump_json(indent=2))
+
+    def show(sn):
+        ui.kv([("snapshot", sn.snapshot_id), ("pages", sn.pages), ("claims", sn.claims),
+               ("generator", f"openwiki {sn.version}, {sn.provider}/{sn.model}")])
+        ui.outcome(f"Registered {sn.snapshot_id}", f"dwb chat --repo {repo} --wiki")
+
+    ui.emit(snap, human=show)
 
 
 # -------------------------------------------------------------------------- benchmark
@@ -437,6 +526,10 @@ def _problems(title: str, problems: list[str]) -> None:
     ui.err().print(t)
 
 
+def _counts(counts: dict) -> None:
+    ui.kv([(k, v) for k, v in counts.items()])
+
+
 @bench_app.command("draft")
 def benchmark_draft(
     selection: Annotated[Path, typer.Argument(help="Selection file, e.g. "
@@ -449,12 +542,27 @@ def benchmark_draft(
     Writes data/questions/drafts/<repo>.public.jsonl and <repo>.excluded.jsonl. Annotate the
     drafts and copy them into data/questions/test/<repo>.jsonl.
     """
+    import yaml
+
     from dwb import curation
 
+    try:
+        sel = yaml.safe_load(selection.read_text()) or {}
+    except yaml.YAMLError:
+        sel = {}
+    if isinstance(sel, dict):
+        _open(str(sel.get("repo") or selection.stem), "research mode",
+              str(sel.get("repo_sha") or "")[:12])
     res = curation.draft(WS, selection, overwrite=overwrite)
-    print(json.dumps({"records": str(res.records_path), "n_records": res.n_records,
-                      "exclusions": str(res.exclusions_path),
-                      "n_excluded": res.n_excluded}, indent=2))
+
+    def show(d):
+        ui.kv([("records", f"{d['n_records']} in {d['records']}"),
+               ("excluded", f"{d['n_excluded']} in {d['exclusions']}")])
+        ui.outcome(f"Drafted {d['n_records']} records; annotate them, then validate",
+                   f"dwb benchmark validate {d['records']}")
+
+    ui.emit({"records": str(res.records_path), "n_records": res.n_records,
+             "exclusions": str(res.exclusions_path), "n_excluded": res.n_excluded}, human=show)
 
 
 @bench_app.command("validate")
@@ -466,11 +574,21 @@ def benchmark_validate(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> 
     """
     from dwb import curation
 
+    _open(records.name, "research mode")
     rep = curation.validate(WS, records, reader_for=curation.git_reader, pdf_corpus=pdf_corpus)
     if rep.problems:
         _problems(f"{len(rep.problems)} problems in {records}", rep.problems)
-    print(json.dumps({"path": str(records), "ok": rep.ok, "counts": rep.counts,
-                      "problems": rep.problems}, indent=2))
+
+    def show(d):
+        _counts(d["counts"])
+        if d["ok"]:
+            ui.outcome(f"{records} is valid", f"dwb benchmark freeze {records}")
+        else:
+            ui.error(f"{len(d['problems'])} problems in {records}",
+                     "fix the records listed above, then validate again")
+
+    ui.emit({"path": str(records), "ok": rep.ok, "counts": rep.counts,
+             "problems": rep.problems}, human=show)
     if not rep.ok:
         raise typer.Exit(1)
 
@@ -484,16 +602,23 @@ def benchmark_freeze(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> No
     """
     from dwb import curation
 
+    _open(records.name, "research mode")
     res = curation.freeze_set(WS, records, reader_for=curation.git_reader,
                               pdf_corpus=pdf_corpus)
     if not res.ok:
         _problems(f"Not frozen: {len(res.report.problems)} problems in {records}",
                   res.report.problems)
         raise typer.Exit(1)
-    ui.err().print(f"[green]Frozen.[/] Set question_set.hash: {res.digest} in the manifests that "
-              f"use {records}.")
-    print(json.dumps({"path": str(records), "hash": res.digest,
-                      "counts": res.report.counts}, indent=2))
+
+    def show(d):
+        ui.kv([("hash", d["hash"])])
+        _counts(d["counts"])
+
+    ui.emit({"path": str(records), "hash": res.digest, "counts": res.report.counts},
+            human=show)
+    # shown in both modes (as before): the hash has to be copied into the manifests
+    ui.outcome(f"Frozen {records}. Set question_set.hash: {res.digest} in the manifests that "
+               "use it.")
 
 
 @bench_app.command("check")
@@ -510,13 +635,22 @@ def benchmark_check(
     """
     from dwb import curation
 
+    _open(f"{dev.name} vs {test.name}", "research mode")
     res = curation.check_sets(dev, test)
     for w in res.warnings:
         LOG.warning(w)
     if res.problems:
         _problems(f"{dev} vs {test}", res.problems)
-    print(json.dumps({"dev": str(dev), "test": str(test), "ok": res.ok,
-                      "problems": res.problems, "warnings": res.warnings}, indent=2))
+
+    def show(d):
+        if d["ok"]:
+            ui.outcome(f"{dev} and {test} are disjoint and the test set is unchanged")
+        else:
+            ui.error(f"{len(d['problems'])} problems between {dev} and {test}",
+                     "fix the overlaps listed above, then check again")
+
+    ui.emit({"dev": str(dev), "test": str(test), "ok": res.ok,
+             "problems": res.problems, "warnings": res.warnings}, human=show)
     if not res.ok:
         raise typer.Exit(1)
 
@@ -547,6 +681,7 @@ def experiment_run(
         if web_mode == "live":
             m = m.model_copy(update={"run_id": f"{m.run_id}-live"})
     base = Path(".")
+    _open(m.repo, "research mode", m.repo_sha[:12], f"run {m.run_id}")
     load_question_set(m, base)  # before touching the checkout (B restores the wiki into it)
     comps = build_components(m, base_dir=base, index_root=WS.index_root,
                              tavily_root=WS.tavily_root, wiki_root=WS.wiki_root)
@@ -554,7 +689,24 @@ def experiment_run(
         summary = run_manifest(m, comps, base_dir=base, runs_dir=runs_dir, overwrite=overwrite)
     except FileExistsError as e:
         raise _fail(f"{e} (add --overwrite to replace it)") from None
-    print(json.dumps(summary, indent=2))
+
+    def show(sm):
+        ui.kv([("questions", sm["questions"]), ("failed", sm["failed"]),
+               ("degraded", sm["degraded"]), ("empty context", sm["empty_context"]),
+               ("web triggered", sm["web_triggered"]),
+               ("unresolved citation IDs", sm["unresolved_citation_ids"]),
+               ("elapsed", f"{sm['elapsed_s']:.1f} s"), ("run", runs_dir / m.run_id)])
+        run_dir = runs_dir / m.run_id
+        pair = (f"{run_dir} runs/<B>" if m.condition == "A" else f"runs/<A> {run_dir}")
+        nxt = f"dwb experiment evaluate {pair} --out reports/<name>"
+        if sm["failed"]:
+            ui.error(f"{sm['failed']} of {sm['questions']} questions failed",
+                     f"see the errors in {run_dir}/traces.jsonl")
+            ui.next_step(nxt)
+        else:
+            ui.outcome(f"Run {m.run_id} finished", nxt)
+
+    ui.emit(summary, human=show)
     if summary["failed"]:
         raise typer.Exit(1)
 
@@ -567,13 +719,29 @@ def experiment_check(
     """Check that an A/B manifest pair differs only in the repository branch."""
     from dwb.manifest import check_paired, load_manifest
 
-    res = check_paired(load_manifest(a), load_manifest(b))
-    for f in res.failures:
-        LOG.error("Shared-stage difference: %s", f)
-    for n in res.notes:
-        LOG.info("Note: %s", n)
-    LOG.info("Paired check %s", "[green]passed[/]" if res.ok else "[red]failed[/]")
-    print(json.dumps(res.model_dump(), indent=2))
+    ma, mb = load_manifest(a), load_manifest(b)
+    _open(ma.repo, "research mode", ma.repo_sha[:12], f"{ma.run_id} vs {mb.run_id}")
+    res = check_paired(ma, mb)
+    if ui.json_mode():
+        for f in res.failures:
+            LOG.error("Shared-stage difference: %s", f)
+        for n in res.notes:
+            LOG.info("Note: %s", n)
+        LOG.info("Paired check %s", "[green]passed[/]" if res.ok else "[red]failed[/]")
+
+    def show(d):
+        rows = [["difference", f] for f in d["failures"]] + [["note", n] for n in d["notes"]]
+        if rows:
+            ui.table(["Kind", "Detail"], rows,
+                     styles={0: lambda v: "fail" if v == "difference" else "secondary"})
+        if d["ok"]:
+            ui.outcome("Paired check passed: the manifests differ only in the repository "
+                       "branch", f"dwb experiment run {a}")
+        else:
+            ui.error(f"Paired check failed: {len(d['failures'])} shared-stage differences",
+                     "make the shared stages identical in both manifests")
+
+    ui.emit(res.model_dump(), human=show)
     if not res.ok:
         raise typer.Exit(1)
 
@@ -594,9 +762,16 @@ def experiment_evaluate(
     """Score two saved runs offline and write the paired report tables."""
     from dwb.eval.command import evaluate_runs
 
+    _open(f"{run_a.name} vs {run_b.name}", "research mode")
     res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
                         deepeval=deepeval or None, allow_unpaired=allow_unpaired)
-    print(json.dumps(res, indent=2))
+
+    def show(d):
+        ui.kv([(k, v if not isinstance(v, (list, dict)) else (", ".join(map(str, v)) or "-"))
+               for k, v in d.items()])
+        ui.outcome(f"Report written to {out_dir}")
+
+    ui.emit(res, human=show)
 
 
 def main() -> None:

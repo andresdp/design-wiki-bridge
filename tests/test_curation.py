@@ -491,3 +491,62 @@ def test_cli_check_names_the_overlap(cli_ws):
 def test_benchmark_help(cmd):
     r = invoke(*cmd)
     assert r.exit_code in (0, 2) and "Usage" in r.output
+
+
+def _dumps(x) -> str:
+    return json.dumps(x, indent=2) + "\n"
+
+
+def test_cli_piped_json_is_unchanged(cli_ws):
+    """Each benchmark command prints exactly the JSON it printed before (indent=2, same keys)."""
+    sel = selection(cli_ws)
+    r = invoke("draft", str(sel))
+    d = Path("data/questions/drafts")
+    assert r.stdout == _dumps({"records": str(d / "toy.public.jsonl"), "n_records": 2,
+                               "exclusions": str(d / "toy.excluded.jsonl"), "n_excluded": 1})
+    p = write_records(cli_ws, pub(), cus())
+    r = invoke("validate", str(p))
+    assert r.stdout == _dumps({"path": str(p), "ok": True, "counts": json.loads(r.stdout)[
+        "counts"], "problems": []})
+    r = invoke("freeze", str(p))
+    digest = Path(f"{p}.sha256").read_text().strip()
+    assert r.stdout == _dumps({"path": str(p), "hash": digest,
+                               "counts": json.loads(r.stdout)["counts"]})
+    dev = write_dev(cli_ws, pub(id="toy-dev-pub-001", question="dev?"))
+    r = invoke("check", str(dev), str(p))
+    out = json.loads(r.stdout)
+    assert r.exit_code == 1 and r.stdout == _dumps(
+        {"dev": str(dev), "test": str(p), "ok": False, "problems": out["problems"],
+         "warnings": []})
+
+
+def test_cli_at_a_terminal_prints_header_summary_and_outcome(cli_ws, tty):
+    r = invoke("draft", str(selection(cli_ws)))
+    assert r.exit_code == 0, r.output
+    assert r.stderr.startswith(f"toy · research mode · {SHA[:12]}\n")
+    assert re.search(r"^records\s+2 in .*toy\.public\.jsonl$", r.stdout, re.M)
+    assert "✓ Drafted 2 records; annotate them, then validate → next: dwb benchmark validate " \
+           in r.stderr
+    p = write_records(cli_ws, pub(), cus())
+    r = invoke("validate", str(p))
+    assert r.exit_code == 0 and r.stderr.startswith("toy.jsonl · research mode\n")
+    assert re.search(r"^public\s+1$", r.stdout, re.M) and "{" not in r.stdout
+    assert f"✓ {p} is valid → next: dwb benchmark freeze {p}" in r.stderr
+    bad = write_records(cli_ws, pub(), pub())
+    r = invoke("validate", str(bad))
+    assert r.exit_code == 1 and "duplicate id" in r.stderr and "✗ 1 problems in" in r.stderr
+    p = write_records(cli_ws, pub(), cus())
+    r = invoke("freeze", str(p))
+    digest = Path(f"{p}.sha256").read_text().strip()
+    assert r.exit_code == 0 and re.search(rf"^hash\s+{re.escape(digest)}$", r.stdout, re.M)
+    assert f"✓ Frozen {p}. Set question_set.hash: {digest}" in r.stderr
+    dev = write_dev(cli_ws, pub(id="toy-dev-pub-009", question="dev?", provenance={
+        "upstream_split": "toy", "upstream_row_id": "toy:9"}))
+    r = invoke("check", str(dev), str(p))
+    assert r.exit_code == 0 and "✓" in r.stderr and "disjoint" in r.stderr
+    from typer.testing import CliRunner
+
+    import dwb.cli as cli
+
+    r = CliRunner().invoke(cli.app, ["--json", "benchmark", "check", str(dev), str(p)])
+    assert json.loads(r.stdout)["ok"] is True and "research mode" not in r.stderr

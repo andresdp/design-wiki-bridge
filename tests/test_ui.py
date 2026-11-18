@@ -334,3 +334,37 @@ def test_short_v_is_still_verbose(monkeypatch, pair):
     assert "hello-debug" in _logs(monkeypatch, pair, "-v")
     r = CliRunner().invoke(cli.app, ["-v", "--help"])
     assert r.exit_code == 0 and f"dwb {dwb.__version__}" not in r.output
+
+
+# ------------------------------------------------------------------ result building blocks
+
+
+def test_kv_and_table_print_aligned_plain_lines():
+    con, raw = _console("utf-8")
+    ui.kv([("index", "code-toy-1"), ("items", 16), ("wiki", None)], console=con)
+    ui.table(["Source", "State", "Detail"], [["code", "ok", "code-toy-1"],
+                                              ["pdf", "missing", "run [b]dwb index[/b]"]],
+             title="toy (v1)", styles={1: lambda v: "ok"}, console=con)
+    assert raw.getvalue().decode() == (
+        "index  code-toy-1\nitems  16\nwiki   -\n"
+        "toy (v1)\n"
+        "Source  State    Detail\n"
+        "code    ok       code-toy-1\n"
+        "pdf     missing  run [b]dwb index[/b]\n")
+
+
+def test_next_step_and_ascii_fallback():
+    con, raw = _console("utf-8")
+    ui.next_step("dwb index", console=con)
+    con2, raw2 = _console("ascii")
+    ui.next_step("dwb index", console=con2)
+    assert raw.getvalue().decode() == "→ next: dwb index\n"
+    assert raw2.getvalue().decode("ascii") == "-> next: dwb index\n"
+
+
+def test_human_is_the_opposite_of_json_mode_and_json_requested_is_the_flag():
+    assert not ui.human() and not ui.json_requested()  # pytest's stdout is not a terminal
+    ui.force_terminal(True)
+    assert ui.human() and ui.interactive()
+    ui.configure(json=True)
+    assert not ui.human() and ui.json_requested()

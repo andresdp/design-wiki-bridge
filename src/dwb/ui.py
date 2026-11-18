@@ -106,6 +106,21 @@ def json_mode() -> bool:
     return _settings.json or not is_terminal(sys.stdout)
 
 
+def human() -> bool:
+    """The opposite of ``json_mode``: a data command's header, summary and outcome line show."""
+    return not json_mode()
+
+
+def json_requested() -> bool:
+    """The global ``--json`` was given (for commands that are human even when piped)."""
+    return _settings.json
+
+
+def interactive() -> bool:
+    """Prompting is allowed: stdin is a terminal (or the test hook says so)."""
+    return is_terminal(sys.stdin)
+
+
 # ---------------------------------------------------------------------------- consoles
 
 
@@ -180,6 +195,45 @@ def header(*parts: str, console: Console | None = None) -> None:
 def bullet(msg: str, *, console: Console | None = None) -> None:
     con = console or err()
     con.print(f"  {glyphs(con).bullet} {escape(msg)}", soft_wrap=True)
+
+
+def next_step(cmd: str, *, console: Console | None = None) -> None:
+    """``→ next: <command>`` on its own line, for when there is no ``✓`` to report (stderr)."""
+    con = console or err()
+    con.print(f"[accent]{glyphs(con).arrow}[/] next: [bold]{escape(cmd)}[/]", soft_wrap=True)
+
+
+def kv(rows: list[tuple[str, Any]], *, console: Console | None = None) -> None:
+    """A compact summary, one ``key  value`` pair per line, keys aligned (stdout by default).
+    Plain lines, no padding after the value, so the output stays grep-parseable."""
+    table(["", ""], [[str(k), "-" if v is None else str(v)] for k, v in rows], header=False,
+          styles={0: lambda _: "secondary"}, console=console)
+
+
+def table(columns: list[str], rows: list[list[str]], *, title: str | None = None,
+          header: bool = True, styles: dict[int, Callable[[str], str]] | None = None,
+          console: Console | None = None) -> None:
+    """A results table: an optional title line, a header row, then one line per row with the
+    columns aligned by two spaces (stdout by default). ``styles`` maps a column index to a
+    function giving the Rich style of a cell value."""
+    con = console or out()
+    lines = [columns] if header else []
+    lines += [[str(c) for c in r] for r in rows]
+    if not lines:
+        return
+    widths = [max(len(r[i]) for r in lines) for i in range(len(columns))]
+    if title:
+        con.print(f"[bold]{escape(title)}[/]", soft_wrap=True)
+    for n, row in enumerate(lines):
+        cells = []
+        for i, cell in enumerate(row):
+            pad = " " * (widths[i] - len(cell)) if i < len(row) - 1 else ""
+            if header and n == 0:
+                style = "bold"
+            else:
+                style = styles[i](cell) if styles and i in styles else ""
+            cells.append((f"[{style}]{escape(cell)}[/]" if style else escape(cell)) + pad)
+        con.print("  ".join(cells), soft_wrap=True)
 
 
 # ------------------------------------------------------------------------- output mode
