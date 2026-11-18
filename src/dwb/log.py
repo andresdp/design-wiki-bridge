@@ -1,32 +1,50 @@
-"""Console progress logging for ``dwb`` commands.
+"""Diagnostic logging for ``dwb`` commands.
 
-Logs go to stderr (stdout stays clean for the JSON results commands print). Uses
-``rich`` when available, plain ``logging`` otherwise.
+Logs go to stderr (stdout stays clean for the results commands print). By default a record is
+just its message (warnings and errors get a ``!`` prefix); ``-v`` adds the time and the level,
+``-q`` keeps warnings and errors only. Uses ``rich`` when available, plain ``logging``
+otherwise.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 NOISY = ("httpx", "httpcore", "openai", "chromadb", "urllib3", "mcp", "langchain_mcp_adapters")
 
 
-def setup_logging(verbosity: int = 0) -> None:
-    """verbosity: -1 quiet (warnings), 0 info, 1+ debug."""
+class _Plain(logging.Formatter):
+    """Default (non-verbose) format: the message, with ``!`` marking warnings and errors."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        msg = super().format(record)
+        if record.levelno >= logging.ERROR:
+            return f"[red]![/] {msg}"
+        if record.levelno >= logging.WARNING:
+            return f"[yellow]![/] {msg}"
+        return msg
+
+
+def setup_logging(verbosity: int = 0, console: Any = None) -> None:
+    """verbosity: -1 quiet (warnings), 0 info, 1+ debug. ``console``: the Rich console to log
+    to (default: a new stderr console)."""
     level = logging.WARNING if verbosity < 0 else logging.DEBUG if verbosity > 0 else logging.INFO
+    verbose = verbosity > 0
     try:
         from rich.console import Console
         from rich.logging import RichHandler
 
         handler: logging.Handler = RichHandler(
-            console=Console(stderr=True), show_path=False, rich_tracebacks=True,
-            markup=True, log_time_format="[%H:%M:%S]",
+            console=console or Console(stderr=True), show_path=False, rich_tracebacks=True,
+            markup=True, show_time=verbose, show_level=verbose, log_time_format="[%H:%M:%S]",
         )
-        fmt = "%(message)s"
+        formatter = logging.Formatter("%(message)s") if verbose else _Plain("%(message)s")
     except ImportError:  # pragma: no cover
         handler = logging.StreamHandler()
-        fmt = "%(asctime)s %(levelname)s %(message)s"
-    handler.setFormatter(logging.Formatter(fmt))
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s" if verbose
+                                      else "%(message)s")
+    handler.setFormatter(formatter)
     root = logging.getLogger("dwb")
     root.handlers[:] = [handler]
     root.setLevel(level)

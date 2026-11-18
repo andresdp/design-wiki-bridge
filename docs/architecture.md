@@ -42,6 +42,7 @@ flowchart TB
         cli["cli<br/>typer commands"]
         chat["chat<br/>ChatSession, REPL, rendering"]
         initw["init_wizard<br/>dwb init questions"]
+        ui["ui<br/>theme, symbols, consoles, errors, output mode"]
     end
     subgraph L2["2 · Application: modes and orchestration"]
         direction LR
@@ -89,7 +90,7 @@ flowchart TB
 
 | Layer | Modules | Responsibility | External libraries |
 |---|---|---|---|
-| 1 Interface | `cli`, `chat`, `init_wizard` | Parse commands and options, run the REPL, and render answers and logs. No retrieval logic | typer, rich, prompt_toolkit |
+| 1 Interface | `cli`, `chat`, `init_wizard`, `ui` | Parse commands and options, run the REPL, and render answers and logs. No retrieval logic. `ui` owns presentation: the theme and symbols (ASCII fallback), the stdout/stderr consoles resolved per invocation, the error/warning/outcome/header lines, and the human-vs-JSON output switch. `cli` has the one exception boundary: expected errors print `✗`/`→` and exit 2, Ctrl-C prints `! Stopped` and exits 130, anything else prints a two-line summary, writes the traceback to `$XDG_CACHE_HOME/dwb/last-error.log`, and exits 1 | typer, rich, prompt_toolkit |
 | 2 Application | `project`, `workspace`, `runner`, `eval.command`, `curation` | Choose the mode, find or build the artifacts, wire concrete components into the graph, run or score a question set, and curate question sets (draft, validate, freeze, check) | PyYAML, PyMuPDF (PDF page counts) |
 | 3 Query pipeline | `graph`, `merge`, `rerank`, `budget`, `generate` | Answer one question: retrieve, merge, rerank, fit the token budget, generate cited claims. The pipeline depends on retriever interfaces; `runner` injects the concrete adapters | LangGraph, LangChain (`LLMListwiseRerank`, chat models) |
 | 3 Evaluation | `eval.*` (except `command`), `evidence_text` | Score saved traces: span recall, claim correctness, citation support and coverage, cost tables | DeepEval (optional diagnostics), LangChain chat model (judge) |
@@ -109,6 +110,7 @@ The module-level detail behind §2: the main import edges between modules.
 ```mermaid
 flowchart TB
     cli["cli.py<br/>typer commands"] --> chat["chat.py<br/>ChatSession, REPL, rendering"]
+    cli --> ui["ui.py<br/>presentation, output mode"]
     cli --> init["init_wizard.py"] --> project["project.py<br/>user mode: config, index_project"]
     cli --> runner["runner.py<br/>batch runner, build_components"]
     cli --> evalc["eval/command.py"]
@@ -353,6 +355,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 | 20 | **Failures count against the condition; degraded answers are flagged** (code review 2026-11-17) | A failed question scores correctness 0 (no answer) instead of dropping out of one side's mean, which would favor the condition that fails more. Its cost is left empty, not 0. A source or rerank failure keeps the answer but marks it `degraded`. Means are taken over the questions scored on both sides | Excluding failures silently; failing the whole question when one source fails |
 | 21 | **`evaluate` rechecks the pair** (code review 2026-11-17) | The saved manifests must be A then B and pass `check_paired`, so a swapped or mismatched pair cannot produce a valid-looking report. `--allow-unpaired` overrides it and is recorded in `evaluator_config.json`. Judge verdicts are cached per judge model and temperature | Trusting the argument order |
 | 22 | **Indexes must match the manifest they are used with** (code review 2026-11-17) | Condition A's index must be cut with the manifest's `max_span_tokens` and the current `chunker_version`; the runner refuses otherwise. User mode uses only the IDs `dwb index` recorded in `state.json`, and refuses a wiki that changed since | Picking the newest matching index |
+| 23 | **One presentation module and one exception boundary** (CLI UX plan KTD1, KTD5, KTD6) | `dwb.ui` resolves consoles and the output mode when output is written (`CliRunner` swaps streams per call), so `NO_COLOR`, `--no-color`, `--json` and TTY detection hold per invocation. The boundary is a custom Typer group, so tests exercise it; Click's own exits pass through untouched | Per-command `except` blocks; a boundary in `main()` that tests never reach |
 
 ## 11. Invariants
 

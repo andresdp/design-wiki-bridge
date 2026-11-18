@@ -11,7 +11,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "dwb"
 # Keep in sync with the module view in docs/architecture.md.
 LAYERS: dict[str, tuple[int, str]] = {
     # 1 interface
-    "cli": (1, ""), "chat": (1, ""), "init_wizard": (1, ""),
+    "cli": (1, ""), "chat": (1, ""), "init_wizard": (1, ""), "ui": (1, ""),
     # 2 application
     "project": (2, ""), "workspace": (2, ""), "runner": (2, ""), "eval.command": (2, ""),
     "curation": (2, ""),

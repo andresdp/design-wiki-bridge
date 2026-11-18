@@ -13,18 +13,64 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.console import Console
 from rich.table import Table
+from typer.core import TyperGroup
 
+from dwb import __version__, ui
 from dwb.log import get_logger, setup_logging
 from dwb.workspace import Workspace, WorkspaceError
 
 LOG = get_logger("cli")
-out = Console()  # results (stdout)
-err = Console(stderr=True)  # messages
+
+# Expected errors: shown as `✗ <message>` (plus `→ <fix>` when the error has a `fix`), exit 2.
+# Matched by name so the boundary imports nothing heavy.
+EXPECTED_ERRORS = (
+    "dwb.workspace.WorkspaceError", "dwb.retrieval.openwiki_client.OpenWikiError",
+    "dwb.runner.QuestionSetError", "dwb.runner.IndexMismatchError",
+    "dwb.manifest.ManifestError", "dwb.evidence_text.EvidenceTextError",
+    "dwb.eval.command.UnpairedRunsError",
+)
+
+
+def _control_flow() -> tuple[type[BaseException], ...]:
+    """Click's own exits and usage errors (RuntimeError subclasses): never ours to report."""
+    from typer._click.exceptions import Abort, ClickException, Exit
+
+    kinds: list[type[BaseException]] = [Exit, Abort, ClickException, typer.Exit, typer.Abort]
+    try:
+        import click
+
+        kinds += [click.exceptions.Exit, click.exceptions.Abort, click.ClickException]
+    except ImportError:  # pragma: no cover
+        pass
+    return tuple(kinds)
+
+
+def _is_expected(e: BaseException) -> bool:
+    return any(f"{c.__module__}.{c.__qualname__}" in EXPECTED_ERRORS for c in type(e).__mro__)
+
+
+class _App(TyperGroup):
+    """The one exception boundary (KTD5): every command runs inside ``invoke``."""
+
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except _control_flow():
+            raise
+        except KeyboardInterrupt:
+            ui.stopped(ctx.meta.get(ui.STOP_KEY, {}))
+            raise typer.Exit(130) from None
+        except Exception as e:
+            if _is_expected(e):
+                ui.error(str(e), getattr(e, "fix", None))
+                raise typer.Exit(2) from None
+            ui.unexpected(e, verbose=(ctx.params.get("verbose") or 0) > 0)
+            raise typer.Exit(1) from None
+
 
 app = typer.Typer(
-    name="dwb", no_args_is_help=True, rich_markup_mode="rich", add_completion=False,
+    name="dwb", cls=_App, no_args_is_help=True, rich_markup_mode="rich", add_completion=False,
     help="Ask questions about a software repository and get answers that cite the original "
          "code, PDFs and web pages. Also runs the A/B retrieval experiments.\n\n"
          "Run from the design-wiki-bridge folder. Guide: docs/usage.md",
@@ -62,15 +108,28 @@ def _workspace(repo: str | None) -> tuple[Workspace, str]:
     return WS, repo
 
 
+def _version(value: bool) -> None:
+    if value:
+        typer.echo(f"dwb {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
 def _main(
     verbose: Annotated[int, typer.Option("--verbose", "-v", count=True,
                                          help="More detail (per-stage timings). Repeatable.")] = 0,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Warnings and errors only.")] = False,
+    as_json: Annotated[bool, typer.Option(
+        "--json", help="Print results as JSON, even at a terminal.")] = False,
+    no_color: Annotated[bool, typer.Option("--no-color", help="No colors or animations.")]
+    = False,
+    version: Annotated[bool, typer.Option("--version", callback=_version, is_eager=True,
+                                          help="Print the version and exit.")] = False,
 ) -> None:
     from dwb.project import load_env
 
-    setup_logging(-1 if quiet else verbose)
+    ui.configure(json=as_json, no_color=no_color)
+    setup_logging(-1 if quiet else verbose, console=ui.err())
     for p in load_env():
         LOG.debug("Loaded environment from %s", p)
 
@@ -88,14 +147,12 @@ def init(
     """
     from dwb.init_wizard import run_init
 
-    try:
-        run_init(Path.cwd(), out, yes=yes, force=force)
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    run_init(Path.cwd(), ui.out(), yes=yes, force=force)
 
 
 def _fail(msg: str, code: int = 2) -> typer.Exit:
-    err.print(f"[red]Error:[/] {msg}")
+    """A usage error found inside a command: print it and return the exit to raise."""
+    ui.error(msg)
     return typer.Exit(code)
 
 
@@ -161,20 +218,17 @@ def ask(
     """
     from dwb.chat import ChatSession, print_answer
 
-    try:
-        ws, name = _workspace(repo)
+    ws, name = _workspace(repo)
 
-        async def go():
-            async with ChatSession(ws, _settings(ws, name, wiki, pdf, web, model)) as s:
-                return await s.ask(question)
+    async def go():
+        async with ChatSession(ws, _settings(ws, name, wiki, pdf, web, model)) as s:
+            return await s.ask(question)
 
-        trace = asyncio.run(go())
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    trace = asyncio.run(go())
     if as_json:
         print(trace.model_dump_json(indent=2))
     else:
-        print_answer(trace, show_context=show_context, console=out)
+        print_answer(trace, show_context=show_context, console=ui.out())
     if trace.errors:
         raise typer.Exit(1)
 
@@ -188,18 +242,15 @@ def chat(repo: RepoOpt = None, wiki: WikiOpt = None, pdf: PdfOpt = None, web: We
     """
     from dwb.chat import ChatSession, repl
 
-    try:
-        ws, name = _workspace(repo)
+    ws, name = _workspace(repo)
 
-        async def go():
-            async with ChatSession(ws, _settings(ws, name, wiki, pdf, web, model)) as s:
-                hist = ws.history_path
-                hist.parent.mkdir(parents=True, exist_ok=True)
-                await repl(s, out, history=hist)
+    async def go():
+        async with ChatSession(ws, _settings(ws, name, wiki, pdf, web, model)) as s:
+            hist = ws.history_path
+            hist.parent.mkdir(parents=True, exist_ok=True)
+            await repl(s, ui.out(), history=hist)
 
-        asyncio.run(go())
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    asyncio.run(go())
 
 
 @app.command()
@@ -208,6 +259,7 @@ def status(embedding_model: Annotated[str | None, typer.Option(
     """Show which sources are ready: for this project, or for every research repository."""
     from dwb.project import ProjectWorkspace, find_project
 
+    out = ui.out()
     root = find_project()
     if root is not None:
         pws = ProjectWorkspace(root)
@@ -266,12 +318,9 @@ def index_all(
         raise _fail("this folder is not a dwb project: run `dwb init` first. "
                     "(Research mode: dwb index code <repo> / dwb index pdf <corpus>.)")
     pws = ProjectWorkspace(root)
-    try:
-        state = index_project(pws, embedding=_embedding("fake", True) if fake else None,
-                              generate_wiki=generate_wiki)
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
-    out.print(f"[green]Indexed[/] {pws.config.name} at {state['sha'][:12]}: code"
+    state = index_project(pws, embedding=_embedding("fake", True) if fake else None,
+                          generate_wiki=generate_wiki)
+    ui.out().print(f"[green]Indexed[/] {pws.config.name} at {state['sha'][:12]}: code"
               + (", PDFs" if state.get("pdf_index_id") else "")
               + (", wiki" if state.get("wiki_snapshot_id") else "")
               + ". Next: [bold]dwb chat[/]")
@@ -295,16 +344,13 @@ def index_code(
     from dwb.retrieval.code_index import build_code_index
 
     model = embedding_model or _default_embedding()
-    try:
-        if path:
-            reader = RepoReader.from_dir(path, sha=sha or "fixture")
-        else:
-            r = WS.repo(repo)
-            if not r.checkout_ok:
-                raise WorkspaceError(f"checkout for {repo} not found at {r.checkout}")
-            reader = RepoReader.from_git(r.checkout, r.sha)
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    if path:
+        reader = RepoReader.from_dir(path, sha=sha or "fixture")
+    else:
+        r = WS.repo(repo)
+        if not r.checkout_ok:
+            raise WorkspaceError(f"checkout for {repo} not found at {r.checkout}")
+        reader = RepoReader.from_git(r.checkout, r.sha)
     LOG.info("Indexing code for [bold]%s[/] at %s with %s", repo, reader.sha[:12], model)
     idx = build_code_index(root, reader, repo, _embedding(model, fake), model,
                            ChunkingConfig(max_span_tokens=max_span_tokens))
@@ -358,22 +404,16 @@ def wiki_snapshot(
     Generate it first, inside the checkout:
     OPENWIKI_TELEMETRY_DISABLED=1 OPENWIKI_PROVIDER=... OPENWIKI_MODEL_ID=... openwiki code --init
     """
-    from dwb.retrieval.openwiki_client import OpenWikiError, openwiki_version, register_snapshot
+    from dwb.retrieval.openwiki_client import openwiki_version, register_snapshot
 
-    try:
-        r = WS.repo(repo)
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    r = WS.repo(repo)
     if version is None:
         version = openwiki_version() or "unknown"
     LOG.info("Registering the OpenWiki tree in %s (openwiki %s, %s/%s)", r.checkout, version,
              provider, model)
-    try:
-        snap = register_snapshot(r.checkout, repo, r.sha, root, provider=provider, model=model,
-                                 version=version, effort=effort, elapsed_s=elapsed_s,
-                                 cost_usd=cost_usd)
-    except OpenWikiError as e:
-        raise _fail(str(e)) from None
+    snap = register_snapshot(r.checkout, repo, r.sha, root, provider=provider, model=model,
+                             version=version, effort=effort, elapsed_s=elapsed_s,
+                             cost_usd=cost_usd)
     LOG.info("Snapshot [bold]%s[/]: %d pages, %d claims", snap.snapshot_id, snap.pages,
              snap.claims)
     print(snap.model_dump_json(indent=2))
@@ -394,7 +434,7 @@ def _problems(title: str, problems: list[str]) -> None:
     t.add_column("problem")
     for p in problems:
         t.add_row(p)
-    err.print(t)
+    ui.err().print(t)
 
 
 @bench_app.command("draft")
@@ -411,10 +451,7 @@ def benchmark_draft(
     """
     from dwb import curation
 
-    try:
-        res = curation.draft(WS, selection, overwrite=overwrite)
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    res = curation.draft(WS, selection, overwrite=overwrite)
     print(json.dumps({"records": str(res.records_path), "n_records": res.n_records,
                       "exclusions": str(res.exclusions_path),
                       "n_excluded": res.n_excluded}, indent=2))
@@ -429,11 +466,7 @@ def benchmark_validate(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> 
     """
     from dwb import curation
 
-    try:
-        rep = curation.validate(WS, records, reader_for=curation.git_reader,
-                                pdf_corpus=pdf_corpus)
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    rep = curation.validate(WS, records, reader_for=curation.git_reader, pdf_corpus=pdf_corpus)
     if rep.problems:
         _problems(f"{len(rep.problems)} problems in {records}", rep.problems)
     print(json.dumps({"path": str(records), "ok": rep.ok, "counts": rep.counts,
@@ -451,16 +484,13 @@ def benchmark_freeze(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> No
     """
     from dwb import curation
 
-    try:
-        res = curation.freeze_set(WS, records, reader_for=curation.git_reader,
-                                  pdf_corpus=pdf_corpus)
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    res = curation.freeze_set(WS, records, reader_for=curation.git_reader,
+                              pdf_corpus=pdf_corpus)
     if not res.ok:
         _problems(f"Not frozen: {len(res.report.problems)} problems in {records}",
                   res.report.problems)
         raise typer.Exit(1)
-    err.print(f"[green]Frozen.[/] Set question_set.hash: {res.digest} in the manifests that "
+    ui.err().print(f"[green]Frozen.[/] Set question_set.hash: {res.digest} in the manifests that "
               f"use {records}.")
     print(json.dumps({"path": str(records), "hash": res.digest,
                       "counts": res.report.counts}, indent=2))
@@ -480,10 +510,7 @@ def benchmark_check(
     """
     from dwb import curation
 
-    try:
-        res = curation.check_sets(dev, test)
-    except WorkspaceError as e:
-        raise _fail(str(e)) from None
+    res = curation.check_sets(dev, test)
     for w in res.warnings:
         LOG.warning(w)
     if res.problems:
@@ -510,13 +537,7 @@ def experiment_run(
 ) -> None:
     """Run one condition of the experiment over its question set and save the traces."""
     from dwb.manifest import load_manifest
-    from dwb.runner import (
-        IndexMismatchError,
-        QuestionSetError,
-        build_components,
-        load_question_set,
-        run_manifest,
-    )
+    from dwb.runner import build_components, load_question_set, run_manifest
 
     if web_mode not in (None, "record", "replay", "live"):
         raise _fail("--web-mode must be record, replay or live")
@@ -526,15 +547,9 @@ def experiment_run(
         if web_mode == "live":
             m = m.model_copy(update={"run_id": f"{m.run_id}-live"})
     base = Path(".")
-    try:  # check the question set before touching the checkout (B restores the wiki into it)
-        load_question_set(m, base)
-    except QuestionSetError as e:
-        raise _fail(str(e)) from None
-    try:
-        comps = build_components(m, base_dir=base, index_root=WS.index_root,
-                                 tavily_root=WS.tavily_root, wiki_root=WS.wiki_root)
-    except IndexMismatchError as e:
-        raise _fail(str(e)) from None
+    load_question_set(m, base)  # before touching the checkout (B restores the wiki into it)
+    comps = build_components(m, base_dir=base, index_root=WS.index_root,
+                             tavily_root=WS.tavily_root, wiki_root=WS.wiki_root)
     try:
         summary = run_manifest(m, comps, base_dir=base, runs_dir=runs_dir, overwrite=overwrite)
     except FileExistsError as e:
@@ -577,14 +592,10 @@ def experiment_evaluate(
         = False,
 ) -> None:
     """Score two saved runs offline and write the paired report tables."""
-    from dwb.eval.command import UnpairedRunsError, evaluate_runs
-    from dwb.evidence_text import EvidenceTextError
+    from dwb.eval.command import evaluate_runs
 
-    try:
-        res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
-                            deepeval=deepeval or None, allow_unpaired=allow_unpaired)
-    except (EvidenceTextError, UnpairedRunsError) as e:
-        raise _fail(str(e)) from None
+    res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
+                        deepeval=deepeval or None, allow_unpaired=allow_unpaired)
     print(json.dumps(res, indent=2))
 
 
