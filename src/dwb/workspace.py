@@ -130,14 +130,17 @@ class Workspace:
 
     # -- configuration --------------------------------------------------------------
 
-    def repos(self) -> dict[str, RepoInfo]:
+    def _repos_cfg(self) -> dict[str, Any]:
         path = self.resolve(self.repos_yaml)
         if not path.exists():
             raise WorkspaceError(
                 f"{path} not found. Run dwb from the design-wiki-bridge folder, or create it "
                 "(see docs/usage.md, 'Adding a repository')."
             )
-        cfg = yaml.safe_load(path.read_text()).get("repos", {})
+        return yaml.safe_load(path.read_text()) or {}
+
+    def repos(self) -> dict[str, RepoInfo]:
+        cfg = self._repos_cfg().get("repos", {})
         return {
             name: RepoInfo(name=name, url=r["url"], sha=r["sha"],
                            checkout=self.resolve(Path(r["checkout"])), tag=r.get("tag"),
@@ -147,8 +150,7 @@ class Workspace:
 
     def swe_qa_pin(self) -> SweQaPin:
         """The ``swe_qa`` section of ``configs/repos.yaml``."""
-        self.repos()  # same not-found message as the repositories
-        cfg = yaml.safe_load(self.resolve(self.repos_yaml).read_text()).get("swe_qa") or {}
+        cfg = self._repos_cfg().get("swe_qa") or {}
         missing = [k for k in ("dataset", "revision", "local_dir") if not cfg.get(k)]
         if missing:
             raise WorkspaceError(f"configs/repos.yaml: swe_qa is missing {', '.join(missing)}")

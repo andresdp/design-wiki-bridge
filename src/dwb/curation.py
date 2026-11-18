@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from dwb.benchmark.freeze import file_hash, find_overlaps, freeze
+from dwb.benchmark.freeze import find_overlaps, freeze, records_hash, sidecar_path
 from dwb.benchmark.schemas import (
     QuestionRecord,
     load_records,
@@ -113,7 +113,6 @@ def draft(ws: Workspace, selection_path: Path, *, out_dir: Path = DRAFTS_DIR,
 
 @dataclass
 class ValidationReport:
-    path: Path
     records: list[QuestionRecord] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
@@ -210,10 +209,10 @@ def validate(ws: Workspace, path: Path, *, reader_for: ReaderFactory = git_reade
     """Every problem in a record file, in one pass, plus summary counts.
 
     Code spans are checked at the pinned commit; PDF spans against the repository's corpus
-    (``pdf_corpus`` in configs/chat.yaml, or ``pdf_corpus``). Readers are built only for
-    repositories whose records have code spans.
+    (``pdf_corpus`` in configs/chat.yaml, or the ``pdf_corpus`` argument). Readers are built
+    only for repositories whose records have code spans.
     """
-    report = ValidationReport(path=path)
+    report = ValidationReport()
     _parse(path, report)
     records = report.records
     seen: set[str] = set()
@@ -236,8 +235,10 @@ def validate(ws: Workspace, path: Path, *, reader_for: ReaderFactory = git_reade
         if r.code_spans():
             if r.repo not in readers:
                 readers[r.repo] = reader_for(repo)
-            report.problems += [p for p in validate_against_checkout(r, readers[r.repo])
-                                if "repo_sha" not in p]  # reported above
+            reader = readers[r.repo]
+            # Check spans at the pinned commit; a SHA mismatch was reported just above.
+            report.problems += validate_against_checkout(
+                r.model_copy(update={"repo_sha": reader.sha}), reader)
         _check_pdf_spans(r, pdfs, report.problems)
 
     report.counts = {
@@ -304,10 +305,11 @@ def check_sets(dev_path: Path, test_path: Path) -> CheckResult:
     if not test_path.exists():
         res.warnings.append(f"test set {test_path} does not exist yet; nothing to compare")
         return res
-    res.problems += find_overlaps(load_records(dev_path), load_records(test_path))
-    sidecar = Path(f"{test_path}.sha256")
+    test = load_records(test_path)
+    res.problems += find_overlaps(load_records(dev_path), test)
+    sidecar = sidecar_path(test_path)
     if sidecar.exists():
-        frozen, actual = sidecar.read_text().strip(), file_hash(test_path)
+        frozen, actual = sidecar.read_text().strip(), records_hash(test)
         if frozen != actual:
             res.problems.append(f"{test_path} changed after it was frozen: {sidecar.name} has "
                                 f"{frozen}, the file hashes to {actual}")
