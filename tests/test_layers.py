@@ -31,6 +31,7 @@ LAYERS: dict[str, tuple[int, str]] = {
     "benchmark.schemas": (5, ""), "benchmark.swe_qa": (5, ""), "benchmark.freeze": (5, ""),
     # 6 foundation
     "repo": (6, ""), "tokens": (6, ""), "usage": (6, ""), "log": (6, ""),
+    "progress": (6, ""),
 }
 
 

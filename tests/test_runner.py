@@ -240,3 +240,159 @@ def test_cli_experiment_evaluate_piped_and_at_a_terminal(tmp_path, monkeypatch):
     assert r.stderr.startswith("A vs B · research mode\n")
     assert re.search(r"^paired\s+1$", r.stdout, re.M)
     assert f"✓ Report written to {tmp_path / 'rep'}" in r.stderr
+
+
+# ------------------------------------------------------------------------------ progress
+
+
+def _mixed_run(tmp_path, runs, on_progress=None):
+    """Three questions: one fails (Tavily replay miss), one is degraded (the PDF retriever
+    raises), one is ok (code only)."""
+    from test_degraded import Boom
+
+    qs = [custom_q().model_copy(update={"id": "q-failed"}),
+          custom_q(sources=("code", "pdf")).model_copy(update={"id": "q-degraded"}),
+          custom_q(sources=("code",)).model_copy(update={"id": "q-ok"})]
+    m = setup(tmp_path, qs)
+    c = components("A", web_store=TavilyStore(tmp_path / "tav", "empty", mode="replay"))
+    c.pdf_retriever = Boom()
+    return m, run_manifest(m, c, base_dir=tmp_path, runs_dir=runs, on_progress=on_progress)
+
+
+def test_run_reports_each_question_outcome_and_counts_match_the_summary(tmp_path):
+    events = []
+    m, summary = _mixed_run(tmp_path, tmp_path / "runs", events.append)
+    assert [(e.task, e.phase) for e in events] == [("run", "start")] + [("run", "step")] * 3 \
+        + [("run", "done")]
+    start, *steps, done = events
+    assert start.total == 3 and start.data["traces"] == tmp_path / "runs" / m.run_id / \
+        "traces.jsonl"
+    assert [(e.label, e.outcome, e.done) for e in steps] == [
+        ("q-failed", "failed", 1), ("q-degraded", "degraded", 2), ("q-ok", "ok", 3)]
+    assert all(e.elapsed_s > 0 and e.data["trace"].question_id == e.label for e in steps)
+    saved = json.loads((tmp_path / "runs" / m.run_id / "run_summary.json").read_text())
+    last = steps[-1].data
+    assert (last["failed"], last["degraded"], last["empty_context"]) == \
+        (saved["failed"], saved["degraded"], saved["empty_context"]) == (1, 1, 0)
+    assert done.data == summary
+
+
+def test_outcome_names_empty_context():
+    from dwb.runner import outcome
+    from dwb.trace import TraceRecord
+
+    def rec(**kw):
+        return TraceRecord(question_id="q", run_id="r", condition="A", **kw)
+
+    assert outcome(rec()) == "ok"
+    assert outcome(rec(errors=["x"], empty_context=True)) == "failed"
+    assert outcome(rec(empty_context=True, warnings=["pdf: boom"])) == "empty"
+    assert outcome(rec(warnings=["pdf: boom"])) == "degraded"
+
+
+_VOLATILE = {"elapsed_s", "latency_ms", "written_at", "created_at", "started_at",
+             "finished_at", "timestamp"}
+
+
+def _stable(obj):
+    """A trace or summary without its wall-clock fields (they differ between any two runs)."""
+    if isinstance(obj, dict):
+        return {k: _stable(v) for k, v in obj.items() if k not in _VOLATILE}
+    if isinstance(obj, list):
+        return [_stable(v) for v in obj]
+    return obj
+
+
+def test_traces_and_summary_are_the_same_with_and_without_progress(tmp_path):
+    m, _ = _mixed_run(tmp_path / "plain", tmp_path / "plain" / "runs")
+    m2, _ = _mixed_run(tmp_path / "cb", tmp_path / "cb" / "runs", lambda e: None)
+    a, b = tmp_path / "plain/runs" / m.run_id, tmp_path / "cb/runs" / m2.run_id
+    for name in ("traces.jsonl", "run_summary.json"):
+        ta, tb = a.joinpath(name).read_text(), b.joinpath(name).read_text()
+        ja = [json.loads(ln) for ln in ta.splitlines()] if name.endswith("l") else \
+            json.loads(ta)
+        jb = [json.loads(ln) for ln in tb.splitlines()] if name.endswith("l") else \
+            json.loads(tb)
+        assert _stable(ja) == _stable(jb), name
+        assert list(ja if isinstance(ja, dict) else ja[0]) == \
+            list(jb if isinstance(jb, dict) else jb[0])  # same fields, same order
+
+
+def _cli_run_two(tmp_path, monkeypatch, *flags, stop_at=None):
+    from typer.testing import CliRunner
+
+    import dwb.cli as cli
+    import dwb.runner as runner
+
+    qs = [public_q(), public_q().model_copy(update={"id": "flask-pub-001"})]
+    m = setup(tmp_path, qs)
+    path = tmp_path / "m.yaml"
+    path.write_text(m.to_yaml())
+    monkeypatch.setattr(runner, "build_components", lambda *a, **k: components("A"))
+    if stop_at is not None:
+        real, calls = runner.trace_from_state, []
+
+        def interrupt(state, m):
+            calls.append(1)
+            if len(calls) == stop_at:
+                raise KeyboardInterrupt
+            return real(state, m)
+
+        monkeypatch.setattr(runner, "trace_from_state", interrupt)
+    monkeypatch.chdir(tmp_path)
+    return m, CliRunner().invoke(cli.app, [*flags, "experiment", "run", str(path),
+                                           "--overwrite"])
+
+
+def test_cli_run_progress_without_a_terminal_is_one_plain_line_per_question(tmp_path,
+                                                                           monkeypatch):
+    m, r = _cli_run_two(tmp_path, monkeypatch)
+    assert r.exit_code == 0, r.output
+    json.loads(r.stdout)  # stdout is still only the summary JSON
+    assert "Ctrl-C stops; traces already written are kept." in r.stderr
+    assert "Running 2 questions" in r.stderr
+    assert re.search(r"^  ✓ flask-pub-000  \d+\.\d s$", r.stderr, re.M)
+    assert re.search(r"^  ✓ flask-pub-001  \d+\.\d s$", r.stderr, re.M)
+    assert "\r" not in r.stderr and "\x1b[" not in r.stderr
+    assert "[1/2]" not in r.stderr  # the per-question log lines are debug records now
+
+
+def test_cli_run_progress_at_a_no_color_terminal_is_plain_lines(tmp_path, monkeypatch, tty):
+    m, r = _cli_run_two(tmp_path, monkeypatch)
+    assert r.exit_code == 0, r.output
+    assert re.search(r"^  ✓ flask-pub-001  \d+\.\d s$", r.stderr, re.M)
+    assert "\r" not in r.stderr and "\x1b[" not in r.stderr
+
+
+def test_cli_run_quiet_shows_no_progress(tmp_path, monkeypatch):
+    m, r = _cli_run_two(tmp_path, monkeypatch, "-q")
+    assert r.exit_code == 0, r.output
+    assert "flask-pub-000" not in r.stderr and "Ctrl-C" not in r.stderr
+
+
+def test_cli_run_progress_animates_on_a_color_terminal(tmp_path, monkeypatch):
+    from dwb import ui
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("COLUMNS", "200")
+    prev = ui.force_terminal(True)
+    try:
+        m, r = _cli_run_two(tmp_path, monkeypatch)
+    finally:
+        ui.force_terminal(prev)
+    assert r.exit_code == 0, r.output
+    assert "\x1b[" in r.stderr  # a live display was drawn
+    assert "flask-pub-000" in r.stderr and "flask-pub-001" in r.stderr
+    assert "Running 2 questions" not in r.stderr  # the bar replaces the plain lines
+
+
+def test_cli_run_interrupted_after_one_question_reports_what_was_kept(tmp_path, monkeypatch):
+    m, r = _cli_run_two(tmp_path, monkeypatch, stop_at=2)
+    assert r.exit_code == 130, r.output
+    assert "! Stopped" in r.stderr and "Traceback" not in r.output
+    traces = Path("runs") / m.run_id / "traces.jsonl"
+    assert f"  • kept: 1 trace in {traces}" in r.stderr.splitlines()
+    assert ("Run incomplete (1 of 2 questions, no run_summary.json): it cannot be evaluated. "
+            "Rerun with --overwrite to restart it.") in r.stderr
+    assert len(read_traces(tmp_path / traces)) == 1
+    assert not (tmp_path / "runs" / m.run_id / "run_summary.json").exists()

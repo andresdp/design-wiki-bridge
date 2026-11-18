@@ -368,3 +368,77 @@ def test_human_is_the_opposite_of_json_mode_and_json_requested_is_the_flag():
     assert ui.human() and ui.interactive()
     ui.configure(json=True)
     assert not ui.human() and ui.json_requested()
+
+
+# ------------------------------------------------------------------------------ progress
+
+
+def test_keyed_keep_replaces_and_a_none_note_is_removed(monkeypatch, pair):
+    def effect():
+        ui.keep("code index code-toy-1")
+        ui.keep("1 trace in runs/x/traces.jsonl", key="traces")
+        ui.keep("2 traces in runs/x/traces.jsonl", key="traces")
+        ui.note_on_stop("Run incomplete (1 of 3)", key="run")
+        ui.note_on_stop("Run incomplete (2 of 3)", key="run")
+        ui.note_on_stop("gone", key="other")
+        ui.note_on_stop(None, key="other")
+        raise KeyboardInterrupt
+
+    r = _check(monkeypatch, pair, effect)
+    assert r.exit_code == 130
+    assert r.output.splitlines() == ["! Stopped", "  • kept: code index code-toy-1",
+                                     "  • kept: 2 traces in runs/x/traces.jsonl",
+                                     "Run incomplete (2 of 3)"]
+
+
+def _embed_events(total=1000, batch=100):
+    from dwb.progress import ProgressEvent
+    from dwb.retrieval.vector_store import IndexInfo
+
+    info = IndexInfo(index_id="code-x-1", kind="code", embedding_model="e", n_items=total,
+                     parts={})
+    yield ProgressEvent("embed", "start", total=total, label="code-x-1", data={"kind": "code"})
+    for done in range(batch, total + 1, batch):
+        yield ProgressEvent("embed", "step", done=done, total=total, label="code-x-1")
+    yield ProgressEvent("embed", "done", done=total, total=total, label="code-x-1",
+                        elapsed_s=2.5, data=info)
+
+
+def test_progress_without_a_terminal_prints_milestones_every_tenth(capsys):
+    with ui.progress("Ctrl-C stops.") as on_progress:
+        for ev in _embed_events():
+            on_progress(ev)
+    err = capsys.readouterr().err
+    lines = err.splitlines()
+    assert lines[0] == "Ctrl-C stops." and lines[1] == "Embedding 1000 spans into code-x-1"
+    assert [ln for ln in lines if "embedded" in ln] == [
+        f"  embedded {n}/1000" for n in range(100, 1000, 100)]
+    assert lines[-1] == "  ✓ Code   1000 spans  code-x-1  2.5 s"
+    assert "\r" not in err and ANSI not in err
+    assert ui._record()["kept"] == ["code index code-x-1"]
+
+
+def test_quiet_progress_prints_nothing_but_still_records_what_was_kept(capsys):
+    ui.configure(verbosity=-1)
+    with ui.progress("Ctrl-C stops.") as on_progress:
+        for ev in _embed_events():
+            on_progress(ev)
+    assert capsys.readouterr().err == ""
+    assert ui._record()["kept"] == ["code index code-x-1"]
+
+
+def test_progress_on_a_color_terminal_draws_a_bar_with_ascii_fallback(monkeypatch):
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="ascii", errors="replace", write_through=True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr("sys.stderr", stream)
+    ui.force_terminal(True)
+    with ui.progress() as on_progress:
+        assert on_progress.animate
+        for ev in _embed_events():
+            on_progress(ev)
+    out = raw.getvalue().decode("ascii")
+    plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", out)
+    assert ANSI in out and "\r" in out and "/1000 spans" in plain  # a live bar was drawn
+    assert "  ok Code   1000 spans  code-x-1  2.5 s" in plain
+    assert "?" not in plain and "[/]" not in plain  # ASCII glyphs, markup-safe frames

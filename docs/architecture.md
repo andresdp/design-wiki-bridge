@@ -82,7 +82,7 @@ flowchart TB
     subgraph L6["6 · Foundation"]
         direction LR
         repo["repo<br/>RepoReader: git show at SHA"]
-        util["tokens · usage · log"]
+        util["tokens · usage · log · progress"]
     end
     L1 --> L2 --> L3 --> L4 --> L5 --> L6
     PIPE x--x|no imports| EVAL
@@ -90,13 +90,13 @@ flowchart TB
 
 | Layer | Modules | Responsibility | External libraries |
 |---|---|---|---|
-| 1 Interface | `cli`, `chat`, `init_wizard`, `ui` | Parse commands and options, run the REPL, and render answers and logs. No retrieval logic. `ui` owns presentation: the theme and symbols (ASCII fallback), the stdout/stderr consoles resolved per invocation, the error/warning/outcome/header lines, and the human-vs-JSON output switch. `cli` has the one exception boundary: expected errors print `✗`/`→` and exit 2, Ctrl-C prints `! Stopped` and exits 130, anything else prints a two-line summary, writes the traceback to `$XDG_CACHE_HOME/dwb/last-error.log`, and exits 1 | typer, rich, prompt_toolkit |
+| 1 Interface | `cli`, `chat`, `init_wizard`, `ui` | Parse commands and options, run the REPL, and render answers and logs. No retrieval logic. `ui` owns presentation: the theme and symbols (ASCII fallback), the stdout/stderr consoles resolved per invocation, the error/warning/outcome/header lines, the human-vs-JSON output switch, and the progress renderer (bars and spinners for `ProgressEvent`s on a colored terminal, one plain line per milestone otherwise). `cli` has the one exception boundary: expected errors print `✗`/`→` and exit 2, Ctrl-C prints `! Stopped` and exits 130, anything else prints a two-line summary, writes the traceback to `$XDG_CACHE_HOME/dwb/last-error.log`, and exits 1 | typer, rich, prompt_toolkit |
 | 2 Application | `project`, `workspace`, `runner`, `eval.command`, `curation` | Choose the mode, find or build the artifacts, wire concrete components into the graph, run or score a question set, and curate question sets (draft, validate, freeze, check) | PyYAML, PyMuPDF (PDF page counts) |
 | 3 Query pipeline | `graph`, `merge`, `rerank`, `budget`, `generate` | Answer one question: retrieve, merge, rerank, fit the token budget, generate cited claims. The pipeline depends on retriever interfaces; `runner` injects the concrete adapters | LangGraph, LangChain (`LLMListwiseRerank`, chat models) |
 | 3 Evaluation | `eval.*` (except `command`), `evidence_text` | Score saved traces: span recall, claim correctness, citation support and coverage, cost tables | DeepEval (optional diagnostics), LangChain chat model (judge) |
 | 4 Adapters | `retrieval.*`, `web.tavily_store` | Build and query the indexes, talk to OpenWiki over MCP and resolve wiki references to code spans, and record or replay Tavily | Chroma, OpenAI embeddings, langchain-mcp-adapters, tavily-python |
 | 5 Domain model | `evidence`, `trace`, `manifest`, `prompts`, `benchmark.*` | The shared vocabulary: evidence items and IDs, traces, run manifests, question records, and prompt versions (see §6) | pydantic |
-| 6 Foundation | `repo`, `tokens`, `usage`, `log` | Read files at a commit through git, count tokens, collect usage from callbacks, and log | tiktoken, LangChain callbacks, rich |
+| 6 Foundation | `repo`, `tokens`, `usage`, `log`, `progress` | Read files at a commit through git, count tokens, collect usage from callbacks, and log. `progress` is the one event type (`ProgressEvent`) that indexing, the runner, OpenWiki generation and evaluation send to an optional `on_progress` callback; `ui` renders it, so no lower layer imports presentation code (KTD2) | tiktoken, LangChain callbacks, rich |
 
 Two consequences of the layering:
 

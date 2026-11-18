@@ -141,7 +141,7 @@ def _main(
 ) -> None:
     from dwb.project import load_env
 
-    ui.configure(json=as_json, no_color=no_color)
+    ui.configure(json=as_json, no_color=no_color, verbosity=-1 if quiet else verbose)
     setup_logging(-1 if quiet else verbose, console=ui.err())
     for p in load_env():
         LOG.debug("Loaded environment from %s", p)
@@ -376,8 +376,10 @@ def index_all(
     pws = ProjectWorkspace(root)
     name = pws.config.name
     _open(name, "user mode", head_sha(root)[:12])
-    state = index_project(pws, embedding=_embedding("fake", True) if fake else None,
-                          generate_wiki=generate_wiki)
+    with ui.progress(STOP_INDEX) as on_progress:
+        state = index_project(pws, embedding=_embedding("fake", True) if fake else None,
+                              generate_wiki=generate_wiki, on_progress=on_progress,
+                              wiki_output=ui.verbose())
 
     def show(st):
         ui.kv([("code", st.get("code_index_id")),
@@ -387,6 +389,9 @@ def index_all(
         ui.outcome(f"Indexed {name} at {st['sha'][:12]}", "dwb chat")
 
     ui.emit(state, human=show)
+
+
+STOP_INDEX = "Ctrl-C stops; finished indexes are kept."
 
 
 def _index_summary(info) -> None:
@@ -421,8 +426,10 @@ def index_code(
         reader = RepoReader.from_git(r.checkout, r.sha)
     _open(repo, "research mode", reader.sha[:12])
     LOG.info("Indexing code for [bold]%s[/] at %s with %s", repo, reader.sha[:12], model)
-    idx = build_code_index(root, reader, repo, _embedding(model, fake), model,
-                           ChunkingConfig(max_span_tokens=max_span_tokens))
+    with ui.progress(STOP_INDEX) as on_progress:
+        idx = build_code_index(root, reader, repo, _embedding(model, fake), model,
+                               ChunkingConfig(max_span_tokens=max_span_tokens),
+                               on_progress=on_progress)
 
     def show(info):
         _index_summary(info)
@@ -454,7 +461,9 @@ def index_pdf(
     _open(c.corpus_id, "research mode")
     LOG.info("Indexing PDF corpus [bold]%s[/] (%d documents) with %s", c.corpus_id,
              len(c.documents), model)
-    idx = build_pdf_index(root, c, base_dir, _embedding(model, fake), model)
+    with ui.progress(STOP_INDEX) as on_progress:
+        idx = build_pdf_index(root, c, base_dir, _embedding(model, fake), model,
+                              on_progress=on_progress)
 
     def show(info):
         _index_summary(info)
@@ -686,7 +695,9 @@ def experiment_run(
     comps = build_components(m, base_dir=base, index_root=WS.index_root,
                              tavily_root=WS.tavily_root, wiki_root=WS.wiki_root)
     try:
-        summary = run_manifest(m, comps, base_dir=base, runs_dir=runs_dir, overwrite=overwrite)
+        with ui.progress("Ctrl-C stops; traces already written are kept.") as on_progress:
+            summary = run_manifest(m, comps, base_dir=base, runs_dir=runs_dir,
+                                   overwrite=overwrite, on_progress=on_progress)
     except FileExistsError as e:
         raise _fail(f"{e} (add --overwrite to replace it)") from None
 
@@ -763,8 +774,10 @@ def experiment_evaluate(
     from dwb.eval.command import evaluate_runs
 
     _open(f"{run_a.name} vs {run_b.name}", "research mode")
-    res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
-                        deepeval=deepeval or None, allow_unpaired=allow_unpaired)
+    with ui.progress("Ctrl-C stops; the report is written only at the end.") as on_progress:
+        res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
+                            deepeval=deepeval or None, allow_unpaired=allow_unpaired,
+                            on_progress=on_progress)
 
     def show(d):
         ui.kv([(k, v if not isinstance(v, (list, dict)) else (", ".join(map(str, v)) or "-"))

@@ -15,7 +15,8 @@ import json
 import os
 import sys
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, TextIO
@@ -57,20 +58,31 @@ _ALL_UNICODE = "".join([UNICODE.ok, UNICODE.fail, UNICODE.bullet, UNICODE.arrow,
 class _Settings:
     json: bool = False
     no_color: bool = False
+    verbosity: int = 0  # -1 quiet (-q), 0 normal, 1+ verbose (-v)
 
 
 _settings = _Settings()
 _forced: bool | None = None
 _cache: dict[str, tuple[tuple, Console]] = {}
-_fallback_record: dict[str, list[str]] = {"kept": [], "notes": []}
+_fallback_record: dict[str, Any] = {"kept": [], "notes": []}
 
 
-def configure(*, json: bool = False, no_color: bool = False) -> None:
+def configure(*, json: bool = False, no_color: bool = False, verbosity: int = 0) -> None:
     """Set the global options for this invocation (called by the CLI callback)."""
     global _settings
-    _settings = _Settings(json=json, no_color=no_color)
-    _fallback_record["kept"].clear()
-    _fallback_record["notes"].clear()
+    _settings = _Settings(json=json, no_color=no_color, verbosity=verbosity)
+    _fallback_record.clear()
+    _fallback_record.update(kept=[], notes=[])
+
+
+def quiet() -> bool:
+    """``-q``: warnings and errors only, no progress."""
+    return _settings.verbosity < 0
+
+
+def verbose() -> bool:
+    """``-v``: diagnostics (timestamps, levels, per-stage timings)."""
+    return _settings.verbosity > 0
 
 
 def force_terminal(value: bool | None = True) -> bool | None:
@@ -294,7 +306,7 @@ def unexpected(exc: BaseException, *, verbose: bool = False,
 STOP_KEY = "dwb.stop_record"  # on the Click context's shared ``meta``
 
 
-def _record() -> dict[str, list[str]]:
+def _record() -> dict[str, Any]:
     """The stop record of the current command, kept on the shared Click context meta."""
     try:
         from typer._click.globals import get_current_context
@@ -306,17 +318,38 @@ def _record() -> dict[str, list[str]]:
     return ctx.meta.setdefault(STOP_KEY, {"kept": [], "notes": []})
 
 
-def keep(item: str) -> None:
-    """Record something finished that survives a Ctrl-C (an index built, a trace written)."""
-    _record()["kept"].append(item)
+def _put(kind: str, text: str | None, key: str | None) -> None:
+    """Append ``text`` to the record's ``kind`` list; with a ``key``, replace (or with
+    ``text=None`` remove) the entry earlier recorded under that key."""
+    rec = _record()
+    items: list[str] = rec[kind]
+    keyed: dict[str, str] = rec.setdefault(f"_{kind}_keys", {})
+    old = keyed.pop(key, None) if key is not None else None
+    if old is not None and old in items:
+        pos = items.index(old)
+        if text is None:
+            del items[pos]
+        else:
+            items[pos] = text
+    elif text is not None:
+        items.append(text)
+    if key is not None and text is not None:
+        keyed[key] = text
 
 
-def note_on_stop(text: str) -> None:
-    """A line to print after ``! Stopped`` (e.g. "the run is incomplete")."""
-    _record()["notes"].append(text)
+def keep(item: str, *, key: str | None = None) -> None:
+    """Record something finished that survives a Ctrl-C (an index built, a trace written).
+    With ``key``, a later call with the same key replaces the entry (a running count)."""
+    _put("kept", item, key)
 
 
-def stopped(record: dict[str, list[str]] | None = None, *,
+def note_on_stop(text: str | None, *, key: str | None = None) -> None:
+    """A line to print after ``! Stopped`` (e.g. "the run is incomplete"). With ``key``, a
+    later call replaces it, and ``None`` removes it."""
+    _put("notes", text, key)
+
+
+def stopped(record: dict[str, Any] | None = None, *,
             console: Console | None = None) -> None:
     """``! Stopped``, then what was kept and any notes (stderr)."""
     con = console or err()
@@ -327,3 +360,225 @@ def stopped(record: dict[str, list[str]] | None = None, *,
         con.print(f"  {g.bullet} kept: {escape(item)}", soft_wrap=True)
     for note in rec.get("notes", []):
         con.print(escape(note), soft_wrap=True)
+
+
+# ------------------------------------------------------------------------------ progress
+
+_KIND = {"code": ("Code", "spans"), "pdf": ("PDFs", "pages")}
+
+
+def _secs(s: float) -> str:
+    return f"{s:.1f} s"
+
+
+def _columns(con: Console) -> list[Any]:
+    """Rich progress columns drawn with the console's glyphs (ASCII fallback): a spinner
+    frame, the description, a bar and counts when the total is known, a note, elapsed."""
+    from rich.progress import ProgressColumn
+    from rich.text import Text
+
+    g = glyphs(con)
+
+    class Lead(ProgressColumn):
+        def render(self, task):
+            frame = g.spinner[int((task.elapsed or 0) * 10) % len(g.spinner)]
+            return Text.from_markup(f"  [accent]{escape(frame)}[/]")
+
+    class Bar(ProgressColumn):
+        width = 24
+
+        def render(self, task):
+            if task.total is None:
+                return Text("")
+            n = int(self.width * task.completed / task.total) if task.total else 0
+            return Text.from_markup(f"[accent]{g.bar_done * n}[/]"
+                                    f"[secondary]{g.bar_todo * (self.width - n)}[/] "
+                                    f"{int(task.completed)}/{int(task.total)}")
+
+    class Note(ProgressColumn):
+        def render(self, task):
+            return Text.from_markup(f"[secondary]{escape(task.fields.get('note', ''))}[/]")
+
+    class Elapsed(ProgressColumn):
+        def render(self, task):
+            return Text(_secs(task.elapsed or 0.0))
+
+    from rich.progress import TextColumn
+
+    return [Lead(), TextColumn("{task.description}"), Bar(), Note(), Elapsed()]
+
+
+class ProgressRenderer:
+    """Renders ``dwb.progress.ProgressEvent``s on stderr and keeps the Ctrl-C record.
+
+    On a colored terminal with human output: a bar with counts and elapsed time for
+    embedding, a spinner with elapsed time for OpenWiki, one bar over the questions of a run
+    (running failed/degraded counts, one result line per question printed above it) and over
+    each evaluated condition. Otherwise (no terminal, ``NO_COLOR``, JSON output) one plain
+    line per milestone; ``-q`` prints nothing. Either way finished indexes and written
+    traces are recorded with ``keep`` so a Ctrl-C reports them. Use it through
+    ``progress()``, which stops the display on the way out (also on Ctrl-C).
+    """
+
+    def __init__(self) -> None:
+        self.con = err()
+        self.quiet = quiet()
+        self.animate = animations() and human() and not self.quiet
+        self._live: Any = None  # a rich.progress.Progress while a task is shown
+        self._tasks: dict[str, Any] = {}
+        self._embed_shown: dict[str, int] = {}
+        self._state: dict[str, Any] = {}
+
+    # -- display plumbing
+
+    def line(self, markup: str) -> None:
+        """Print a line (Rich markup) above the live display, or plainly without one."""
+        if self.quiet:
+            return
+        target = self._live.console if self._live is not None else self.con
+        target.print(markup, soft_wrap=True)
+
+    def _show(self, key: str, description: str, total: int | None, note: str = "") -> None:
+        if not self.animate:
+            return
+        if self._live is None:
+            from rich.progress import Progress
+
+            self._live = Progress(*_columns(self.con), console=self.con, transient=True,
+                                  refresh_per_second=10)
+            self._live.start()
+        self._tasks[key] = self._live.add_task(description, total=total, note=note)
+
+    def _update(self, key: str, **fields: Any) -> None:
+        if self._live is not None and key in self._tasks:
+            self._live.update(self._tasks[key], **fields)
+
+    def _hide(self, key: str) -> None:
+        tid = self._tasks.pop(key, None)
+        if self._live is not None and tid is not None:
+            self._live.remove_task(tid)
+            if not self._tasks:
+                self.close()
+
+    def close(self) -> None:
+        """Stop the live display, if any (idempotent)."""
+        live, self._live, self._tasks = self._live, None, {}
+        if live is not None:
+            live.stop()
+
+    # -- events
+
+    def __call__(self, ev: Any) -> None:
+        handler = getattr(self, f"_on_{ev.task}", None)
+        if handler is not None:
+            handler(ev)
+
+    def _on_embed(self, ev: Any) -> None:
+        key, g = f"embed:{ev.label}", glyphs(self.con)
+        if ev.phase == "start":
+            title, unit = _KIND.get((ev.data or {}).get("kind", ""), ("Index", "items"))
+            self._embed_shown[ev.label] = 0
+            if self.animate:
+                self._show(key, f"{title:<6}", ev.total or 0, note=unit)
+            else:
+                self.line(f"Embedding {ev.total} {unit} into {escape(ev.label)}")
+        elif ev.phase == "step":
+            if self.animate:
+                self._update(key, completed=ev.done)
+            elif ev.total and ev.done < ev.total:
+                tenth = ev.done * 10 // ev.total  # one line per ~10%, at most one per batch
+                if tenth > self._embed_shown.get(ev.label, 0):
+                    self._embed_shown[ev.label] = tenth
+                    self.line(f"  embedded {ev.done}/{ev.total}")
+        elif ev.phase == "done":
+            kind = getattr(ev.data, "kind", "")
+            title, unit = _KIND.get(kind, ("Index", "items"))
+            self._hide(key)
+            when = "reused" if getattr(ev.data, "reused", False) else _secs(ev.elapsed_s)
+            self.line(f"  [ok]{g.ok}[/] {title:<6} {ev.done} {unit}  "
+                      f"[secondary]{escape(ev.label)}  {when}[/]")
+            keep(f"{kind} index {ev.label}" if kind else f"index {ev.label}")
+
+    def _on_wiki(self, ev: Any) -> None:
+        g, data = glyphs(self.con), ev.data or {}
+        log = data.get("log")
+        if ev.phase == "start":
+            what = f"OpenWiki {ev.label}"
+            if data.get("provider"):
+                what += f" ({data['provider']}/{data.get('model', '')})"
+            if self.animate and log is not None:
+                self._show("wiki", what, None, note=f"output: {log}; can take ~15 min ")
+            else:
+                self.line(f"Running {escape(what)}; it makes model calls and can take ~15 min"
+                          + (f". Output: {escape(str(log))}" if log else ""))
+        elif ev.phase == "done":
+            self._hide("wiki")
+            self.line(f"  [ok]{g.ok}[/] Wiki   generated by OpenWiki  "
+                      f"[secondary]{_secs(ev.elapsed_s)}[/]")
+            keep("wiki generated in openwiki/")
+
+    def _run_note(self) -> None:
+        st = self._state
+        note_on_stop(f"Run incomplete ({st['done']} of {st['total']} questions, no "
+                     "run_summary.json): it cannot be evaluated. Rerun with --overwrite to "
+                     "restart it.", key="run")
+
+    def _on_run(self, ev: Any) -> None:
+        g, st = glyphs(self.con), self._state
+        if ev.phase == "start":
+            st.update(done=0, total=ev.total or 0, traces=(ev.data or {}).get("traces"))
+            self._run_note()
+            if self.animate:
+                self._show("run", "Questions", ev.total or 0, note="0 failed, 0 degraded ")
+            else:
+                self.line(f"Running {ev.total} questions")
+        elif ev.phase == "step":
+            data = ev.data or {}
+            st["done"] = ev.done
+            n = ev.done
+            keep(f"{n} trace{'s' if n != 1 else ''} in {st.get('traces')}", key="traces")
+            self._run_note()
+            sym = {"ok": f"[ok]{g.ok}[/]", "failed": f"[fail]{g.fail}[/]"}.get(
+                ev.outcome, f"[warn]{g.warn}[/]")
+            what = {"ok": "", "failed": "failed", "degraded": "degraded",
+                    "empty": "empty context"}.get(ev.outcome, ev.outcome)
+            self.line(f"  {sym} {escape(ev.label)}  " + (f"{what}  " if what else "")
+                      + f"[secondary]{_secs(ev.elapsed_s)}[/]")
+            self._update("run", completed=ev.done,
+                         note=f"{data.get('failed', 0)} failed, "
+                              f"{data.get('degraded', 0)} degraded ")
+        elif ev.phase == "done":
+            self._hide("run")
+            note_on_stop(None, key="run")
+
+    def _on_evaluate(self, ev: Any) -> None:
+        g = glyphs(self.con)
+        if ev.phase == "start":
+            if self.animate:
+                self._show("evaluate", f"Judging {escape(ev.label)}", ev.total or 0)
+            else:
+                self.line(f"Evaluating condition {escape(ev.label)}: {ev.total} traces")
+        elif ev.phase == "step":
+            self._update("evaluate", completed=ev.done)
+            if ev.outcome == "skipped":
+                self.line(f"  [warn]{g.warn}[/] {escape(ev.label)}  skipped (not in the "
+                          "question set)")
+            elif not self.animate:
+                self.line(f"  [{ev.done}/{ev.total}] {escape(ev.label)}")
+        elif ev.phase == "done":
+            self._hide("evaluate")
+            self.line(f"  [ok]{g.ok}[/] Condition {escape(ev.label)}: {ev.total} traces scored")
+
+
+@contextmanager
+def progress(stop_hint: str | None = None) -> Iterator[ProgressRenderer]:
+    """A progress renderer for one long-running command; pass it as ``on_progress``.
+    ``stop_hint`` (e.g. "Ctrl-C stops; finished indexes are kept.") is printed first
+    (R15). The live display stops on the way out, before any error or ``! Stopped``."""
+    r = ProgressRenderer()
+    if stop_hint and not r.quiet:
+        r.con.print(f"[secondary]{escape(stop_hint)}[/]", soft_wrap=True)
+    try:
+        yield r
+    finally:
+        r.close()

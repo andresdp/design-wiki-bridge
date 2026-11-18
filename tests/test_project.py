@@ -208,7 +208,7 @@ def test_cli_index_at_a_terminal_prints_header_summary_and_outcome(repo, tty):
     assert f"✓ Indexed toyproj at {sha} → next: dwb chat" in r.stderr
     r = CliRunner().invoke(cli(), ["--json", "index", "--fake"])
     assert r.exit_code == 0 and json.loads(r.stdout)["sha"].startswith(sha)
-    assert "user mode" not in r.stderr and "✓" not in r.stderr
+    assert "user mode" not in r.stderr and "Indexed toyproj" not in r.stderr
 
 
 def test_cli_status_in_a_project_piped_and_at_a_terminal(repo, monkeypatch):
@@ -607,3 +607,122 @@ def test_init_echoes_a_masked_key_and_never_the_key(repo, monkeypatch):
     assert r.exit_code == 0, r.output
     assert saved == {"OPENAI_API_KEY": key}
     assert "sk-*****xyz" in r.output and "SECRETVALUE" not in r.output
+
+
+# ------------------------------------------------------------------------------ progress
+
+
+def test_index_reports_embedding_progress_and_keeps_going_without_a_callback(repo, monkeypatch):
+    import dwb.retrieval.vector_store as vs
+
+    monkeypatch.setattr(vs, "BATCH", 2)
+    ws = _project(repo)
+    events = []
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    state = index_project(ws, embedding=DeterministicFakeEmbedding(size=32),
+                          on_progress=events.append)
+    code = [e for e in events if e.label == state["code_index_id"]]
+    assert code[0].phase == "start" and code[0].data == {"kind": "code"}
+    steps = [e.done for e in code if e.phase == "step"]
+    assert steps == sorted(steps) and len(steps) > 1  # one step per batch
+    assert code[-1].phase == "done" and code[-1].done == steps[-1] == code[-1].data.n_items
+    pdf = [e for e in events if e.label == state["pdf_index_id"]]
+    assert [e.phase for e in pdf] == ["start", "step", "done"] and pdf[-1].done == 1
+    # a reused index reports one done event carrying the reused info
+    again = []
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32), on_progress=again.append)
+    assert [(e.phase, e.data.reused) for e in again] == [("done", True), ("done", True)]
+
+
+def _fake_openwiki(tmp_path, monkeypatch, body: str) -> Path:
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir(exist_ok=True)
+    exe = bin_dir / "openwiki"
+    exe.write_text("#!/bin/sh\n" + body)
+    exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return exe
+
+
+def test_openwiki_output_goes_to_the_log_not_the_terminal(repo, tmp_path, monkeypatch, capfd):
+    from dwb.project import WikiCfg, _generate_wiki
+
+    _fake_openwiki(tmp_path, monkeypatch,
+                   'echo "openwiki says hello $1 $2"\necho "openwiki warns" >&2\nexit 0\n')
+    events = []
+    _generate_wiki(repo, WikiCfg(), update=False, on_progress=events.append)
+    out, err = capfd.readouterr()
+    assert "openwiki says" not in out + err and "openwiki warns" not in out + err
+    log = (repo / ".dwb/openwiki.log").read_text()
+    assert "openwiki says hello code --init" in log and "openwiki warns" in log
+    assert [(e.task, e.phase) for e in events] == [("wiki", "start"), ("wiki", "done")]
+    assert events[0].data["log"] == repo / ".dwb/openwiki.log"
+
+
+def test_openwiki_failure_shows_the_last_lines_and_the_log_path(repo, tmp_path, monkeypatch):
+    from dwb.project import WikiCfg, _generate_wiki
+
+    _fake_openwiki(tmp_path, monkeypatch,
+                   'i=1\nwhile [ $i -le 30 ]; do echo "step $i"; i=$((i+1)); done\n'
+                   'echo "boom: no API key" >&2\nexit 3\n')
+    with pytest.raises(WorkspaceError) as exc:
+        _generate_wiki(repo, WikiCfg(), update=True)
+    msg = str(exc.value)
+    assert "OpenWiki exited with status 3" in msg and "boom: no API key" in msg
+    assert "step 30" in msg and "step 12" in msg and "step 11\n" not in msg  # last 20 lines
+    assert str(repo / ".dwb/openwiki.log") in msg
+
+
+def test_openwiki_output_is_not_captured_with_verbose(repo, tmp_path, monkeypatch, capfd):
+    from dwb.project import WikiCfg, _generate_wiki
+
+    _fake_openwiki(tmp_path, monkeypatch, 'echo "openwiki streams"\nexit 0\n')
+    events = []
+    _generate_wiki(repo, WikiCfg(), update=False, inherit_output=True,
+                   on_progress=events.append)
+    out, _ = capfd.readouterr()
+    assert "openwiki streams" in out
+    assert not (repo / ".dwb/openwiki.log").exists() and events[0].data["log"] is None
+
+
+def test_cli_index_progress_without_a_terminal_is_plain_milestones(repo):
+    _project(repo)
+    r = CliRunner().invoke(cli(), ["index", "--fake"])
+    assert r.exit_code == 0, r.output
+    state = json.loads(r.stdout)
+    assert "Ctrl-C stops; finished indexes are kept." in r.stderr
+    assert re.search(r"^Embedding \d+ spans into code-toy-", r.stderr, re.M)
+    assert re.search(rf"^  ✓ Code   \d+ spans  {state['code_index_id']}  \d+\.\d s$",
+                     r.stderr, re.M)
+    assert re.search(r"^  ✓ PDFs   1 pages  pdf-toy-pdfs-", r.stderr, re.M)
+    assert "\r" not in r.stderr and "\x1b[" not in r.stderr
+    assert "  embedded " not in r.stderr  # one small batch: no 10% lines
+
+
+def test_cli_index_generates_the_wiki_with_a_spinner_line(repo, tmp_path, monkeypatch, tty):
+    _fake_openwiki(tmp_path, monkeypatch, 'echo "noisy openwiki output"\nexit 0\n')
+    _project(repo, pdfs=[], wiki={"enabled": True, "generate": True})
+    r = CliRunner().invoke(cli(), ["index", "--fake"])
+    assert r.exit_code == 0, r.output
+    assert "noisy openwiki output" not in r.output
+    assert "Running OpenWiki code --init (openai/" in r.stderr
+    assert "Output: " in r.stderr and ".dwb/openwiki.log" in r.stderr
+    assert "✓ Wiki   generated by OpenWiki" in r.stderr
+
+
+def test_cli_index_interrupted_after_the_code_index_reports_it_kept(repo, monkeypatch):
+    import dwb.retrieval.pdf_index as pdf_index
+
+    def stop(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pdf_index, "build_pdf_index", stop)
+    _project(repo)
+    r = CliRunner().invoke(cli(), ["index", "--fake"])
+    assert r.exit_code == 130, r.output
+    lines = r.stderr.splitlines()
+    assert "! Stopped" in lines and "Traceback" not in r.output
+    kept = [ln for ln in lines if ln.startswith("  • kept: ")]
+    assert len(kept) == 1 and kept[0].startswith("  • kept: code index code-toy-")
+    assert not (repo / ".dwb/state.json").exists()

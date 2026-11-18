@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from dwb.evidence import EvidenceItem, PdfLocator
 from dwb.log import get_logger
+from dwb.progress import OnProgress, report
 from dwb.retrieval.vector_store import VectorIndex, make_index_id
 
 LOG = get_logger("index")
@@ -71,11 +72,15 @@ def build_pdf_index(
     base_dir: Path,
     embedding: Embeddings,
     embedding_model: str,
+    on_progress: OnProgress | None = None,
 ) -> VectorIndex:
     index_id = pdf_index_id(corpus, base_dir, embedding_model)
     if VectorIndex.load_info(root, index_id) is not None:
         LOG.info("Index [bold]%s[/] already exists; reusing it, not rebuilding", index_id)
-        return VectorIndex.open(root, index_id, embedding)
+        idx = VectorIndex.open(root, index_id, embedding)
+        report(on_progress, "embed", "done", done=idx.info.n_items, total=idx.info.n_items,
+               label=index_id, data=idx.info)
+        return idx
     items = []
     for d in corpus.documents:
         pages = pdf_pages(d, base_dir)
@@ -85,6 +90,7 @@ def build_pdf_index(
         root, index_id=index_id, kind="pdf", items=items, embedding=embedding,
         embedding_model=embedding_model,
         parts={"corpus_id": corpus.corpus_id, "docs": corpus.fingerprint(base_dir)},
+        on_progress=on_progress,
     )
 
 

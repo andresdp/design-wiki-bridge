@@ -25,6 +25,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from dwb.log import get_logger
+from dwb.progress import OnProgress, report
 from dwb.prompts import GENERATE_PROMPT
 from dwb.repo import GIT_TIMEOUT_S
 from dwb.retrieval.openwiki_client import openwiki_version  # noqa: F401  (re-exported)
@@ -36,6 +37,7 @@ DWB_DIR = ".dwb"
 CONFIG_NAME = "config.yaml"
 STATE_NAME = "state.json"
 WIKI_RECORD = "wiki.json"
+OPENWIKI_LOG = "openwiki.log"
 GLOBAL_ENV = Path.home() / ".config" / "dwb" / ".env"
 
 CODE_EXTENSIONS = [
@@ -489,25 +491,58 @@ def openwiki_status(root: Path) -> dict[str, Any]:
     return info
 
 
-def _generate_wiki(root: Path, cfg: WikiCfg, update: bool) -> float:
+def _tail(path: Path, n: int = 20) -> list[str]:
+    try:
+        return path.read_text(errors="replace").splitlines()[-n:]
+    except OSError:
+        return []
+
+
+def _generate_wiki(root: Path, cfg: WikiCfg, update: bool, *, inherit_output: bool = False,
+                   on_progress: OnProgress | None = None) -> float:
+    """Run ``openwiki code`` in ``root``. Its stdout and stderr go to ``.dwb/openwiki.log``
+    (KTD7), so a spinner can show meanwhile; ``inherit_output`` streams them to the terminal
+    instead (``-v``). stdin is always inherited. A failure carries the log's last lines."""
     exe = shutil.which("openwiki")
     if not exe:
         raise WorkspaceError("openwiki is not installed (npm install -g openwiki@0.9.0)")
     env = {**os.environ, "OPENWIKI_TELEMETRY_DISABLED": "1",
            "OPENWIKI_PROVIDER": cfg.provider, "OPENWIKI_MODEL_ID": cfg.model}
     cmd = [exe, "code", "--update" if update else "--init"]
-    LOG.info("Running OpenWiki (%s, %s/%s); this makes model calls and can take ~15 min",
-             " ".join(cmd[1:]), cfg.provider, cfg.model)
+    log_path = None if inherit_output else root / DWB_DIR / OPENWIKI_LOG
+    LOG.debug("Running OpenWiki (%s, %s/%s); this makes model calls and can take ~15 min",
+              " ".join(cmd[1:]), cfg.provider, cfg.model)
+    report(on_progress, "wiki", "start", label=" ".join(cmd[1:]),
+           data={"log": log_path, "provider": cfg.provider, "model": cfg.model})
     t0 = time.perf_counter()
-    rc = subprocess.run(cmd, cwd=root, env=env).returncode
+    if log_path is None:
+        rc = subprocess.run(cmd, cwd=root, env=env).returncode
+    else:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("w") as fh:
+            rc = subprocess.run(cmd, cwd=root, env=env, stdout=fh,
+                                stderr=subprocess.STDOUT).returncode
     if rc != 0:
-        raise WorkspaceError(f"OpenWiki exited with status {rc}")
-    return time.perf_counter() - t0
+        msg = f"OpenWiki exited with status {rc}"
+        if log_path is not None:
+            tail = _tail(log_path)
+            msg += (":\n" + "\n".join(f"  {ln}" for ln in tail) if tail else "")
+            msg += f"\nFull output: {log_path}"
+        raise WorkspaceError(msg)
+    elapsed = time.perf_counter() - t0
+    report(on_progress, "wiki", "done", elapsed_s=elapsed, label=" ".join(cmd[1:]),
+           data={"log": log_path})
+    return elapsed
 
 
 def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool | None = None,
+                  on_progress: OnProgress | None = None, wiki_output: bool = False,
                   ) -> dict[str, Any]:
-    """Build every source the config lists, for the HEAD commit. Returns the new state."""
+    """Build every source the config lists, for the HEAD commit. Returns the new state.
+
+    ``on_progress`` receives the ``embed`` events of the code and PDF indexes and the ``wiki``
+    events of OpenWiki generation. ``wiki_output`` streams OpenWiki's own output to the
+    terminal instead of ``.dwb/openwiki.log``."""
     from dwb.repo import RepoReader
     from dwb.retrieval.chunking import ChunkingConfig
     from dwb.retrieval.code_index import build_code_index
@@ -539,7 +574,7 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
                          extensions=tuple(c.code.extensions),
                          exclude_prefixes=tuple(c.code.exclude))
     idx = build_code_index(ws.index_root, RepoReader.from_git(root, sha), c.name, embedding,
-                           c.models.embedding, cfg)
+                           c.models.embedding, cfg, on_progress=on_progress)
     state["code_index_id"] = idx.info.index_id
 
     # PDFs
@@ -558,7 +593,8 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
         corpus = PdfCorpus(corpus_id=f"{_slug(c.name)}-pdfs", documents=docs)
         (ws.dir / "pdf_corpus.yaml").write_text(yaml.safe_dump(corpus.model_dump(),
                                                                sort_keys=False))
-        pidx = build_pdf_index(ws.index_root, corpus, Path("/"), embedding, c.models.embedding)
+        pidx = build_pdf_index(ws.index_root, corpus, Path("/"), embedding, c.models.embedding,
+                               on_progress=on_progress)
         state["pdf_index_id"] = pidx.info.index_id
         state["pdf_corpus_id"] = corpus.corpus_id
     else:  # PDFs removed from the config: drop the old corpus so chat cannot pick it up
@@ -572,7 +608,8 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
         gen = c.wiki.generate if generate_wiki is None else generate_wiki
         elapsed = None
         if not current and gen:
-            elapsed = _generate_wiki(root, c.wiki, update=ow["exists"])
+            elapsed = _generate_wiki(root, c.wiki, update=ow["exists"],
+                                     inherit_output=wiki_output, on_progress=on_progress)
             ow = openwiki_status(root)
             current = ow["exists"] and ow["git_head"] == sha
         if current and wiki_dirty(root):

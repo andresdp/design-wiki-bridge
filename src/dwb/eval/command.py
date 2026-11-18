@@ -14,6 +14,7 @@ from dwb.eval.report import question_row, write_report
 from dwb.evidence_text import hydrate
 from dwb.log import get_logger
 from dwb.manifest import MODEL_NET, check_paired, load_manifest
+from dwb.progress import OnProgress, report
 from dwb.prompts import PROMPT_DIR
 from dwb.trace import TraceRecord, read_traces
 
@@ -58,7 +59,11 @@ def evaluate_runs(
     use_judge: bool = True,
     deepeval: bool | None = None,
     allow_unpaired: bool = False,
+    on_progress: OnProgress | None = None,
 ) -> dict[str, Any]:
+    """Score both runs and write the report. ``on_progress`` gets, per condition, an
+    ``evaluate`` start (``label`` A or B, ``total`` traces), one step per trace scored or
+    skipped, and a done event."""
     paired_check = check_runs(run_a, run_b, allow_unpaired=allow_unpaired)
     cfg = yaml.safe_load(config_path.read_text())
     rules = MatchRules(**cfg.get("matching", {}))
@@ -91,24 +96,31 @@ def evaluate_runs(
         rows[label] = []
         LOG.info("Condition %s: %d traces (%d code passages read from %s)", label,
                  len(traces[label]), filled, checkout or "-")
+        total = len(traces[label])
+        report(on_progress, "evaluate", "start", total=total, label=label)
         for i, t in enumerate(traces[label], start=1):
             rec = records.get(t.question_id)
             if rec is None:
                 LOG.warning("  %s not in the question set; skipped", t.question_id)
+                report(on_progress, "evaluate", "step", done=i, total=total,
+                       label=t.question_id, outcome="skipped")
                 continue
             calls0 = judge.stats.calls if judge else 0
             row = question_row(rec, t, judge, rules)
             rows[label].append(row)
-            LOG.info("  [%d/%d] %s: recall %s/%s, correctness %s, support %s, coverage %s%s",
-                     i, len(traces[label]), t.question_id, _fmt(row["recall_candidates"]),
-                     _fmt(row["recall_final"]), _fmt(row["correctness"]),
-                     _fmt(row["citation_support"]), _fmt(row["coverage"]),
-                     f" ({judge.stats.calls - calls0} judge calls)" if judge else "")
+            LOG.debug("  [%d/%d] %s: recall %s/%s, correctness %s, support %s, coverage %s%s",
+                      i, len(traces[label]), t.question_id, _fmt(row["recall_candidates"]),
+                      _fmt(row["recall_final"]), _fmt(row["correctness"]),
+                      _fmt(row["citation_support"]), _fmt(row["coverage"]),
+                      f" ({judge.stats.calls - calls0} judge calls)" if judge else "")
             if run_deepeval:
                 from dwb.eval.deepeval_diag import run_diagnostics
 
                 diagnostics.append({"question_id": t.question_id, "condition": t.condition,
                                     **run_diagnostics(rec, t, cfg["deepeval"]["model"])})
+            report(on_progress, "evaluate", "step", done=i, total=total, label=t.question_id,
+                   outcome="ok")
+        report(on_progress, "evaluate", "done", done=total, total=total, label=label)
     config = {"eval_config": cfg, "match_rules": rules.__dict__,
               "judge_prompt_hashes": ({"claim": judge.claim_hash, "support": judge.support_hash}
                                       if judge else None),

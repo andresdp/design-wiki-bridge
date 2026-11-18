@@ -9,6 +9,7 @@ from langchain_core.embeddings import Embeddings
 
 from dwb.evidence import EvidenceItem
 from dwb.log import get_logger
+from dwb.progress import OnProgress, report
 from dwb.repo import RepoReader
 from dwb.retrieval.chunking import ChunkingConfig, chunk_repo
 from dwb.retrieval.vector_store import VectorIndex, make_index_id
@@ -28,12 +29,16 @@ def build_code_index(
     embedding: Embeddings,
     embedding_model: str,
     cfg: ChunkingConfig | None = None,
+    on_progress: OnProgress | None = None,
 ) -> VectorIndex:
     cfg = cfg or ChunkingConfig()
     index_id = code_index_id(repo, reader.sha, cfg, embedding_model)
     if VectorIndex.load_info(root, index_id) is not None:
         LOG.info("Index [bold]%s[/] already exists; reusing it, not rebuilding", index_id)
-        return VectorIndex.open(root, index_id, embedding)
+        idx = VectorIndex.open(root, index_id, embedding)
+        report(on_progress, "embed", "done", done=idx.info.n_items, total=idx.info.n_items,
+               label=index_id, data=idx.info)
+        return idx
     LOG.info("Chunking %s at %s (AST, max %d tokens per span)", repo, reader.sha[:12],
              cfg.max_span_tokens)
     items = chunk_repo(reader, cfg)
@@ -42,6 +47,7 @@ def build_code_index(
         root, index_id=index_id, kind="code", items=items, embedding=embedding,
         embedding_model=embedding_model,
         parts={"repo": repo, "sha": reader.sha, "chunking": asdict(cfg)},
+        on_progress=on_progress,
     )
 
 
