@@ -1,5 +1,4 @@
 from conftest import make_trace
-
 from dwb.eval.recall import recall
 
 

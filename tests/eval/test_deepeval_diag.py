@@ -1,5 +1,4 @@
 from conftest import make_trace
-
 from dwb.eval.deepeval_diag import build_test_case, run_diagnostics
 
 
