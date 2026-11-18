@@ -88,7 +88,7 @@ def test_init_refuses_to_overwrite_without_force(repo):
     assert CliRunner().invoke(cli(), ["init", "--yes", "--force"]).exit_code == 0
 
 
-def test_init_interactive_collects_pdfs_and_web(repo):
+def test_init_interactive_collects_pdfs_and_web(repo, tty):
     answers = "\n".join([
         "myproj",            # project name
         "chat-x",            # chat model
@@ -108,6 +108,61 @@ def test_init_interactive_collects_pdfs_and_web(repo):
     assert cfg.sources.web and cfg.sources.pdf
     assert cfg.web.exclude_domains == ["github.com", "toy.readthedocs.io"]
     assert "Not found" in r.output
+
+
+def test_init_without_a_terminal_needs_yes(repo):
+    r = CliRunner().invoke(cli(), ["init"], input="myproj\n" * 20)
+    assert r.exit_code == 2, r.output
+    assert "--yes" in r.output and "terminal" in r.output
+    assert not (repo / ".dwb" / "config.yaml").exists()
+    assert CliRunner().invoke(cli(), ["init", "--yes"]).exit_code == 0  # still works
+
+
+def test_init_shows_numbered_steps_and_ends_with_the_path_and_next(repo, tty):
+    from dwb import __version__
+
+    r = CliRunner().invoke(cli(), ["init", "--yes"])
+    assert r.exit_code == 0, r.output
+    assert r.output.startswith(f"dwb {__version__}\n")
+    for n, title in enumerate(["Models", "PDF documents", "Web search", "OpenWiki",
+                               "Default sources", "API keys"], 1):
+        assert f"Step {n} of 6: {title}" in r.output
+    last = r.output.strip().splitlines()[-1]
+    assert str(repo / ".dwb" / "config.yaml") in last and "→ next: dwb index" in last
+
+
+def test_ctrl_c_during_init_says_nothing_was_written(repo, tty, monkeypatch):
+    import dwb.init_wizard as wiz
+
+    def stop():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(wiz, "openwiki_version", stop)
+    r = CliRunner().invoke(cli(), ["init", "--yes"])
+    assert r.exit_code == 130, r.output
+    assert "! Stopped" in r.output and "Nothing was written" in r.output
+    assert not (repo / ".dwb" / "config.yaml").exists()
+
+
+def test_ctrl_c_during_init_states_what_was_written(repo, tty, monkeypatch):
+    import dwb.init_wizard as wiz
+    import dwb.project as project
+
+    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.setattr(project, "GLOBAL_ENV", repo / "no-global.env")  # not the user's file
+    monkeypatch.setattr(wiz, "save_global_key", lambda name, value: None)
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
+
+    def stop(*a, **kw):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(wiz, "write_config", stop)
+    key = "sk-proj-SECRETVALUE123xyz"
+    answers = "\n".join(["myproj", "", "", "", "n", "", key]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 130, r.output
+    assert "! Stopped" in r.output and f"kept: OPENAI_API_KEY in {wiz.GLOBAL_ENV}" in r.output
+    assert "config.yaml was not written" in r.output and "SECRETVALUE" not in r.output
 
 
 def test_init_outside_git_fails(tmp_path, monkeypatch):
@@ -565,7 +620,7 @@ def test_a_folder_without_pdfs_is_a_clear_error(repo):
         _index(ws)
 
 
-def test_init_accepts_folders_and_rejects_repeated_pdfs(repo):
+def test_init_accepts_folders_and_rejects_repeated_pdfs(repo, tty):
     _pdf(repo / "docs/specs/alpha.pdf", "Alpha.")
     _pdf(repo / "docs/specs/beta.pdf", "Beta.")
     answers = "\n".join([
@@ -592,7 +647,7 @@ def test_mask_secret_shows_only_the_ends():
     assert mask_secret("short") == "*****"
 
 
-def test_init_echoes_a_masked_key_and_never_the_key(repo, monkeypatch):
+def test_init_echoes_a_masked_key_and_never_the_key(repo, tty, monkeypatch):
     import dwb.init_wizard as wiz
     import dwb.project as project
 

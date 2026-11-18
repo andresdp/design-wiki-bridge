@@ -312,7 +312,7 @@ def test_chat_stays_human_when_piped(research, monkeypatch):
 
     monkeypatch.setattr(runner, "build_components", lambda m, **kw: components("A"))
 
-    async def fake_repl(session, console, *, history=None):
+    async def fake_repl(session, console, **kw):
         console.print(f"[bold]dwb chat[/] · {session.settings.repo}")
 
     monkeypatch.setattr(chat, "repl", fake_repl)
@@ -350,3 +350,110 @@ def test_cli_index_pdf_piped_and_at_a_terminal(research, tmp_path, monkeypatch):
     assert r.stderr.startswith("spec-v1 · research mode\n")
     assert re.search(r"^items\s+1$", r.stdout, re.M)
     assert "✓ Indexed spec-v1: 1 pages from 1 PDFs → next: dwb status" in r.stderr
+
+
+# ------------------------------------------------------------------ chat header and Ctrl-C
+
+
+def _reader(*lines):
+    """A scripted prompt: each item is a line, or an exception type raised at the prompt."""
+    it = iter(lines)
+
+    async def read() -> str:
+        item = next(it, EOFError)
+        if isinstance(item, type) and issubclass(item, BaseException):
+            raise item
+        return item
+
+    return read
+
+
+def _chat(ws, *lines, patch_ask=None) -> str:
+    from dwb import __version__, ui
+    from dwb.chat import repl
+
+    con = Console(record=True, width=200, theme=ui.THEME)  # as ui.out()
+
+    async def go():
+        async with ChatSession(ws, ChatSettings(repo="toy", sources=Sources(pdf=True)),
+                               components=components("A")) as s:
+            if patch_ask:
+                patch_ask(s)
+            await repl(s, con, context=("toy", "research mode", ws.repo("toy").sha[:12]),
+                       read=_reader(*lines))
+
+    asyncio.run(go())
+    text = con.export_text()
+    assert f"dwb {__version__}" in text
+    return text
+
+
+def test_chat_header_shows_context_sources_and_how_to_leave(ws):
+    text = _chat(ws, "/sources")
+    sha = ws.repo("toy").sha[:12]
+    for part in ("Repository: toy", "Mode: research mode", f"Commit: {sha}",
+                 "/help · /quit or Ctrl-D to leave"):
+        assert part in text, part
+    assert text.count("Sources: repository (vector search), pdf") == 2  # header and /sources
+
+
+def test_ctrl_c_while_answering_stops_only_that_question(ws):
+    def patch(s):
+        real, calls = s.ask, []
+
+        async def ask(q):
+            calls.append(q)
+            if len(calls) == 1:
+                raise KeyboardInterrupt
+            return await real(q)
+
+        s.ask = ask
+
+    text = _chat(ws, "first?", "second?", patch_ask=patch)
+    assert "! Stopped" in text
+    assert text.index("! Stopped") < text.index("Answer")
+    assert text.count("Answer") == 1  # the next question still answers
+
+
+def test_sigint_while_answering_cancels_the_question(ws):
+    import os
+    import signal
+
+    def patch(s):
+        real, calls = s.ask, []
+
+        async def ask(q):
+            calls.append(q)
+            if len(calls) == 1:
+                os.kill(os.getpid(), signal.SIGINT)  # a real Ctrl-C
+                await asyncio.sleep(10)
+            return await real(q)
+
+        s.ask = ask
+
+    prev = signal.getsignal(signal.SIGINT)
+    text = _chat(ws, "first?", "second?", patch_ask=patch)
+    assert "! Stopped" in text and text.count("Answer") == 1
+    assert signal.getsignal(signal.SIGINT) is prev  # the handler is restored
+
+
+@pytest.mark.parametrize("key", [KeyboardInterrupt, EOFError])
+def test_ctrl_c_or_ctrl_d_at_the_prompt_leaves_quietly(research, monkeypatch, key):
+    import dwb.chat as chat
+    import dwb.cli as cli
+    import dwb.runner as runner
+
+    monkeypatch.setattr(runner, "build_components", lambda m, **kw: components("A"))
+    monkeypatch.setattr(chat, "_reader", lambda session, history: _reader(key))
+    closed = []
+    real_exit = chat.ChatSession.__aexit__
+
+    async def aexit(self, *exc):
+        closed.append(True)
+        await real_exit(self, *exc)
+
+    monkeypatch.setattr(chat.ChatSession, "__aexit__", aexit)
+    r = CliRunner().invoke(cli.app, ["chat", "--repo", "toy"])
+    assert r.exit_code == 0, r.output
+    assert "Stopped" not in r.output and "Error" not in r.output
+    assert closed == [True]

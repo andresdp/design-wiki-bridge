@@ -171,7 +171,7 @@ def _main(
     from dwb.project import load_env
 
     ui.configure(json=as_json, no_color=no_color, verbosity=-1 if quiet else verbose)
-    setup_logging(-1 if quiet else verbose, console=ui.err())
+    setup_logging(-1 if quiet else verbose, console=ui.err)
     for p in load_env():
         LOG.debug("Loaded environment from %s", p)
 
@@ -305,7 +305,7 @@ def chat(repo: RepoOpt = None, wiki: WikiOpt = None, pdf: PdfOpt = None, web: We
         async with ChatSession(ws, _settings(ws, name, wiki, pdf, web, model)) as s:
             hist = ws.history_path
             hist.parent.mkdir(parents=True, exist_ok=True)
-            await repl(s, ui.out(), history=hist)
+            await repl(s, ui.out(), history=hist, context=_context(ws, name))
 
     asyncio.run(go())
 

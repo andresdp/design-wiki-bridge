@@ -302,26 +302,106 @@ def parse_command(line: str) -> tuple[str, str | None]:
     return aliases.get(cmd, cmd), arg
 
 
-async def repl(session: ChatSession, console=None, *, history: Path | None = None) -> None:
-    from rich.console import Console
+def sources_line(session: ChatSession) -> str:
+    """The one wording of the active sources, in the header and for /sources."""
+    return f"Sources: {session.sources.describe()}"
 
-    console = console or Console()
+
+def print_header(session: ChatSession, context: tuple[str, ...], console) -> None:
+    """The framed chat header: ``dwb <version>``, repository, mode, commit, sources, and how
+    to leave (R13). Rich draws the frame with ASCII when the console cannot encode boxes."""
+    from rich.markup import escape
+    from rich.panel import Panel
+
+    from dwb import __version__, ui
+
+    name, mode, sha = (list(context) + ["", "", ""])[:3]
+    rows = [f"[bold]dwb {__version__}[/]"]
+    rows += [f"[dim]{k}:[/] {escape(v)}" for k, v in
+             (("Repository", name), ("Mode", mode), ("Commit", sha)) if v]
+    rows.append(escape(sources_line(session)))
+    rows.append(f"[dim]/help {ui.glyphs(console).sep} /quit or Ctrl-D to leave[/]")
+    console.print(Panel("\n".join(rows), title="chat", title_align="left",
+                        border_style="cyan", expand=False))
+
+
+def _reader(session: ChatSession, history: Path | None):
+    """The prompt: prompt_toolkit (line editing, history) at a terminal, else plain lines."""
+    import sys
+
+    label = f"{session.settings.repo}> "
+    if sys.stdin.isatty():
+        try:
+            from prompt_toolkit import PromptSession
+            from prompt_toolkit.history import FileHistory
+        except ImportError:  # pragma: no cover
+            pass
+        else:
+            pt = PromptSession(history=FileHistory(str(history)) if history else None)
+
+            async def read() -> str:
+                return await pt.prompt_async(label)
+
+            return read
+
+    async def read_plain() -> str:  # blocking is fine: nothing else runs meanwhile
+        return input(label)
+
+    return read_plain
+
+
+async def answer(session: ChatSession, question: str) -> TraceRecord | None:
+    """Answer one question; ``None`` when Ctrl-C stopped it.
+
+    While it runs, SIGINT cancels only this question's task (the loop's own handling would
+    cancel the whole session, and prompt_toolkit leaves the default handler behind), and the
+    previous handler comes back afterwards. A ``KeyboardInterrupt`` raised inside the
+    question (no signal handler possible) counts as a stop too.
+    """
+    import asyncio
+    import signal
+
+    async def guarded() -> TraceRecord | None:
+        try:
+            return await session.ask(question)
+        except KeyboardInterrupt:
+            return None
+
+    loop = asyncio.get_running_loop()
+    task = asyncio.ensure_future(guarded())
+    prev = signal.getsignal(signal.SIGINT)
     try:
-        from prompt_toolkit import PromptSession
-        from prompt_toolkit.history import FileHistory
+        loop.add_signal_handler(signal.SIGINT, task.cancel)
+        installed = True
+    except (NotImplementedError, RuntimeError, ValueError):  # not the main thread, Windows
+        installed = False
+    try:
+        return await task
+    except asyncio.CancelledError:
+        me = asyncio.current_task()
+        if not task.cancelled() or (me is not None and me.cancelling()):
+            raise  # the session itself is being cancelled, not just this question
+        return None
+    finally:
+        if installed:
+            loop.remove_signal_handler(signal.SIGINT)
+            if prev is not None:
+                signal.signal(signal.SIGINT, prev)
 
-        pt = PromptSession(history=FileHistory(str(history)) if history else None)
 
-        async def read() -> str:
-            return await pt.prompt_async(f"{session.settings.repo}> ")
-    except ImportError:  # pragma: no cover
-        import asyncio
+async def repl(session: ChatSession, console=None, *, history: Path | None = None,
+               context: tuple[str, ...] | None = None, read=None) -> None:
+    """The chat loop. ``context`` is the header's (repository, mode, commit); ``read`` is the
+    prompt (an async callable returning a line), by default ``_reader``. Ctrl-C or Ctrl-D at
+    the prompt leaves; Ctrl-C while answering stops that question only."""
+    from dwb import ui
 
-        async def read() -> str:
-            return await asyncio.to_thread(input, f"{session.settings.repo}> ")
-
-    console.print(f"[bold]dwb chat[/] · {session.settings.repo} · sources: "
-                  f"{session.sources.describe()}\nType a question, or /help for commands.")
+    console = console or ui.out()
+    read = read or _reader(session, history)
+    if context is None:
+        sha = session.manifest.repo_sha[:12] if session.manifest else ""
+        context = (session.settings.repo, "", sha)
+    print_header(session, context, console)
     last: TraceRecord | None = None
     while True:
         try:
@@ -336,7 +416,7 @@ async def repl(session: ChatSession, console=None, *, history: Path | None = Non
         if cmd == "help":
             console.print(HELP)
         elif cmd == "sources":
-            console.print(f"Sources: {session.sources.describe()}")
+            console.print(sources_line(session))
         elif cmd == "context":
             if last:
                 print_answer(last, show_context=True, console=console)
@@ -348,13 +428,21 @@ async def repl(session: ChatSession, console=None, *, history: Path | None = Non
                 continue
             try:
                 await session.set_sources(**{cmd: arg == "on"})
-                console.print(f"Sources: {session.sources.describe()}")
+                console.print(sources_line(session))
             except WorkspaceError as e:
                 console.print(f"[red]{e}[/]")
                 await session.set_sources(**{cmd: not (arg == "on")})
         elif cmd == "ask":
-            with console.status("Retrieving evidence and answering…"):
-                last = await session.ask(arg or "")
+            with ui.progress() as p:
+                if p.animate:
+                    p.show("answer", "Answering", note="Ctrl-C stops this question ")
+                elif ui.interactive():
+                    console.print(f"[dim]Answering{ui.glyphs(console).ellipsis}[/]")
+                trace = await answer(session, arg or "")
+            if trace is None:
+                ui.stopped({}, console=console)
+                continue
+            last = trace
             print_answer(last, console=console)
         else:
             console.print(f"Unknown command /{cmd}. Type /help.")
