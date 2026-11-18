@@ -185,10 +185,11 @@ def run_init(start: Path, console: Console | None = None, *, yes: bool = False,
                                             default=False)
 
     _section(c, "API keys")
-    saved = [k for k in (_ensure_key(c, ask, "OPENAI_API_KEY", "embeddings and answers",
-                                     required=True),
-                         web and _ensure_key(c, ask, "TAVILY_API_KEY", "web search",
-                                             required=False)) if k]
+    saved = []
+    if key := _ensure_key(c, ask, "OPENAI_API_KEY", "embeddings and answers", required=True):
+        saved.append(key)
+    if web and (key := _ensure_key(c, ask, "TAVILY_API_KEY", "web search", required=False)):
+        saved.append(key)
 
     cfg = ProjectConfig(
         name=name,

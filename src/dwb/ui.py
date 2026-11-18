@@ -11,6 +11,7 @@ test hook that makes the current streams count as a terminal.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sys
@@ -64,7 +65,12 @@ class _Settings:
 _settings = _Settings()
 _forced: bool | None = None
 _cache: dict[str, tuple[tuple, Console]] = {}
-_fallback_record: dict[str, Any] = {"kept": [], "notes": []}
+def _new_record() -> dict[str, Any]:
+    """An empty stop record: what a Ctrl-C keeps, and notes printed after it."""
+    return {"kept": [], "notes": []}
+
+
+_fallback_record: dict[str, Any] = _new_record()
 
 
 def configure(*, json: bool = False, no_color: bool = False, verbosity: int = 0) -> None:
@@ -72,7 +78,7 @@ def configure(*, json: bool = False, no_color: bool = False, verbosity: int = 0)
     global _settings
     _settings = _Settings(json=json, no_color=no_color, verbosity=verbosity)
     _fallback_record.clear()
-    _fallback_record.update(kept=[], notes=[])
+    _fallback_record.update(_new_record())
 
 
 def quiet() -> bool:
@@ -143,7 +149,7 @@ def _console(kind: str, stream: TextIO) -> Console:
     if hit is not None and hit[0] == key:
         return hit[1]
     con = Console(file=stream, theme=THEME, highlight=False,
-                  force_terminal=_forced if _forced is not None else None,
+                  force_terminal=_forced,
                   color_system="auto" if color else None,
                   no_color=not color)
     _cache[kind] = (key, con)
@@ -162,9 +168,13 @@ def err() -> Console:
 
 def glyphs(console: Console | None = None) -> Glyphs:
     """Unicode symbols when the console's encoding can represent them, else ASCII."""
-    enc = (console or err()).encoding or "utf-8"
+    return _glyphs_for((console or err()).encoding or "utf-8")
+
+
+@functools.cache
+def _glyphs_for(encoding: str) -> Glyphs:
     try:
-        _ALL_UNICODE.encode(enc)
+        _ALL_UNICODE.encode(encoding)
     except (UnicodeEncodeError, LookupError):
         return ASCII
     return UNICODE
@@ -315,7 +325,7 @@ def _record() -> dict[str, Any]:
     ctx = get_current_context(silent=True)
     if ctx is None:
         return _fallback_record
-    return ctx.meta.setdefault(STOP_KEY, {"kept": [], "notes": []})
+    return ctx.meta.setdefault(STOP_KEY, _new_record())
 
 
 def _put(kind: str, text: str | None, key: str | None) -> None:
@@ -374,7 +384,7 @@ def _secs(s: float) -> str:
 def _columns(con: Console) -> list[Any]:
     """Rich progress columns drawn with the console's glyphs (ASCII fallback): a spinner
     frame, the description, a bar and counts when the total is known, a note, elapsed."""
-    from rich.progress import ProgressColumn
+    from rich.progress import ProgressColumn, TextColumn
     from rich.text import Text
 
     g = glyphs(con)
@@ -402,8 +412,6 @@ def _columns(con: Console) -> list[Any]:
     class Elapsed(ProgressColumn):
         def render(self, task):
             return Text(_secs(task.elapsed or 0.0))
-
-    from rich.progress import TextColumn
 
     return [Lead(), TextColumn("{task.description}"), Bar(), Note(), Elapsed()]
 
@@ -464,7 +472,6 @@ class ProgressRenderer:
             if not self._tasks:
                 self.close()
 
-    _show, _hide = show, hide  # the pre-U5 names
 
     def close(self) -> None:
         """Stop the live display, if any (idempotent)."""

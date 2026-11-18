@@ -36,13 +36,10 @@ def setup_logging(verbosity: int = 0, console: Any = None) -> None:
         from rich.console import Console
         from rich.logging import RichHandler
 
-        if console is None:
-            fixed = Console(stderr=True)  # resolves sys.stderr itself on each write
-            get_console = lambda: fixed  # noqa: E731
-        elif callable(console):
-            get_console = console
-        else:
-            get_console = lambda: console  # noqa: E731
+        fixed = console if console is not None else Console(stderr=True)  # follows sys.stderr
+
+        def get_console():
+            return fixed() if callable(fixed) else fixed
 
         class _CurrentConsole(RichHandler):
             """A RichHandler that asks for the console per record, never holding a stale stream."""

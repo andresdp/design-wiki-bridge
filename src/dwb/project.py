@@ -8,6 +8,7 @@ lives in ``<repo>/.dwb/``, hidden from git through ``.git/info/exclude``. The re
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import os
@@ -492,8 +493,10 @@ def openwiki_status(root: Path) -> dict[str, Any]:
 
 
 def _tail(path: Path, n: int = 20) -> list[str]:
+    """The last ``n`` lines of ``path``, read without loading the whole file."""
     try:
-        return path.read_text(errors="replace").splitlines()[-n:]
+        with path.open(errors="replace") as fh:
+            return [line.rstrip("\r\n") for line in collections.deque(fh, maxlen=n)]
     except OSError:
         return []
 
