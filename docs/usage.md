@@ -268,7 +268,6 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
   Pass the A run first. `evaluate` stops if the two saved manifests are not condition A then B or fail the `experiment check` rules; `--allow-unpaired` scores them anyway and records that in `evaluator_config.json`.
 - **Question records** live in `data/questions/{test,dev}/`; see `data/questions/README.md`.
 
-
 ### Building the test set
 
 People select SWE-QA rows, annotate them, and write the custom questions; the `dwb benchmark` commands only move and check records:
