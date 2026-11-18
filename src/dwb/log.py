@@ -28,15 +28,35 @@ class _Plain(logging.Formatter):
 
 def setup_logging(verbosity: int = 0, console: Any = None) -> None:
     """verbosity: -1 quiet (warnings), 0 info, 1+ debug. ``console``: the Rich console to log
-    to (default: a new stderr console)."""
+    to, or a zero-argument callable returning it, resolved on every record so the handler
+    follows the current stderr (default: a stderr console)."""
     level = logging.WARNING if verbosity < 0 else logging.DEBUG if verbosity > 0 else logging.INFO
     verbose = verbosity > 0
     try:
         from rich.console import Console
         from rich.logging import RichHandler
 
-        handler: logging.Handler = RichHandler(
-            console=console or Console(stderr=True), show_path=False, rich_tracebacks=True,
+        if console is None:
+            fixed = Console(stderr=True)  # resolves sys.stderr itself on each write
+            get_console = lambda: fixed  # noqa: E731
+        elif callable(console):
+            get_console = console
+        else:
+            get_console = lambda: console  # noqa: E731
+
+        class _CurrentConsole(RichHandler):
+            """A RichHandler that asks for the console per record, never holding a stale stream."""
+
+            @property
+            def console(self):
+                return get_console()
+
+            @console.setter
+            def console(self, _value) -> None:
+                pass
+
+        handler: logging.Handler = _CurrentConsole(
+            show_path=False, rich_tracebacks=True,
             markup=True, show_time=verbose, show_level=verbose, log_time_format="[%H:%M:%S]",
         )
         formatter = logging.Formatter("%(message)s") if verbose else _Plain("%(message)s")
