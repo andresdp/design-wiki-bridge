@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -124,6 +125,19 @@ def test_split_hash_mismatch_names_the_file(tmp_path):
     ws = make_ws(tmp_path, pin_sha="0" * 64)
     with pytest.raises(WorkspaceError, match="toy.jsonl"):
         draft(ws, selection(tmp_path))
+
+
+def test_split_download_failure_is_a_setup_error(tmp_path):
+    from dwb.curation import draft
+
+    ws = make_ws(tmp_path)
+    (tmp_path / "artifacts/swe-qa/toy.jsonl").unlink()
+
+    def offline(split_file, revision, local_dir):
+        raise OSError("offline")
+
+    with pytest.raises(WorkspaceError, match=f"toy.jsonl at SWE-QA revision {REV}: offline"):
+        draft(ws, selection(tmp_path), fetch=offline)
 
 
 def test_unknown_selection_row_is_a_setup_error(tmp_path):
@@ -347,6 +361,16 @@ def test_freeze_refuses_overlap_with_the_dev_set(tmp_path):
     assert not Path(f"{p}.sha256").exists()
 
 
+def test_freeze_reports_a_malformed_dev_file_and_writes_nothing(tmp_path):
+    ws = make_ws(tmp_path)
+    dev = write_dev(tmp_path)
+    dev.write_text("{not json\n")
+    p = write_records(tmp_path, pub())
+    with pytest.raises(WorkspaceError, match=re.escape(f"invalid {dev}")):
+        run_freeze(ws, p)
+    assert not Path(f"{p}.sha256").exists()
+
+
 def test_check_passes_on_disjoint_sets_and_fails_on_overlap(tmp_path):
     from dwb.curation import check_sets
 
@@ -390,6 +414,19 @@ def test_check_needs_the_dev_file(tmp_path):
 
     with pytest.raises(WorkspaceError, match="not found"):
         check_sets(tmp_path / "nope.jsonl", tmp_path / "also-nope.jsonl")
+
+
+@pytest.mark.parametrize("bad", ["dev", "test"])
+def test_check_reports_a_malformed_file_by_name(tmp_path, bad):
+    from dwb.curation import check_sets
+
+    dev = write_dev(tmp_path, pub(id="toy-dev-pub-009", question="dev?", provenance={
+        "upstream_split": "toy", "upstream_row_id": "toy:9"}))
+    test = write_records(tmp_path, pub())
+    target = dev if bad == "dev" else test
+    target.write_text(target.read_text() + '{"id": "broken"}\n')
+    with pytest.raises(WorkspaceError, match=re.escape(f"invalid {target}")):
+        check_sets(dev, test)
 
 
 # ------------------------------------------------------------------------------- U4: CLI

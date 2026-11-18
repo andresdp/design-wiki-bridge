@@ -47,6 +47,14 @@ def _validation_message(e: ValidationError) -> str:
                      for x in e.errors())
 
 
+def _load_set(path: Path) -> list[QuestionRecord]:
+    """``load_records`` with schema errors reported as a setup error naming the file."""
+    try:
+        return load_records(path)
+    except ValidationError as e:
+        raise WorkspaceError(f"invalid {path}: {_validation_message(e)}") from None
+
+
 def draft(ws: Workspace, selection_path: Path, *, out_dir: Path = DRAFTS_DIR,
           overwrite: bool = False, fetch: Fetcher = fetch_split) -> DraftResult:
     """Draft public records for a selection file's included rows, plus its exclusions.
@@ -83,7 +91,11 @@ def draft(ws: Workspace, selection_path: Path, *, out_dir: Path = DRAFTS_DIR,
     if not path.exists():
         LOG.info("Downloading %s at SWE-QA revision %s", split_file, pin.revision[:12])
         local_dir.mkdir(parents=True, exist_ok=True)
-        path = Path(fetch(split_file, pin.revision, local_dir))
+        try:
+            path = Path(fetch(split_file, pin.revision, local_dir))
+        except Exception as e:
+            raise WorkspaceError(f"could not download {split_file} at SWE-QA revision "
+                                 f"{pin.revision}: {e}") from None
     try:
         rows = load_split(path, sel.split, expected)
     except ValueError as e:
@@ -276,7 +288,7 @@ def freeze_set(ws: Workspace, path: Path, *, reader_for: ReaderFactory = git_rea
         if dev_path.exists():
             test = [r for r in report.records if r.repo == repo]
             report.problems += [f"overlap with {dev_path.name} dev set: {o}"
-                                for o in find_overlaps(load_records(dev_path), test)]
+                                for o in find_overlaps(_load_set(dev_path), test)]
     if not report.ok:
         return FreezeResult(report)
     digest = freeze(path)
@@ -305,8 +317,8 @@ def check_sets(dev_path: Path, test_path: Path) -> CheckResult:
     if not test_path.exists():
         res.warnings.append(f"test set {test_path} does not exist yet; nothing to compare")
         return res
-    test = load_records(test_path)
-    res.problems += find_overlaps(load_records(dev_path), test)
+    test = _load_set(test_path)
+    res.problems += find_overlaps(_load_set(dev_path), test)
     sidecar = sidecar_path(test_path)
     if sidecar.exists():
         frozen, actual = sidecar.read_text().strip(), records_hash(test)
