@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -18,7 +19,7 @@ from dwb.project import (
     find_project,
     hide_from_git,
     index_project,
-    save_global_key,
+    save_key,
     suggest_exclude_domains,
     write_config,
 )
@@ -87,7 +88,7 @@ def test_init_refuses_to_overwrite_without_force(repo):
     assert CliRunner().invoke(cli(), ["init", "--yes", "--force"]).exit_code == 0
 
 
-def test_init_interactive_collects_pdfs_and_web(repo):
+def test_init_interactive_collects_pdfs_and_web(repo, tty):
     answers = "\n".join([
         "myproj",            # project name
         "chat-x",            # chat model
@@ -107,6 +108,70 @@ def test_init_interactive_collects_pdfs_and_web(repo):
     assert cfg.sources.web and cfg.sources.pdf
     assert cfg.web.exclude_domains == ["github.com", "toy.readthedocs.io"]
     assert "Not found" in r.output
+
+
+def test_init_without_a_terminal_needs_yes(repo):
+    r = CliRunner().invoke(cli(), ["init"], input="myproj\n" * 20)
+    assert r.exit_code == 2, r.output
+    assert "--yes" in r.output and "terminal" in r.output
+    assert not (repo / ".dwb" / "config.yaml").exists()
+    assert CliRunner().invoke(cli(), ["init", "--yes"]).exit_code == 0  # still works
+
+
+def test_init_shows_numbered_steps_and_ends_with_the_path_and_next(repo, tty):
+    from dwb import __version__
+
+    r = CliRunner().invoke(cli(), ["init", "--yes"])
+    assert r.exit_code == 0, r.output
+    assert r.output.startswith(f"dwb {__version__}\n")
+    for n, title in enumerate(["Models", "PDF documents", "Web search", "OpenWiki",
+                               "Default sources", "API keys"], 1):
+        assert f"Step {n} of 6: {title}" in r.output
+    last = r.output.strip().splitlines()[-1]
+    assert str(repo / ".dwb" / "config.yaml") in last and "→ next: dwb index" in last
+
+
+def test_ctrl_c_during_init_says_nothing_was_written(repo, tty, monkeypatch):
+    import dwb.init_wizard as wiz
+
+    def stop():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(wiz, "openwiki_version", stop)
+    r = CliRunner().invoke(cli(), ["init", "--yes"])
+    assert r.exit_code == 130, r.output
+    assert "! Stopped" in r.output and "Nothing was written" in r.output
+    assert not (repo / ".dwb" / "config.yaml").exists()
+
+
+def test_ctrl_d_at_an_init_prompt_is_a_stop_not_a_crash(repo, tty, monkeypatch):
+    import dwb.init_wizard as wiz
+
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
+    r = CliRunner().invoke(cli(), ["init"], input="")  # end of input at the first prompt
+    assert r.exit_code == 130, r.output
+    assert "! Stopped" in r.output and "Nothing was written" in r.output
+    assert "Unexpected error" not in r.output
+
+
+def test_ctrl_c_during_init_states_what_was_written(repo, tty, monkeypatch):
+    import dwb.init_wizard as wiz
+
+    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.setattr(wiz, "save_key", lambda name, value, path: None)
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
+
+    def stop(*a, **kw):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(wiz, "write_config", stop)
+    key = "sk-proj-SECRETVALUE123xyz"
+    answers = "\n".join(["myproj", "", "", "", "n", "", key]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 130, r.output
+    env = repo / ".dwb" / ".env"
+    assert "! Stopped" in r.output and f"kept: OPENAI_API_KEY in {env}" in r.output
+    assert "config.yaml was not written" in r.output and "SECRETVALUE" not in r.output
 
 
 def test_init_outside_git_fails(tmp_path, monkeypatch):
@@ -192,7 +257,90 @@ def test_cli_index_runs_from_a_subfolder(repo, monkeypatch):
     monkeypatch.chdir(repo / "src")
     r = CliRunner().invoke(cli(), ["index", "--fake"])
     assert r.exit_code == 0, r.output
-    assert "Indexed" in r.output and (repo / ".dwb/state.json").exists()
+    state = json.loads((repo / ".dwb/state.json").read_text())
+    assert r.stdout == json.dumps(state, indent=2) + "\n"  # piped: the state, as JSON
+
+
+def test_cli_index_at_a_terminal_prints_header_summary_and_outcome(repo, tty):
+    CliRunner().invoke(cli(), ["init", "--yes"])
+    sha = _git(repo, "rev-parse", "HEAD")[:12]
+    r = CliRunner().invoke(cli(), ["index", "--fake"])
+    assert r.exit_code == 0, r.output
+    assert r.stderr.startswith(f"toyproj · user mode · {sha}\n")
+    assert "{" not in r.stdout and re.search(r"^code\s+code-toyproj-", r.stdout, re.M)
+    assert re.search(r"^pdf\s+off$", r.stdout, re.M)
+    assert f"✓ Indexed toyproj at {sha} → next: dwb chat" in r.stderr
+    r = CliRunner().invoke(cli(), ["--json", "index", "--fake"])
+    assert r.exit_code == 0 and json.loads(r.stdout)["sha"].startswith(sha)
+    assert "user mode" not in r.stderr and "Indexed toyproj" not in r.stderr
+
+
+def test_cli_status_in_a_project_piped_and_at_a_terminal(repo, monkeypatch):
+    from dwb import ui
+
+    _project(repo)
+    r = CliRunner().invoke(cli(), ["status"])
+    assert r.exit_code == 0, r.output
+    data = json.loads(r.stdout)
+    assert data["name"] == "toy" and data["root"] == str(repo)
+    assert [s["source"] for s in data["sources"]] == ["commit", "code", "pdf", "wiki", "web"]
+    assert data["sources"][1] == {"source": "code", "state": "missing",
+                                  "detail": "run dwb index"}
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "200")
+    ui.force_terminal(True)
+    try:
+        r = CliRunner().invoke(cli(), ["status"])
+    finally:
+        ui.force_terminal(None)
+    assert r.exit_code == 0, r.output
+    assert r.stderr.startswith("toy · user mode · ")
+    assert re.search(r"^Source\s+State\s+Detail$", r.stdout, re.M)
+    assert re.search(r"^code\s+missing\s+run dwb index$", r.stdout, re.M)
+    assert "→ next: dwb index" in r.stderr
+
+
+def test_ask_with_no_question_exits_2_without_a_terminal(repo):
+    r = CliRunner().invoke(cli(), ["ask"])
+    assert r.exit_code == 2 and 'Usage: dwb ask "<question>"' in r.output
+
+
+def test_ask_at_a_terminal_prints_the_header_then_the_answer(repo, monkeypatch, tty):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    import dwb.runner as runner
+
+    ws = _project(repo)
+    state = index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    monkeypatch.setattr(runner, "build_components", lambda m, **kw: components("A"))
+    r = CliRunner().invoke(cli(), ["ask", "How does the app run?"])
+    assert r.exit_code == 0, r.output
+    head = f"toy · user mode · {state['sha'][:12]}"
+    assert r.stderr.startswith(head + "\n")
+    assert "Answer" in r.stdout and "Sources" in r.stdout
+    assert r.output.index(head) < r.output.index("Answer")
+    # with no question at a terminal, it asks for one
+    r = CliRunner().invoke(cli(), ["ask"], input="How does the app run?\n")
+    assert r.exit_code == 0, r.output
+    assert "Question:" in r.stderr and "Answer" in r.stdout
+
+
+def test_ask_stays_human_when_piped_and_json_prints_the_trace(repo, monkeypatch):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    import dwb.runner as runner
+    from dwb.trace import TraceRecord
+
+    ws = _project(repo)
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    monkeypatch.setattr(runner, "build_components", lambda m, **kw: components("A"))
+    r = CliRunner().invoke(cli(), ["ask", "How does the app run?"])
+    assert r.exit_code == 0 and "Answer" in r.stdout and "toy · user mode" in r.stderr
+    for flags in (["ask", "q?", "--json"], ["--json", "ask", "q?"]):
+        r = CliRunner().invoke(cli(), flags)
+        assert r.exit_code == 0, r.output
+        t = TraceRecord.model_validate_json(r.stdout)
+        assert r.stdout == t.model_dump_json(indent=2) + "\n" and "user mode" not in r.stderr
 
 
 def test_index_outside_project_points_to_init(tmp_path, monkeypatch):
@@ -211,11 +359,11 @@ def test_suggest_exclude_domains(repo):
     assert suggest_exclude_domains(repo)[0] == "github.com"
 
 
-def test_save_global_key_is_private(tmp_path, monkeypatch):
+def test_save_key_is_private(tmp_path, monkeypatch):
     p = tmp_path / "dwb" / ".env"
     monkeypatch.delenv("DWB_TEST_KEY", raising=False)
-    save_global_key("DWB_TEST_KEY", "one", p)
-    save_global_key("DWB_TEST_KEY", "two", p)
+    save_key("DWB_TEST_KEY", "one", p)
+    save_key("DWB_TEST_KEY", "two", p)
     assert p.read_text() == "DWB_TEST_KEY=two\n"
     assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
     assert os.environ["DWB_TEST_KEY"] == "two"
@@ -232,19 +380,38 @@ def test_research_mode_still_needs_repo_flag_outside_projects(monkeypatch):
 # ------------------------------------------------------------------ review fixes
 
 
-def test_project_env_only_supplies_api_keys(tmp_path, monkeypatch):
+def test_user_mode_reads_keys_only_from_the_project_dwb_env(tmp_path, monkeypatch):
     from dwb.project import load_env
 
     proj = tmp_path / "cloned"
-    proj.mkdir()
-    (proj / ".env").write_text("OPENAI_API_KEY=from-repo\nOPENAI_BASE_URL=https://evil.example\n"
-                               "HTTPS_PROXY=http://evil.example:8080\n")
-    for k in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "HTTPS_PROXY"):
+    (proj / ".dwb").mkdir(parents=True)
+    (proj / ".dwb/config.yaml").write_text("name: x\n")
+    (proj / ".dwb/.env").write_text("OPENAI_API_KEY=from-project\n"
+                                    "OPENAI_BASE_URL=https://evil.example\n"
+                                    "HTTPS_PROXY=http://evil.example:8080\n")
+    (proj / ".env").write_text("TAVILY_API_KEY=from-repo-env\n")  # the repo's own .env
+    glob = tmp_path / "global.env"
+    glob.write_text("TAVILY_API_KEY=from-global\nDWB_T_GLOBAL=1\n")
+    (proj / "src").mkdir()
+    for k in ("OPENAI_API_KEY", "TAVILY_API_KEY", "OPENAI_BASE_URL", "HTTPS_PROXY",
+              "DWB_T_GLOBAL"):
         monkeypatch.delenv(k, raising=False)
-    loaded = load_env(cwd=proj, global_env=tmp_path / "none.env")
-    assert loaded == [proj / ".env"]
-    assert os.environ["OPENAI_API_KEY"] == "from-repo"
-    assert "OPENAI_BASE_URL" not in os.environ and "HTTPS_PROXY" not in os.environ
+    loaded = load_env(cwd=proj / "src", global_env=glob)  # from a subfolder too
+    assert loaded == [proj / ".dwb/.env"]
+    assert os.environ["OPENAI_API_KEY"] == "from-project"
+    for k in ("TAVILY_API_KEY", "OPENAI_BASE_URL", "HTTPS_PROXY", "DWB_T_GLOBAL"):
+        assert k not in os.environ  # not from the repo's .env, the global file, or non-key names
+
+
+def test_user_mode_outside_a_project_reads_no_env_file(tmp_path, monkeypatch):
+    from dwb.project import load_env
+
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-repo-env\n")
+    glob = tmp_path / "global.env"
+    glob.write_text("OPENAI_API_KEY=from-global\n")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert load_env(cwd=tmp_path, global_env=glob) == []
+    assert "OPENAI_API_KEY" not in os.environ
 
 
 def test_harness_env_and_global_env_load_in_full(tmp_path, monkeypatch):
@@ -270,7 +437,7 @@ def test_saved_key_is_never_world_readable(tmp_path, monkeypatch):
     monkeypatch.delenv("DWB_TEST_KEY", raising=False)
     old = os.umask(0o022)
     try:
-        save_global_key("DWB_TEST_KEY", "one", p)
+        save_key("DWB_TEST_KEY", "one", p)
     finally:
         os.umask(old)
     assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
@@ -481,7 +648,7 @@ def test_a_folder_without_pdfs_is_a_clear_error(repo):
         _index(ws)
 
 
-def test_init_accepts_folders_and_rejects_repeated_pdfs(repo):
+def test_init_accepts_folders_and_rejects_repeated_pdfs(repo, tty):
     _pdf(repo / "docs/specs/alpha.pdf", "Alpha.")
     _pdf(repo / "docs/specs/beta.pdf", "Beta.")
     answers = "\n".join([
@@ -508,14 +675,12 @@ def test_mask_secret_shows_only_the_ends():
     assert mask_secret("short") == "*****"
 
 
-def test_init_echoes_a_masked_key_and_never_the_key(repo, monkeypatch):
+def test_init_echoes_a_masked_key_and_never_the_key(repo, tty, monkeypatch):
     import dwb.init_wizard as wiz
-    import dwb.project as project
 
     saved = {}
     monkeypatch.delenv("OPENAI_API_KEY")
-    monkeypatch.setattr(project, "GLOBAL_ENV", repo / "no-global.env")  # not the user's file
-    monkeypatch.setattr(wiz, "save_global_key", lambda name, value: saved.update({name: value}))
+    monkeypatch.setattr(wiz, "save_key", lambda name, value, path: saved.update({name: value}))
     monkeypatch.setattr(wiz, "openwiki_version", lambda: None)  # no wiki questions
     key = "sk-proj-SECRETVALUE123xyz"
     answers = "\n".join(["myproj", "", "", "", "n", "", key]) + "\n" + "\n" * 10
@@ -523,3 +688,195 @@ def test_init_echoes_a_masked_key_and_never_the_key(repo, monkeypatch):
     assert r.exit_code == 0, r.output
     assert saved == {"OPENAI_API_KEY": key}
     assert "sk-*****xyz" in r.output and "SECRETVALUE" not in r.output
+
+
+def _saved_key_setup(repo, monkeypatch, value: str | None):
+    """The project's .dwb/.env holding ``value`` (the environment is set by the caller)."""
+    import dwb.init_wizard as wiz
+
+    env = repo / ".dwb" / ".env"
+    if value is not None:
+        env.parent.mkdir(exist_ok=True)
+        env.write_text(f"OPENAI_API_KEY={value}\n")
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
+    saved = {}
+    monkeypatch.setattr(wiz, "save_key", lambda name, v, path: saved.update({name: v}))
+    return env, saved
+
+
+@pytest.mark.parametrize("answer", ["", "y"])
+def test_init_shows_where_a_saved_key_is_and_keeps_it(repo, tty, monkeypatch, answer):
+    old = "sk-proj-OLDSECRET0000abc"
+    monkeypatch.setenv("OPENAI_API_KEY", old)
+    env, saved = _saved_key_setup(repo, monkeypatch, old)
+    answers = "\n".join(["myproj", "", "", "", "n", "", answer]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    assert f"found in {env} (sk-*****abc)" in r.output
+    assert "Use this OPENAI_API_KEY?" in r.output and "Paste" not in r.output
+    assert saved == {} and "OLDSECRET" not in r.output
+
+
+def test_init_replaces_a_saved_key_when_asked(repo, tty, monkeypatch):
+    old, new = "sk-proj-OLDSECRET0000abc", "sk-proj-NEWSECRET1111xyz"
+    monkeypatch.setenv("OPENAI_API_KEY", old)
+    _, saved = _saved_key_setup(repo, monkeypatch, old)
+    answers = "\n".join(["myproj", "", "", "", "n", "", "n", new]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    assert saved == {"OPENAI_API_KEY": new}
+    assert "sk-*****xyz" in r.output and "SECRET" not in r.output
+
+
+def test_init_does_not_offer_to_replace_a_shell_key(repo, tty, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-SHELLSECRET99def")
+    _, saved = _saved_key_setup(repo, monkeypatch, None)  # not in the global .env
+    answers = "\n".join(["myproj", "", "", "", "n", ""]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    assert "found in your shell environment" in r.output and "(sk-*****def)" in r.output
+    assert "Use this OPENAI_API_KEY?" not in r.output and saved == {}
+
+
+def test_init_yes_keeps_a_saved_key_without_asking(repo, monkeypatch):
+    old = "sk-proj-OLDSECRET0000abc"
+    monkeypatch.setenv("OPENAI_API_KEY", old)
+    _, saved = _saved_key_setup(repo, monkeypatch, old)
+    r = CliRunner().invoke(cli(), ["init", "--yes"])
+    assert r.exit_code == 0, r.output
+    assert "Use this" not in r.output and saved == {}
+
+
+# ------------------------------------------------------------------------------ progress
+
+
+def test_index_reports_embedding_progress_and_keeps_going_without_a_callback(repo, monkeypatch):
+    import dwb.retrieval.vector_store as vs
+
+    monkeypatch.setattr(vs, "BATCH", 2)
+    ws = _project(repo)
+    events = []
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    state = index_project(ws, embedding=DeterministicFakeEmbedding(size=32),
+                          on_progress=events.append)
+    code = [e for e in events if e.label == state["code_index_id"]]
+    assert code[0].phase == "start" and code[0].data == {"kind": "code"}
+    steps = [e.done for e in code if e.phase == "step"]
+    assert steps == sorted(steps) and len(steps) > 1  # one step per batch
+    assert code[-1].phase == "done" and code[-1].done == steps[-1] == code[-1].data.n_items
+    pdf = [e for e in events if e.label == state["pdf_index_id"]]
+    assert [e.phase for e in pdf] == ["start", "step", "done"] and pdf[-1].done == 1
+    # a reused index reports one done event carrying the reused info
+    again = []
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32), on_progress=again.append)
+    assert [(e.phase, e.data.reused) for e in again] == [("done", True), ("done", True)]
+
+
+def _fake_openwiki(tmp_path, monkeypatch, body: str) -> Path:
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir(exist_ok=True)
+    exe = bin_dir / "openwiki"
+    exe.write_text("#!/bin/sh\n" + body)
+    exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return exe
+
+
+def test_openwiki_output_goes_to_the_log_not_the_terminal(repo, tmp_path, monkeypatch, capfd):
+    from dwb.project import WikiCfg, _generate_wiki
+
+    _fake_openwiki(tmp_path, monkeypatch,
+                   'echo "openwiki says hello $1 $2"\necho "openwiki warns" >&2\nexit 0\n')
+    events = []
+    _generate_wiki(repo, WikiCfg(), update=False, on_progress=events.append)
+    out, err = capfd.readouterr()
+    assert "openwiki says" not in out + err and "openwiki warns" not in out + err
+    log = (repo / ".dwb/openwiki.log").read_text()
+    assert "openwiki says hello code --init" in log and "openwiki warns" in log
+    assert [(e.task, e.phase) for e in events] == [("wiki", "start"), ("wiki", "done")]
+    assert events[0].data["log"] == repo / ".dwb/openwiki.log"
+
+
+def test_openwiki_failure_shows_the_last_lines_and_the_log_path(repo, tmp_path, monkeypatch):
+    from dwb.project import WikiCfg, _generate_wiki
+
+    _fake_openwiki(tmp_path, monkeypatch,
+                   'i=1\nwhile [ $i -le 30 ]; do echo "step $i"; i=$((i+1)); done\n'
+                   'echo "boom: no API key" >&2\nexit 3\n')
+    with pytest.raises(WorkspaceError) as exc:
+        _generate_wiki(repo, WikiCfg(), update=True)
+    msg = str(exc.value)
+    assert "OpenWiki exited with status 3" in msg and "boom: no API key" in msg
+    assert "step 30" in msg and "step 12" in msg and "step 11\n" not in msg  # last 20 lines
+    assert str(repo / ".dwb/openwiki.log") in msg
+
+
+def test_openwiki_output_is_not_captured_with_verbose(repo, tmp_path, monkeypatch, capfd):
+    from dwb.project import WikiCfg, _generate_wiki
+
+    _fake_openwiki(tmp_path, monkeypatch, 'echo "openwiki streams"\nexit 0\n')
+    events = []
+    _generate_wiki(repo, WikiCfg(), update=False, inherit_output=True,
+                   on_progress=events.append)
+    out, _ = capfd.readouterr()
+    assert "openwiki streams" in out
+    assert not (repo / ".dwb/openwiki.log").exists() and events[0].data["log"] is None
+
+
+def test_cli_index_progress_without_a_terminal_is_plain_milestones(repo):
+    _project(repo)
+    r = CliRunner().invoke(cli(), ["index", "--fake"])
+    assert r.exit_code == 0, r.output
+    state = json.loads(r.stdout)
+    assert "Ctrl-C stops; finished indexes are kept." in r.stderr
+    assert re.search(r"^Embedding \d+ spans into code-toy-", r.stderr, re.M)
+    assert re.search(rf"^  ✓ Code   \d+ spans  {state['code_index_id']}  \d+\.\d s$",
+                     r.stderr, re.M)
+    assert re.search(r"^  ✓ PDFs   1 pages  pdf-toy-pdfs-", r.stderr, re.M)
+    assert "\r" not in r.stderr and "\x1b[" not in r.stderr
+    assert "  embedded " not in r.stderr  # one small batch: no 10% lines
+
+
+def test_cli_index_generates_the_wiki_with_a_spinner_line(repo, tmp_path, monkeypatch, tty):
+    _fake_openwiki(tmp_path, monkeypatch, 'echo "noisy openwiki output"\nexit 0\n')
+    _project(repo, pdfs=[], wiki={"enabled": True, "generate": True})
+    r = CliRunner().invoke(cli(), ["index", "--fake"])
+    assert r.exit_code == 0, r.output
+    assert "noisy openwiki output" not in r.output
+    assert "Running OpenWiki code --init (openai/" in r.stderr
+    assert "Output: " in r.stderr and ".dwb/openwiki.log" in r.stderr
+    assert "✓ Wiki   generated by OpenWiki" in r.stderr
+
+
+def test_cli_index_interrupted_after_the_code_index_reports_it_kept(repo, monkeypatch):
+    import dwb.retrieval.pdf_index as pdf_index
+
+    def stop(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pdf_index, "build_pdf_index", stop)
+    _project(repo)
+    r = CliRunner().invoke(cli(), ["index", "--fake"])
+    assert r.exit_code == 130, r.output
+    lines = r.stderr.splitlines()
+    assert "! Stopped" in lines and "Traceback" not in r.output
+    kept = [ln for ln in lines if ln.startswith("  • kept: ")]
+    assert len(kept) == 1 and kept[0].startswith("  • kept: code index code-toy-")
+    assert not (repo / ".dwb/state.json").exists()
+
+
+def test_init_saves_a_pasted_key_in_the_project_dwb_env(repo, tty, monkeypatch):
+    import dwb.init_wizard as wiz
+
+    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
+    key = "sk-proj-SECRETVALUE123xyz"
+    answers = "\n".join(["myproj", "", "", "", "n", "", key]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    env = repo / ".dwb" / ".env"
+    assert env.read_text() == f"OPENAI_API_KEY={key}\n"
+    assert stat.S_IMODE(os.stat(env).st_mode) == 0o600
+    assert "/.dwb/" in (repo / ".git/info/exclude").read_text()  # never committed
+    assert f"saved OPENAI_API_KEY to {env}" in r.output and "SECRETVALUE" not in r.output

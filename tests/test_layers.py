@@ -11,7 +11,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "dwb"
 # Keep in sync with the module view in docs/architecture.md.
 LAYERS: dict[str, tuple[int, str]] = {
     # 1 interface
-    "cli": (1, ""), "chat": (1, ""), "init_wizard": (1, ""),
+    "cli": (1, ""), "chat": (1, ""), "init_wizard": (1, ""), "ui": (1, ""),
     # 2 application
     "project": (2, ""), "workspace": (2, ""), "runner": (2, ""), "eval.command": (2, ""),
     "curation": (2, ""),
@@ -31,6 +31,7 @@ LAYERS: dict[str, tuple[int, str]] = {
     "benchmark.schemas": (5, ""), "benchmark.swe_qa": (5, ""), "benchmark.freeze": (5, ""),
     # 6 foundation
     "repo": (6, ""), "tokens": (6, ""), "usage": (6, ""), "log": (6, ""),
+    "progress": (6, ""),
 }
 
 
@@ -39,12 +40,28 @@ def _module(path: Path) -> str:
 
 
 def _imports(path: Path) -> set[str]:
+    return _imports_of(path.read_text())
+
+
+def _imports_of(source: str) -> set[str]:
+    """The dwb modules a source file imports, including ``from dwb import ui`` forms."""
     out = set()
-    for node in ast.walk(ast.parse(path.read_text())):
-        names = ([a.name for a in node.names] if isinstance(node, ast.Import)
-                 else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            # `from dwb.x import y`: dwb.x, plus dwb.x.y when y is itself a module
+            names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+        else:
+            names = []
         out |= {n.removeprefix("dwb.") for n in names if n.startswith("dwb.")}
-    return out
+    return {m for m in out if m in LAYERS}
+
+
+def test_from_dwb_import_module_is_seen():
+    assert _imports_of("from dwb import ui, __version__") == {"ui"}
+    assert _imports_of("from dwb.retrieval import vector_store") == {"retrieval.vector_store"}
+    assert _imports_of("from dwb.ui import out\nimport dwb.log") == {"ui", "log"}
 
 
 def test_every_module_has_a_layer():

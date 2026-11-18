@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from conftest import make_trace
-
 from dwb.eval.claims_judge import ClaimsJudge
 from fakes import FakeStructuredChat
 

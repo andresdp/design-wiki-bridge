@@ -21,6 +21,7 @@ from langchain_core.embeddings import Embeddings
 
 from dwb.evidence import EvidenceItem, parse_locator
 from dwb.log import get_logger
+from dwb.progress import OnProgress, report
 
 LOG = get_logger("index")
 
@@ -93,13 +94,19 @@ class VectorIndex:
         embedding: Embeddings,
         embedding_model: str,
         parts: dict[str, Any],
+        on_progress: OnProgress | None = None,
     ) -> VectorIndex:
+        """Embed ``items`` into a new index, or reuse the existing one. ``on_progress`` gets an
+        ``embed`` start, one step per batch (items embedded so far) and a done event carrying
+        the ``IndexInfo``."""
         root = Path(root)
         existing = cls.load_info(root, index_id)
         if existing is not None:
             existing.reused = True
             LOG.info("Index [bold]%s[/] already exists (%d items); reusing it, not rebuilding",
                      index_id, existing.n_items)
+            report(on_progress, "embed", "done", done=existing.n_items,
+                   total=existing.n_items, label=index_id, data=existing)
             return cls(root, existing, embedding)
         info = IndexInfo(index_id=index_id, kind=kind, embedding_model=embedding_model,
                          n_items=len(items), parts=parts)
@@ -108,15 +115,23 @@ class VectorIndex:
             shutil.rmtree(root / index_id)
         idx = cls(root, info, embedding)
         docs = [_flat(i) for i in items]
-        LOG.info("Embedding %d items into [bold]%s[/] with %s", len(docs), index_id,
-                 embedding_model)
+        LOG.debug("Embedding %d items into [bold]%s[/] with %s", len(docs), index_id,
+                  embedding_model)
+        report(on_progress, "embed", "start", total=len(docs), label=index_id,
+               data={"kind": kind})
         t0 = time.perf_counter()
         for s in range(0, len(docs), BATCH):
             batch = docs[s : s + BATCH]
             idx._store.add_documents(batch, ids=[d.id for d in batch])
-            LOG.info("  embedded %d/%d", min(s + BATCH, len(docs)), len(docs))
+            done = min(s + BATCH, len(docs))
+            LOG.debug("  embedded %d/%d", done, len(docs))
+            report(on_progress, "embed", "step", done=done, total=len(docs), label=index_id,
+                   elapsed_s=time.perf_counter() - t0)
         (root / index_id / "index.json").write_text(json.dumps(asdict(info), indent=2))
-        LOG.info("Index [bold]%s[/] built in %.1f s", index_id, time.perf_counter() - t0)
+        elapsed = time.perf_counter() - t0
+        LOG.debug("Index [bold]%s[/] built in %.1f s", index_id, elapsed)
+        report(on_progress, "embed", "done", done=len(docs), total=len(docs), label=index_id,
+               elapsed_s=elapsed, data=info)
         return idx
 
     @staticmethod

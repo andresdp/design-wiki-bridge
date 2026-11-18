@@ -3,9 +3,9 @@ import sys
 from pathlib import Path
 
 import yaml
-from conftest import make_trace
 from test_claims_judge import make_judge
 
+from conftest import make_trace
 from dwb.benchmark.schemas import save_records
 from dwb.eval.command import evaluate_runs
 from dwb.eval.matching import MatchRules
@@ -173,3 +173,37 @@ def test_evaluate_rejects_unpaired_settings_unless_allowed(tmp_path, record):
     cfg_out = json.loads((tmp_path / "out" / "evaluator_config.json").read_text())
     assert cfg_out["paired_check"]["allowed_unpaired"] is True
     assert any("models" in f for f in cfg_out["paired_check"]["failures"])
+
+
+def test_evaluate_reports_each_question_and_the_results_do_not_change(tmp_path, record):
+    (a, b), cfg = _two_runs(tmp_path, record)
+    plain = evaluate_runs(a, b, tmp_path / "plain", config_path=cfg, base_dir=tmp_path,
+                          use_judge=False)
+    events = []
+    with_cb = evaluate_runs(a, b, tmp_path / "cb", config_path=cfg, base_dir=tmp_path,
+                            use_judge=False, on_progress=events.append)
+    assert with_cb == plain
+    for f in ("per_question.csv", "paired.csv", "paired_summary.csv", "cost.csv"):
+        assert (tmp_path / "plain" / f).read_text() == (tmp_path / "cb" / f).read_text(), f
+    assert [(e.task, e.phase, e.label) for e in events] == [
+        ("evaluate", "start", "A"), ("evaluate", "step", record.id), ("evaluate", "done", "A"),
+        ("evaluate", "start", "B"), ("evaluate", "step", record.id), ("evaluate", "done", "B")]
+    assert all(e.total == 1 for e in events) and events[1].done == 1
+
+
+def test_cli_evaluate_prints_one_line_per_question_without_a_terminal(tmp_path, record,
+                                                                      monkeypatch):
+    from typer.testing import CliRunner
+
+    import dwb.cli as cli
+
+    (a, b), cfg = _two_runs(tmp_path, record)
+    monkeypatch.chdir(tmp_path)
+    r = CliRunner().invoke(cli.app, ["experiment", "evaluate", str(a), str(b), "--out",
+                                     str(tmp_path / "rep"), "--config", str(cfg), "--no-judge"])
+    assert r.exit_code == 0, r.output
+    assert "Ctrl-C stops" in r.stderr
+    lines = r.stderr.splitlines()
+    assert "Evaluating condition A: 1 traces" in lines and f"  [1/1] {record.id}" in lines
+    assert "  ✓ Condition B: 1 traces scored" in lines
+    assert "\r" not in r.stderr and "\x1b[" not in r.stderr

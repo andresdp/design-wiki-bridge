@@ -42,6 +42,7 @@ flowchart TB
         cli["cli<br/>typer commands"]
         chat["chat<br/>ChatSession, REPL, rendering"]
         initw["init_wizard<br/>dwb init questions"]
+        ui["ui<br/>theme, symbols, consoles, errors, output mode"]
     end
     subgraph L2["2 · Application: modes and orchestration"]
         direction LR
@@ -81,7 +82,7 @@ flowchart TB
     subgraph L6["6 · Foundation"]
         direction LR
         repo["repo<br/>RepoReader: git show at SHA"]
-        util["tokens · usage · log"]
+        util["tokens · usage · log · progress"]
     end
     L1 --> L2 --> L3 --> L4 --> L5 --> L6
     PIPE x--x|no imports| EVAL
@@ -89,13 +90,13 @@ flowchart TB
 
 | Layer | Modules | Responsibility | External libraries |
 |---|---|---|---|
-| 1 Interface | `cli`, `chat`, `init_wizard` | Parse commands and options, run the REPL, and render answers and logs. No retrieval logic | typer, rich, prompt_toolkit |
+| 1 Interface | `cli`, `chat`, `init_wizard`, `ui` | Parse commands and options, run the REPL, and render answers and logs. No retrieval logic. `ui` owns presentation: the theme and symbols (ASCII fallback), the stdout/stderr consoles resolved per invocation, the error/warning/outcome/header lines, the human-vs-JSON output switch, and the progress renderer (bars and spinners for `ProgressEvent`s on a colored terminal, one plain line per milestone otherwise). `cli` has the one exception boundary: expected errors print `✗`/`→` and exit 2, Ctrl-C prints `! Stopped` and exits 130, anything else prints a two-line summary, writes the traceback to `$XDG_CACHE_HOME/dwb/last-error.log`, and exits 1 | typer, rich, prompt_toolkit |
 | 2 Application | `project`, `workspace`, `runner`, `eval.command`, `curation` | Choose the mode, find or build the artifacts, wire concrete components into the graph, run or score a question set, and curate question sets (draft, validate, freeze, check) | PyYAML, PyMuPDF (PDF page counts) |
 | 3 Query pipeline | `graph`, `merge`, `rerank`, `budget`, `generate` | Answer one question: retrieve, merge, rerank, fit the token budget, generate cited claims. The pipeline depends on retriever interfaces; `runner` injects the concrete adapters | LangGraph, LangChain (`LLMListwiseRerank`, chat models) |
 | 3 Evaluation | `eval.*` (except `command`), `evidence_text` | Score saved traces: span recall, claim correctness, citation support and coverage, cost tables | DeepEval (optional diagnostics), LangChain chat model (judge) |
 | 4 Adapters | `retrieval.*`, `web.tavily_store` | Build and query the indexes, talk to OpenWiki over MCP and resolve wiki references to code spans, and record or replay Tavily | Chroma, OpenAI embeddings, langchain-mcp-adapters, tavily-python |
 | 5 Domain model | `evidence`, `trace`, `manifest`, `prompts`, `benchmark.*` | The shared vocabulary: evidence items and IDs, traces, run manifests, question records, and prompt versions (see §6) | pydantic |
-| 6 Foundation | `repo`, `tokens`, `usage`, `log` | Read files at a commit through git, count tokens, collect usage from callbacks, and log | tiktoken, LangChain callbacks, rich |
+| 6 Foundation | `repo`, `tokens`, `usage`, `log`, `progress` | Read files at a commit through git, count tokens, collect usage from callbacks, and log. `progress` is the one event type (`ProgressEvent`) that indexing, the runner, OpenWiki generation and evaluation send to an optional `on_progress` callback; `ui` renders it, so no lower layer imports presentation code (KTD2). OpenWiki generation writes its own output to `.dwb/openwiki.log` so a spinner can show meanwhile; `-v` streams it to the terminal instead (KTD7) | tiktoken, LangChain callbacks, rich |
 
 Two consequences of the layering:
 
@@ -109,6 +110,7 @@ The module-level detail behind §2: the main import edges between modules.
 ```mermaid
 flowchart TB
     cli["cli.py<br/>typer commands"] --> chat["chat.py<br/>ChatSession, REPL, rendering"]
+    cli --> ui["ui.py<br/>presentation, output mode"]
     cli --> init["init_wizard.py"] --> project["project.py<br/>user mode: config, index_project"]
     cli --> runner["runner.py<br/>batch runner, build_components"]
     cli --> evalc["eval/command.py"]
@@ -353,6 +355,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 | 20 | **Failures count against the condition; degraded answers are flagged** (code review 2026-11-17) | A failed question scores correctness 0 (no answer) instead of dropping out of one side's mean, which would favor the condition that fails more. Its cost is left empty, not 0. A source or rerank failure keeps the answer but marks it `degraded`. Means are taken over the questions scored on both sides | Excluding failures silently; failing the whole question when one source fails |
 | 21 | **`evaluate` rechecks the pair** (code review 2026-11-17) | The saved manifests must be A then B and pass `check_paired`, so a swapped or mismatched pair cannot produce a valid-looking report. `--allow-unpaired` overrides it and is recorded in `evaluator_config.json`. Judge verdicts are cached per judge model and temperature | Trusting the argument order |
 | 22 | **Indexes must match the manifest they are used with** (code review 2026-11-17) | Condition A's index must be cut with the manifest's `max_span_tokens` and the current `chunker_version`; the runner refuses otherwise. User mode uses only the IDs `dwb index` recorded in `state.json`, and refuses a wiki that changed since | Picking the newest matching index |
+| 23 | **One presentation module and one exception boundary** (CLI UX plan KTD1, KTD5, KTD6) | `dwb.ui` resolves consoles and the output mode when output is written (`CliRunner` swaps streams per call), so `NO_COLOR`, `--no-color`, `--json` and TTY detection hold per invocation. The boundary is a custom Typer group, so tests exercise it; Click's own exits pass through untouched | Per-command `except` blocks; a boundary in `main()` that tests never reach |
 
 ## 11. Invariants
 
@@ -362,7 +365,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 - If one branch returns nothing, the others still contribute. When nothing is found at all, the graph records an explicit empty context and never substitutes another retriever.
 - The test set is frozen by content hash. Development questions are separate, and the runner rejects any ID or question text shared between dev and test.
 - Nothing leaves the machine except calls to OpenAI, Tavily (only when the web is enabled), and OpenWiki generation (only when requested). Telemetry is off for OpenWiki and Chroma.
-- In user mode, a repository's own `.env` can supply only `OPENAI_API_KEY` and `TAVILY_API_KEY`; settings such as `OPENAI_BASE_URL` are read only from the shell or `~/.config/dwb/.env`.
+- In user mode, API keys are per project: they come only from `<repo>/.dwb/.env` (or the shell), and only `OPENAI_API_KEY` and `TAVILY_API_KEY` are read from it, so a cloned repository cannot set `OPENAI_BASE_URL` and redirect the key. Neither the repository's own `.env` nor `~/.config/dwb/.env` is read; the latter is used only in research mode.
 - Every network or subprocess call has a timeout: OpenAI clients (180 s, 2 retries), OpenWiki MCP calls (120 s), git (120 s), PDF downloads (60 s).
 
 ## 12. Known limitations and parked work

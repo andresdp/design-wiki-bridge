@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
@@ -14,6 +13,7 @@ from dwb.benchmark.schemas import QuestionRecord, load_records
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
 from dwb.manifest import MODEL_NET, RunManifest
+from dwb.progress import OnProgress, report
 from dwb.trace import RunDir, StageRecord, TraceRecord
 
 LOG = get_logger("run")
@@ -48,18 +48,25 @@ async def run_questions(
     run_dir: RunDir,
     *,
     run_stages: list[StageRecord] | None = None,
-    on_trace: Callable[[TraceRecord], None] | None = None,
+    on_progress: OnProgress | None = None,
 ) -> dict[str, Any]:
+    """Answer every question and write the traces and the run summary. ``on_progress`` gets a
+    ``run`` start (``total`` questions, ``data["traces"]`` the traces file), one step per
+    question once its trace is written (``outcome`` ok/failed/degraded/empty, ``data`` the
+    ``TraceRecord`` plus the running failed/degraded/empty_context counts) and a done event
+    carrying the summary."""
     graph = build_graph(components, m)
     t_run = time.perf_counter()
     run_stages = list(run_stages or [])
-    LOG.info("Run [bold]%s[/]: condition %s, %s @ %s, %d questions → %s", m.run_id, m.condition,
-             m.repo, m.repo_sha[:12], len(questions), run_dir.root)
+    LOG.debug("Run [bold]%s[/]: condition %s, %s @ %s, %d questions → %s", m.run_id,
+              m.condition, m.repo, m.repo_sha[:12], len(questions), run_dir.root)
+    report(on_progress, "run", "start", total=len(questions), label=m.run_id,
+           data={"traces": run_dir.traces_path, "run_dir": run_dir.root})
     async with AsyncExitStack() as stack:
         startup = await start_wiki(stack, components)  # one MCP session for the whole run
         if startup is not None:
             run_stages.append(startup)
-        counts = await _run_all(graph, m, questions, run_dir, on_trace)
+        counts = await _run_all(graph, m, questions, run_dir, on_progress)
     n_failed, n_degraded, n_empty, n_web, n_unresolved = counts
     summary = {
         "run_id": m.run_id,
@@ -75,9 +82,11 @@ async def run_questions(
     }
     run_dir.write_summary(summary)
     style = "red" if n_failed else "green"
-    LOG.info("[%s]Done[/]: %d questions, %d failed, %d degraded, %d empty context, %d with web, "
-             "%d unresolved citation IDs, %.1f s. Traces: %s", style, len(questions), n_failed,
-             n_degraded, n_empty, n_web, n_unresolved, summary["elapsed_s"], run_dir.traces_path)
+    LOG.debug("[%s]Done[/]: %d questions, %d failed, %d degraded, %d empty context, %d with web, "
+              "%d unresolved citation IDs, %.1f s. Traces: %s", style, len(questions), n_failed,
+              n_degraded, n_empty, n_web, n_unresolved, summary["elapsed_s"], run_dir.traces_path)
+    report(on_progress, "run", "done", done=len(questions), total=len(questions),
+           label=m.run_id, elapsed_s=summary["elapsed_s"], data=summary)
     return summary
 
 
@@ -97,13 +106,13 @@ async def start_wiki(stack: AsyncExitStack, components: Components) -> StageReco
 
 async def _run_all(
     graph, m: RunManifest, questions: list[QuestionRecord], run_dir: RunDir,
-    on_trace: Callable[[TraceRecord], None] | None,
+    on_progress: OnProgress | None,
 ) -> tuple[int, int, int, int, int]:
     n_failed = n_degraded = n_empty = n_web = n_unresolved = 0
     total = len(questions)
     with run_dir.writer() as w:
         for i, q in enumerate(questions, start=1):
-            LOG.info("[cyan][%d/%d][/] %s: %s", i, total, q.id, _short(q.question))
+            LOG.debug("[cyan][%d/%d][/] %s: %s", i, total, q.id, _short(q.question))
             t0 = time.perf_counter()
             try:
                 state = await graph.ainvoke({"question": q})
@@ -111,16 +120,30 @@ async def _run_all(
             except Exception as e:
                 rec = TraceRecord(question_id=q.id, run_id=m.run_id, condition=m.condition,
                                   errors=[f"{type(e).__name__}: {e}"])
-            _log_trace(rec, time.perf_counter() - t0)
+            elapsed = time.perf_counter() - t0
+            _log_trace(rec, elapsed)
             n_failed += bool(rec.errors)
             n_degraded += rec.degraded
             n_empty += rec.empty_context
             n_web += rec.web_triggered
             n_unresolved += int(rec.validation.get("n_unresolved_ids", 0) or 0)
             w.append(rec)
-            if on_trace:
-                on_trace(rec)
+            report(on_progress, "run", "step", done=i, total=total, label=q.id,
+                   outcome=outcome(rec), elapsed_s=elapsed,
+                   data={"trace": rec, "failed": n_failed, "degraded": n_degraded,
+                         "empty_context": n_empty})
     return n_failed, n_degraded, n_empty, n_web, n_unresolved
+
+
+def outcome(rec: TraceRecord) -> str:
+    """One word for a question's result: failed, empty (no context), degraded, or ok."""
+    if rec.errors:
+        return "failed"
+    if rec.empty_context:
+        return "empty"
+    if rec.degraded:
+        return "degraded"
+    return "ok"
 
 
 def _short(text: str, n: int = 90) -> str:
@@ -151,11 +174,12 @@ def _log_trace(rec: TraceRecord, elapsed: float) -> None:
         extra.append(f"{len(rec.unresolved_refs)} unresolved refs")
     if rec.web_triggered:
         extra.append("web")
-    LOG.info("    [green]✓[/] %d candidates → %d in context → %d claim(s) (%d cited, %s unresolved "
-             "IDs)%s, %.1f s", sum(len(rec.candidates.get(k, [])) for k in ("repo", "pdf", "web")),
-             len(rec.final_context_ids), len(rec.claims), cited,
-             f"[red]{n_unres}[/]" if n_unres else "0",
-             f" [{', '.join(extra)}]" if extra else "", elapsed)
+    n_cand = sum(len(rec.candidates.get(k, [])) for k in ("repo", "pdf", "web"))
+    LOG.debug("    [green]✓[/] %d candidates → %d in context → %d claim(s) (%d cited, %s "
+              "unresolved IDs)%s, %.1f s", n_cand, len(rec.final_context_ids), len(rec.claims),
+              cited,
+              f"[red]{n_unres}[/]" if n_unres else "0",
+              f" [{', '.join(extra)}]" if extra else "", elapsed)
 
 
 def build_components(
@@ -258,6 +282,7 @@ def run_manifest(
     runs_dir: Path,
     run_stages: list[StageRecord] | None = None,
     overwrite: bool = False,
+    on_progress: OnProgress | None = None,
 ) -> dict[str, Any]:
     """Check the question set before anything else, then process every question."""
     questions = load_question_set(m, base_dir)
@@ -265,4 +290,5 @@ def run_manifest(
              "frozen, hash verified" if m.question_set.hash else "not frozen (dev)")
     m = m.resolve_prompts(base_dir)
     run_dir = RunDir.start(m, runs_dir, overwrite=overwrite)
-    return asyncio.run(run_questions(m, components, questions, run_dir, run_stages=run_stages))
+    return asyncio.run(run_questions(m, components, questions, run_dir, run_stages=run_stages,
+                                     on_progress=on_progress))

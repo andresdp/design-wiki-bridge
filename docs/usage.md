@@ -15,7 +15,7 @@
 | Ask | `dwb ask "…"`, `dwb chat` | `dwb ask "…" --repo flask`, `dwb chat --repo flask` |
 | Experiments | No | `dwb experiment check / run / evaluate` |
 | Question sets | No | `dwb benchmark draft / validate / freeze / check` |
-| API keys | `~/.config/dwb/.env`; a repository's `.env` gives only `OPENAI_API_KEY` and `TAVILY_API_KEY` | `design-wiki-bridge/.env`, read in full |
+| API keys | `<repo>/.dwb/.env` (only `OPENAI_API_KEY` and `TAVILY_API_KEY`) | `design-wiki-bridge/.env`, read in full |
 
 **Which mode runs?** `dwb` decides from the current folder and the options:
 
@@ -43,7 +43,7 @@ A pinned checkout under `artifacts/checkouts/` is a normal git repository, so it
   - [Adding a research repository](#adding-a-research-repository)
   - [Research configuration](#research-configuration)
   - [Trying user mode on a pinned checkout](#trying-user-mode-on-a-pinned-checkout)
-- [Logging](#logging-and-output)
+- [Output and scripting](#output-and-scripting)
 - [Troubleshooting](#troubleshooting)
 
 ## Install
@@ -55,12 +55,18 @@ conda activate taxonomy                  # Python 3.11 environment with the depe
 pip install --no-deps -e <path-to>/design-wiki-bridge     # installs the `dwb` command
 ```
 
-Run `dwb` in your own terminal with the environment activated. `conda run` does not pass keyboard input through, so `dwb init` and `dwb chat` cannot read your answers under it.
+Run `dwb` in your own terminal with the environment activated. To run it through conda without activating, add `--no-capture-output`:
+
+```sh
+conda run --no-capture-output -n taxonomy dwb chat
+```
+
+Plain `conda run -n taxonomy dwb ...` pipes the output and does not pass keyboard input through. `dwb` then behaves as if piped: JSON instead of tables, no progress bars, and no prompts (`dwb init` needs `--yes`). That is fine for scripts, not for `init`, `chat`, or watching an index build.
 
 API keys: `OPENAI_API_KEY` is required, and `TAVILY_API_KEY` is needed only for web search. Keys exported in your shell always take precedence. Beyond that, the modes read keys from different places:
 
-- **User mode:** `dwb init` offers to save the keys in `~/.config/dwb/.env` (readable only by you), which `dwb` reads from any folder. From a repository's own `.env`, `dwb` reads only `OPENAI_API_KEY` and `TAVILY_API_KEY`; other settings there (for example `OPENAI_BASE_URL`) are ignored, so a cloned repository cannot redirect your key. Put such settings in your shell or `~/.config/dwb/.env`.
-- **Research mode:** `design-wiki-bridge/.env` is read in full, then `~/.config/dwb/.env`.
+- **User mode:** keys belong to the project. `dwb init` saves them in `<repo>/.dwb/.env` (readable only by you, and hidden from git with the rest of `.dwb/`), and `dwb` reads them from there anywhere inside the repository. Nothing else is read: not the repository's own `.env`, and not `~/.config/dwb/.env`. Only `OPENAI_API_KEY` and `TAVILY_API_KEY` are taken from `.dwb/.env`; other settings (for example `OPENAI_BASE_URL`) are ignored, so a cloned repository cannot redirect your key. A key exported in your shell still wins over the file. Put other settings in your shell.
+- **Research mode:** `design-wiki-bridge/.env` is read in full, then `~/.config/dwb/.env` (unchanged).
 
 For the wiki source you also need [OpenWiki](https://github.com/langchain-ai/openwiki) **0.9.0** (`npm install -g openwiki@0.9.0`, Node ≥ 22.22) and `git` on the `PATH`.
 
@@ -79,13 +85,14 @@ dwb chat        # 3. ask away
 
 ### 1. `dwb init`: configure the repository
 
-Run it anywhere inside the repository. It shows the commit that will be indexed (HEAD) and asks about:
+Run it anywhere inside the repository. It needs a terminal (use `--yes` to run without one). It shows the commit that will be indexed (HEAD), then goes through six numbered steps (`Step 2 of 6: PDF documents (optional)`):
 
-- **Models:** the chat model (answering and reranking) and the embedding model (indexes). Both are OpenAI models.
-- **PDF documents:** specifications, papers, or manuals that explain what the code implements. Give local files or folders (relative to the repository) or URLs. A folder adds every PDF inside it, subfolders included, each titled by its file name; new PDFs in it are picked up on the next `dwb index`. URLs are downloaded during `dwb index`. An entry given twice is rejected.
-- **Web search:** whether to use it by default, and which domains to exclude. `init` suggests the project's own hosts (its git host, the docs URLs in `pyproject.toml`/`package.json`, PyPI/npm), so web evidence stays external to the code. Edit the list as you like.
-- **OpenWiki:** whether to use the wiki source. If `openwiki/` is missing or older than HEAD, `init` asks whether `dwb index` should generate or update it. That makes model calls (about 15 minutes for a mid-size repository) and writes `openwiki/`, `AGENTS.md`, and a GitHub workflow into the repository.
-- **API keys:** if a key is missing, paste it to save it in `~/.config/dwb/.env`. Typing shows `*` per character, and `init` confirms the key as `sk-*****xyz` (first and last three characters only).
+1. **Models:** the chat model (answering and reranking) and the embedding model (indexes). Both are OpenAI models.
+2. **PDF documents:** specifications, papers, or manuals that explain what the code implements. Give local files or folders (relative to the repository) or URLs. A folder adds every PDF inside it, subfolders included, each titled by its file name; new PDFs in it are picked up on the next `dwb index`. URLs are downloaded during `dwb index`. An entry given twice is rejected.
+3. **Web search:** whether to use it by default, and which domains to exclude. `init` suggests the project's own hosts (its git host, the docs URLs in `pyproject.toml`/`package.json`, PyPI/npm), so web evidence stays external to the code. Edit the list as you like.
+4. **OpenWiki:** whether to use the wiki source. If `openwiki/` is missing or older than HEAD, `init` asks whether `dwb index` should generate or update it. That makes model calls (about 15 minutes for a mid-size repository) and writes `openwiki/`, `AGENTS.md`, and a GitHub workflow into the repository.
+5. **Default sources:** which of wiki, PDFs, and web `ask` and `chat` use unless you override them.
+6. **API keys:** if a key is missing, paste it to save it in `.dwb/.env`. Typing shows `*` per character, and `init` confirms the key as `sk-*****xyz` (first and last three characters only). If the project already has a key, `init` shows where it is (`.dwb/.env` or your shell) with that masked preview and asks whether to keep it; a key in `.dwb/.env` can be replaced, a shell variable has to be changed in the shell.
 
 The result is **`.dwb/config.yaml`**, a plain YAML file you can edit at any time (see [below](#the-project-file-dwbconfigyaml)). Everything `dwb` writes stays in `.dwb/`, which is hidden from git through `.git/info/exclude`; your `.gitignore` is not touched. `dwb init --yes` accepts every default without asking, and `--force` overwrites an existing config.
 
@@ -324,19 +331,91 @@ dwb chat
 
 The research harness reads committed files through git, so `.dwb/` (hidden from git) does not affect it. Do not let `dwb index` regenerate the wiki there (keep `wiki.generate: false`): the checkout's `openwiki/` is the pinned snapshot. To undo, delete `.dwb/`.
 
-## Logging and output
+## Output and scripting
 
-Progress messages go to stderr, and results (answers, JSON) go to stdout. `dwb -v <command>` adds per-stage timings and token counts, and `dwb -q <command>` shows only warnings and errors. Put these options **before** the command.
+**At a terminal** `dwb` prints human output: a header line, progress, tables, and an outcome with the next step. **Piped, or with `--json`**, the data commands print JSON to stdout instead: `status`, `index` (user mode), `index code`, `index pdf`, `wiki snapshot`, `experiment check / run / evaluate`, and `benchmark`. `ask` and `chat` always stay human; `dwb --json ask "…"` (or `ask --json`) prints the full trace. Progress, messages, and errors always go to stderr, so `dwb status | jq` stays clean.
+
+```sh
+dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml   # terminal: readable
+dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml | cat   # piped: JSON
+dwb --json status                                                                     # JSON at a terminal
+```
+
+Global options go **before** the command:
+
+| Option | Effect |
+|---|---|
+| `--json` | JSON for data commands even at a terminal |
+| `--no-color` (or `NO_COLOR=1`) | No colors or animations; progress becomes one plain line per step. Also used automatically when output is not a terminal |
+| `-v` | Timestamps and levels on log lines, per-stage timings and token counts, the traceback of an unexpected error, and OpenWiki's own output streamed to the terminal (otherwise it goes to `.dwb/openwiki.log`) |
+| `-q` | Warnings and errors only |
+| `--version` | Print the version |
+
+Symbols (`✓ ✗ ! • →`) fall back to ASCII (`ok x ! - ->`) where the terminal cannot show them.
+
+### What the output looks like
+
+A research-mode `status` at a terminal (a header line, then one table per repository):
+
+```
+all repositories · research mode · indexes built with text-embedding-3-large
+flask (3.1.2)
+Source    State  Detail
+checkout  ok     pinned 3.1.2
+code      ok     code-flask-d8133bc0499d
+pdf       ok     flask-v1, pdf-flask-v1-55138d10d333
+wiki      ok     wiki-flask-52e1119f2d9c
+```
+
+A command that ends well prints `✓`, what happened, and the next step:
+
+```
+flask · research mode · 2c1b30d0503c · flask-A-dev-001 vs flask-B-dev-001
+Kind  Detail
+note  repository candidate budget differs: A=40 B=20 (reported, R7)
+✓ Paired check passed: the manifests differ only in the repository branch → next: dwb experiment run configs/manifests/flask-A.yaml
+```
+
+Expected errors print `✗` and the problem, with `→` and what to do (exit code 2):
+
+```
+✗ this folder is not a dwb project: run `dwb init` first. (Research mode: dwb index code <repo> / dwb index pdf <corpus>.)
+```
+
+Long commands (`index`, `index code`, `index pdf`, `experiment run` and `evaluate`) show progress bars or spinners per step on stderr. Without a terminal they print one plain line per milestone.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Problems found (for example `benchmark validate`), a run with failed questions, or an unexpected error |
+| 2 | Setup or usage error: not a project, missing index or key, bad option |
+| 130 | Stopped with Ctrl-C |
+
+An unexpected error prints a two-line summary, not a traceback. The full traceback is written to `~/.cache/dwb/last-error.log` (`$XDG_CACHE_HOME/dwb/last-error.log` if set); rerun with `-v` to see it on screen.
+
+### Stopping with Ctrl-C
+
+Long commands say at the start what Ctrl-C does (for example `Ctrl-C stops; finished indexes are kept.`). On Ctrl-C `dwb` prints `! Stopped`, lists what was kept, and exits 130.
+
+- **`index`:** indexes already finished are kept; rerun to build the rest.
+- **OpenWiki generation (user-mode `index`):** a wiki generated before the stop stays in `openwiki/`.
+- **`experiment run`:** traces already written are kept, but the run is incomplete (no `run_summary.json`) and **cannot be evaluated**. Rerun it with `--overwrite`.
+- **`experiment evaluate`:** nothing is kept; the report is written only at the end.
+- **`chat`:** Ctrl-C while answering cancels only that answer. Ctrl-C or Ctrl-D at the prompt leaves.
 
 ## Troubleshooting
 
 | Mode | Message | Fix |
 |---|---|---|
+| Both | I get JSON instead of tables, or no progress and no prompts | Output is piped, `--json` is set, or you ran plain `conda run`. Activate the env, or use `conda run --no-capture-output -n taxonomy dwb ...`. |
+| Both | `Unexpected error: …` | The traceback is in `~/.cache/dwb/last-error.log`; rerun with `-v` to print it, and include it in a bug report. |
 | Both | `this folder is not a dwb project` | User mode: `dwb init` inside the repository. Research mode: run from design-wiki-bridge with `--repo <name>`. |
 | User | `… has not been indexed yet` | `dwb index`. |
 | User | `The index is for commit … but HEAD is …` | `dwb index` to update; until then answers cite the indexed commit. |
 | User | `not inside a git repository` | dwb indexes committed code: `git init` and commit, or cd into a repository. |
-| User | `OPENAI_API_KEY is not set` | Rerun `dwb init` to save it, export it, or put it in `~/.config/dwb/.env`. |
+| User | `OPENAI_API_KEY is not set` | Rerun `dwb init` to save it in `.dwb/.env`, or export it. A key in `~/.config/dwb/.env` is not used in user mode. |
 | User | `Wiki not available: openwiki/ missing…` | Set `wiki.generate: true` and `dwb index`, or run `openwiki code --init` yourself, then `dwb index`. |
 | Both | `OpenWiki MCP server lacks … (needs 0.9.0)` | `npm install -g openwiki@0.9.0`, then `hash -r`. |
 | User | `did not return a PDF` | Download the file in a browser and list the local path under `pdfs:`. |

@@ -11,24 +11,30 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
+from dwb import __version__, ui
 from dwb.project import (
     CONFIG_NAME,
     DWB_DIR,
-    GLOBAL_ENV,
     PdfEntry,
     ProjectConfig,
     folder_pdfs,
     git_root,
     head_sha,
+    hide_from_git,
     is_dirty,
     is_url,
     openwiki_status,
     openwiki_version,
-    save_global_key,
+    project_env,
+    save_key,
     suggest_exclude_domains,
     write_config,
 )
 from dwb.workspace import WorkspaceError
+
+STEPS = ["Models (OpenAI)", "PDF documents (optional)", "Web search (optional, Tavily)",
+         "OpenWiki (optional)", "Default sources for ask/chat", "API keys"]
+_NOT_WRITTEN = f"{DWB_DIR}/{CONFIG_NAME} was not written."
 
 
 def mask_secret(value: str) -> str:
@@ -69,17 +75,31 @@ class Asker:
 
 
 def _section(c: Console, title: str) -> None:
-    c.print(f"\n[bold cyan]{title}[/]")
+    """``Step 2 of 6: PDF documents (optional)``, the details after the name dimmed."""
+    n = STEPS.index(title) + 1
+    name, _, rest = title.partition(" (")
+    extra = f" [dim]({rest}[/]" if rest else ""
+    c.print(f"\n[bold cyan]Step {n} of {len(STEPS)}: {name}[/]{extra}")
+
+
+def require_terminal(yes: bool) -> None:
+    """Without a terminal, ``dwb init`` never prompts: it needs ``--yes`` (R14)."""
+    if not yes and not ui.interactive():
+        raise WorkspaceError("dwb init asks questions and needs a terminal. Rerun with --yes "
+                             "to accept every default (then edit .dwb/config.yaml).")
 
 
 def run_init(start: Path, console: Console | None = None, *, yes: bool = False,
              force: bool = False) -> Path:
-    c = console or Console()
+    c = console or ui.out()
     ask = Asker(c, yes)
     root = git_root(start)
     if root is None:
         raise WorkspaceError(f"{start} is not inside a git repository. dwb indexes committed "
                              "code; run `git init` and commit first, or cd into a repository.")
+    require_terminal(yes)
+    ui.note_on_stop("Nothing was written.", key="init")
+    c.print(f"[bold]dwb {__version__}[/]")
     cfg_path = root / DWB_DIR / CONFIG_NAME
     if cfg_path.exists() and not force and not ask.confirm(
             f"{cfg_path} already exists. Overwrite it?", default=False):
@@ -89,7 +109,7 @@ def run_init(start: Path, console: Console | None = None, *, yes: bool = False,
     c.print(Panel(f"Repository: [bold]{root}[/]\nCommit to index: HEAD [bold]{sha[:12]}[/]"
                   + ("\n[yellow]Uncommitted changes are not indexed; commit them first if they "
                      "matter.[/]" if is_dirty(root) else ""),
-                  title="dwb init", border_style="cyan"))
+                  title="init", title_align="left", border_style="cyan"))
     name = ask.text("Project name", default=re.sub(r"\W+", "-", root.name).strip("-") or "repo")
 
     _section(c, "Models (OpenAI)")
@@ -166,9 +186,14 @@ def run_init(start: Path, console: Console | None = None, *, yes: bool = False,
                                             default=False)
 
     _section(c, "API keys")
-    _ensure_key(c, ask, "OPENAI_API_KEY", "embeddings and answers", required=True)
-    if web:
-        _ensure_key(c, ask, "TAVILY_API_KEY", "web search", required=False)
+    env = project_env(root)
+    saved = []
+    if key := _ensure_key(c, ask, env, "OPENAI_API_KEY", "embeddings and answers",
+                          required=True):
+        saved.append(key)
+    if web and (key := _ensure_key(c, ask, env, "TAVILY_API_KEY", "web search",
+                                   required=False)):
+        saved.append(key)
 
     cfg = ProjectConfig(
         name=name,
@@ -179,21 +204,51 @@ def run_init(start: Path, console: Console | None = None, *, yes: bool = False,
         wiki={"enabled": wiki_enabled, "generate": wiki_generate, "model": wiki_model},
     )
     path = write_config(root, cfg)
-    c.print(Panel(f"Wrote [bold]{path}[/] (review or edit it any time).\n"
-                  f"{DWB_DIR}/ is hidden from git through .git/info/exclude.\n\n"
-                  "Next: [bold]dwb index[/]   then   [bold]dwb chat[/]",
-                  title="Done", border_style="green"))
+    ui.keep(str(path))
+    ui.note_on_stop(None, key="init")
+    c.print("\n[bold]Summary[/]")
+    ui.bullet(f"{DWB_DIR}/ is hidden from git through .git/info/exclude", console=c)
+    for k in saved:
+        ui.bullet(f"saved {k} to {env}", console=c)
+    ui.bullet("review or edit the configuration any time; after indexing: dwb chat", console=c)
+    ui.outcome(f"Wrote {path}", "dwb index", console=c)
     return path
 
 
-def _ensure_key(c: Console, ask: Asker, name: str, purpose: str, *, required: bool) -> None:
-    if os.environ.get(name):
-        c.print(f"{name}: [green]found[/]")
-        return
-    c.print(f"{name} ({purpose}) is not set.")
-    value = ask.secret(f"Paste {name} to save it in {GLOBAL_ENV} (Enter to skip)")
+def _saved_value(env: Path, name: str) -> str | None:
+    """The value of ``name`` in the project's .dwb/.env, or None (missing file or key)."""
+    try:
+        from dotenv import dotenv_values
+    except ImportError:  # pragma: no cover
+        return None
+    return dotenv_values(env).get(name) if env.exists() else None
+
+
+def _ensure_key(c: Console, ask: Asker, env: Path, name: str, purpose: str, *,
+                required: bool) -> str | None:
+    """Offer to save a missing key in the project's .dwb/.env, or to replace the one saved
+    there; returns its name when a key was saved."""
+    current = os.environ.get(name)
+    if current:
+        saved_here = _saved_value(env, name) == current
+        where = env if saved_here else "your shell environment"
+        c.print(f"{name}: [green]found[/] in {where} ({mask_secret(current)})")
+        if not saved_here:  # a shell variable wins over the file: a new key there would not apply
+            c.print("  [dim]To use another key, change or unset it in your shell.[/]")
+            return None
+        if ask.yes or ask.confirm(f"Use this {name}?", default=True):
+            return None
+        prompt = f"Paste the new {name} to save it in {env} (Enter to keep the current one)"
+    else:
+        c.print(f"{name} ({purpose}) is not set.")
+        prompt = f"Paste {name} to save it in {env} (Enter to skip)"
+    value = ask.secret(prompt)
     if value:
-        save_global_key(name, value)
-        c.print(f"Saved to {GLOBAL_ENV} (readable only by you).")
-    elif required:
-        c.print(f"[yellow]Set {name} before `dwb index`: export it, or put it in {GLOBAL_ENV}.[/]")
+        hide_from_git(env.parent.parent)  # before the key exists on disk
+        save_key(name, value, env)
+        ui.keep(f"{name} in {env}")
+        ui.note_on_stop(_NOT_WRITTEN, key="init")
+        c.print(f"Saved to {env} (readable only by you, hidden from git).")
+        return name
+    if required and not current:
+        c.print(f"[yellow]Set {name} before `dwb index`: rerun dwb init, or put it in {env}.[/]")

@@ -8,6 +8,7 @@ lives in ``<repo>/.dwb/``, hidden from git through ``.git/info/exclude``. The re
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from dwb.log import get_logger
+from dwb.progress import OnProgress, report
 from dwb.prompts import GENERATE_PROMPT
 from dwb.repo import GIT_TIMEOUT_S
 from dwb.retrieval.openwiki_client import openwiki_version  # noqa: F401  (re-exported)
@@ -36,6 +38,7 @@ DWB_DIR = ".dwb"
 CONFIG_NAME = "config.yaml"
 STATE_NAME = "state.json"
 WIKI_RECORD = "wiki.json"
+OPENWIKI_LOG = "openwiki.log"
 GLOBAL_ENV = Path.home() / ".config" / "dwb" / ".env"
 
 CODE_EXTENSIONS = [
@@ -203,43 +206,58 @@ def suggest_exclude_domains(root: Path) -> list[str]:
 # --------------------------------------------------------------------------- keys
 
 
-# A repository's own .env is untrusted in user mode: a cloned repo could set
-# OPENAI_BASE_URL (or a proxy) and send the user's key elsewhere. Outside the research
-# harness folder only these names are read from ./.env.
+# The API keys a project stores in ``.dwb/.env``. Only these names are read from it: a
+# cloned repo could ship a ``.dwb/.env`` that sets OPENAI_BASE_URL (or a proxy) and send the
+# user's key elsewhere.
 LOCAL_ENV_KEYS = ("OPENAI_API_KEY", "TAVILY_API_KEY")
+ENV_NAME = ".env"
+
+
+def project_env(root: Path) -> Path:
+    """The project's key file: ``<repo>/.dwb/.env`` (hidden from git with ``.dwb/``)."""
+    return root / DWB_DIR / ENV_NAME
+
+
+def _project_root(start: Path) -> Path | None:
+    """The nearest folder at or above ``start`` holding ``.dwb/config.yaml`` (no git call)."""
+    for d in (start, *start.parents):
+        if (d / DWB_DIR / CONFIG_NAME).exists():
+            return d
+    return None
 
 
 def load_env(cwd: Path | None = None, global_env: Path | None = None) -> list[Path]:
-    """Load ./.env then ~/.config/dwb/.env. Variables already set (the shell) always win.
+    """Load the API keys for the current folder. Variables already set (the shell) always win.
 
-    ~/.config/dwb/.env is the user's own file and is loaded in full. ./.env is loaded in full
-    only in the research harness folder (it has configs/repos.yaml); anywhere else only
-    ``LOCAL_ENV_KEYS`` are taken from it."""
+    Research mode (the harness folder, with configs/repos.yaml): ./.env in full, then
+    ~/.config/dwb/.env. User mode: only ``<repo>/.dwb/.env``, and only ``LOCAL_ENV_KEYS``
+    from it; neither the repository's own .env nor ~/.config/dwb/.env is read."""
     try:
         from dotenv import dotenv_values, load_dotenv
     except ImportError:  # pragma: no cover
         return []
     cwd = cwd or Path.cwd()
-    global_env = global_env or GLOBAL_ENV
     loaded = []
-    local = cwd / ".env"
-    if local.exists():
-        if (cwd / "configs" / "repos.yaml").exists():
-            load_dotenv(local, override=False)
-        else:
-            for k, v in dotenv_values(local).items():
-                if k in LOCAL_ENV_KEYS and v and k not in os.environ:
-                    os.environ[k] = v
-                elif k not in LOCAL_ENV_KEYS:
-                    LOG.debug("Ignoring %s from %s (only %s are read from a project .env)", k,
-                              local, ", ".join(LOCAL_ENV_KEYS))
-        loaded.append(local)
-    if global_env.exists() and load_dotenv(global_env, override=False):
-        loaded.append(global_env)
+    if (cwd / "configs" / "repos.yaml").exists():
+        for env in (cwd / ".env", global_env or GLOBAL_ENV):
+            if env.exists() and load_dotenv(env, override=False):
+                loaded.append(env)
+        return loaded
+    root = _project_root(cwd)
+    env = project_env(root) if root else None
+    if env is None or not env.exists():
+        return loaded
+    for k, v in dotenv_values(env).items():
+        if k in LOCAL_ENV_KEYS and v and k not in os.environ:
+            os.environ[k] = v
+        elif k not in LOCAL_ENV_KEYS:
+            LOG.debug("Ignoring %s from %s (only %s are read from it)", k, env,
+                      ", ".join(LOCAL_ENV_KEYS))
+    loaded.append(env)
     return loaded
 
 
-def save_global_key(name: str, value: str, path: Path = GLOBAL_ENV) -> Path:
+def save_key(name: str, value: str, path: Path) -> Path:
     """Write the key with 0600 from the start (no window where it is world-readable)."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lines = [ln for ln in (path.read_text().splitlines() if path.exists() else [])
@@ -489,25 +507,60 @@ def openwiki_status(root: Path) -> dict[str, Any]:
     return info
 
 
-def _generate_wiki(root: Path, cfg: WikiCfg, update: bool) -> float:
+def _tail(path: Path, n: int = 20) -> list[str]:
+    """The last ``n`` lines of ``path``, read without loading the whole file."""
+    try:
+        with path.open(errors="replace") as fh:
+            return [line.rstrip("\r\n") for line in collections.deque(fh, maxlen=n)]
+    except OSError:
+        return []
+
+
+def _generate_wiki(root: Path, cfg: WikiCfg, update: bool, *, inherit_output: bool = False,
+                   on_progress: OnProgress | None = None) -> float:
+    """Run ``openwiki code`` in ``root``. Its stdout and stderr go to ``.dwb/openwiki.log``
+    (KTD7), so a spinner can show meanwhile; ``inherit_output`` streams them to the terminal
+    instead (``-v``). stdin is always inherited. A failure carries the log's last lines."""
     exe = shutil.which("openwiki")
     if not exe:
         raise WorkspaceError("openwiki is not installed (npm install -g openwiki@0.9.0)")
     env = {**os.environ, "OPENWIKI_TELEMETRY_DISABLED": "1",
            "OPENWIKI_PROVIDER": cfg.provider, "OPENWIKI_MODEL_ID": cfg.model}
     cmd = [exe, "code", "--update" if update else "--init"]
-    LOG.info("Running OpenWiki (%s, %s/%s); this makes model calls and can take ~15 min",
-             " ".join(cmd[1:]), cfg.provider, cfg.model)
+    log_path = None if inherit_output else root / DWB_DIR / OPENWIKI_LOG
+    LOG.debug("Running OpenWiki (%s, %s/%s); this makes model calls and can take ~15 min",
+              " ".join(cmd[1:]), cfg.provider, cfg.model)
+    report(on_progress, "wiki", "start", label=" ".join(cmd[1:]),
+           data={"log": log_path, "provider": cfg.provider, "model": cfg.model})
     t0 = time.perf_counter()
-    rc = subprocess.run(cmd, cwd=root, env=env).returncode
+    if log_path is None:
+        rc = subprocess.run(cmd, cwd=root, env=env).returncode
+    else:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("w") as fh:
+            rc = subprocess.run(cmd, cwd=root, env=env, stdout=fh,
+                                stderr=subprocess.STDOUT).returncode
     if rc != 0:
-        raise WorkspaceError(f"OpenWiki exited with status {rc}")
-    return time.perf_counter() - t0
+        msg = f"OpenWiki exited with status {rc}"
+        if log_path is not None:
+            tail = _tail(log_path)
+            msg += (":\n" + "\n".join(f"  {ln}" for ln in tail) if tail else "")
+            msg += f"\nFull output: {log_path}"
+        raise WorkspaceError(msg)
+    elapsed = time.perf_counter() - t0
+    report(on_progress, "wiki", "done", elapsed_s=elapsed, label=" ".join(cmd[1:]),
+           data={"log": log_path})
+    return elapsed
 
 
 def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool | None = None,
+                  on_progress: OnProgress | None = None, wiki_output: bool = False,
                   ) -> dict[str, Any]:
-    """Build every source the config lists, for the HEAD commit. Returns the new state."""
+    """Build every source the config lists, for the HEAD commit. Returns the new state.
+
+    ``on_progress`` receives the ``embed`` events of the code and PDF indexes and the ``wiki``
+    events of OpenWiki generation. ``wiki_output`` streams OpenWiki's own output to the
+    terminal instead of ``.dwb/openwiki.log``."""
     from dwb.repo import RepoReader
     from dwb.retrieval.chunking import ChunkingConfig
     from dwb.retrieval.code_index import build_code_index
@@ -521,7 +574,8 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
                     sha[:12])
     if embedding is None:
         if not os.environ.get("OPENAI_API_KEY"):
-            raise WorkspaceError("OPENAI_API_KEY is not set (run dwb init, or export it)")
+            raise WorkspaceError("OPENAI_API_KEY is not set (run dwb init to save it in "
+                                 ".dwb/.env, or export it)")
         from langchain_openai import OpenAIEmbeddings
 
         from dwb.manifest import MODEL_NET
@@ -539,7 +593,7 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
                          extensions=tuple(c.code.extensions),
                          exclude_prefixes=tuple(c.code.exclude))
     idx = build_code_index(ws.index_root, RepoReader.from_git(root, sha), c.name, embedding,
-                           c.models.embedding, cfg)
+                           c.models.embedding, cfg, on_progress=on_progress)
     state["code_index_id"] = idx.info.index_id
 
     # PDFs
@@ -558,7 +612,8 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
         corpus = PdfCorpus(corpus_id=f"{_slug(c.name)}-pdfs", documents=docs)
         (ws.dir / "pdf_corpus.yaml").write_text(yaml.safe_dump(corpus.model_dump(),
                                                                sort_keys=False))
-        pidx = build_pdf_index(ws.index_root, corpus, Path("/"), embedding, c.models.embedding)
+        pidx = build_pdf_index(ws.index_root, corpus, Path("/"), embedding, c.models.embedding,
+                               on_progress=on_progress)
         state["pdf_index_id"] = pidx.info.index_id
         state["pdf_corpus_id"] = corpus.corpus_id
     else:  # PDFs removed from the config: drop the old corpus so chat cannot pick it up
@@ -572,7 +627,8 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
         gen = c.wiki.generate if generate_wiki is None else generate_wiki
         elapsed = None
         if not current and gen:
-            elapsed = _generate_wiki(root, c.wiki, update=ow["exists"])
+            elapsed = _generate_wiki(root, c.wiki, update=ow["exists"],
+                                     inherit_output=wiki_output, on_progress=on_progress)
             ow = openwiki_status(root)
             current = ow["exists"] and ow["git_head"] == sha
         if current and wiki_dirty(root):
