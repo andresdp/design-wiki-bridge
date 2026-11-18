@@ -390,3 +390,67 @@ def test_check_needs_the_dev_file(tmp_path):
 
     with pytest.raises(WorkspaceError, match="not found"):
         check_sets(tmp_path / "nope.jsonl", tmp_path / "also-nope.jsonl")
+
+
+# ------------------------------------------------------------------------------- U4: CLI
+
+
+@pytest.fixture
+def cli_ws(tmp_path, monkeypatch):
+    import dwb.cli as cli
+    import dwb.curation as curation
+
+    make_ws(tmp_path)
+    with_corpus(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "WS", Workspace())
+    monkeypatch.setattr(curation, "git_reader", toy_reader)
+    return tmp_path
+
+
+def invoke(*args):
+    from typer.testing import CliRunner
+
+    import dwb.cli as cli
+
+    return CliRunner().invoke(cli.app, ["benchmark", *args])
+
+
+def test_cli_validate_exit_codes(cli_ws):
+    p = write_records(cli_ws, pub(), pub())
+    r = invoke("validate", str(p))
+    assert r.exit_code == 1 and "duplicate id" in r.output
+    p = write_records(cli_ws, pub(), cus())
+    r = invoke("validate", str(p))
+    assert r.exit_code == 0, r.output
+    assert '"public": 1' in r.output and '"custom": 1' in r.output
+
+
+def test_cli_draft_pin_mismatch_is_a_usage_error(cli_ws):
+    r = invoke("draft", str(selection(cli_ws, repo_sha="b" * 40)))
+    assert r.exit_code == 2 and SHA in r.output
+    r = invoke("draft", str(selection(cli_ws)))
+    assert r.exit_code == 0 and "toy.public.jsonl" in r.output
+
+
+def test_cli_freeze_prints_the_hash_and_hint(cli_ws):
+    p = write_records(cli_ws, pub(), cus())
+    r = invoke("freeze", str(p))
+    assert r.exit_code == 0, r.output
+    digest = Path(f"{p}.sha256").read_text().strip()
+    assert digest in r.output and "question_set.hash" in r.output
+
+
+def test_cli_check_names_the_overlap(cli_ws):
+    dev = write_dev(cli_ws, pub(id="toy-dev-pub-001", question="dev?"))
+    r = invoke("check", str(dev), str(write_records(cli_ws, pub())))
+    assert r.exit_code == 1 and "toy:1" in r.output
+    r = invoke("check", str(dev), str(cli_ws / "missing.jsonl"))
+    assert r.exit_code == 0 and "does not exist" in r.output
+
+
+@pytest.mark.parametrize("cmd", [[], ["draft", "--help"], ["validate", "--help"],
+                                 ["freeze", "--help"], ["check", "--help"]])
+def test_benchmark_help(cmd):
+    r = invoke(*cmd)
+    assert r.exit_code in (0, 2) and "Usage" in r.output
