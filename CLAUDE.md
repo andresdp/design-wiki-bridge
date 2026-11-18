@@ -22,6 +22,7 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 - Paired gate: `dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml`
 - Run one condition: `dwb experiment run configs/manifests/flask-A.yaml [--web-mode record|replay|live] [--overwrite]`
 - Evaluate: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name>` (`--no-judge` gives recall and cost only)
+- Curate question sets: `dwb benchmark draft <selection>`, `dwb benchmark validate <records>`, `dwb benchmark freeze <records>`, `dwb benchmark check <dev> <test>` (docs/usage.md, "Building the test set")
 
 `conda run` doesn't forward stdin, so heredoc scripts piped into it silently do nothing. Write the script to a file first.
 

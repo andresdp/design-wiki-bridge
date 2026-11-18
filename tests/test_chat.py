@@ -145,7 +145,8 @@ def test_cli_ask_and_status(ws, monkeypatch):
 @pytest.mark.parametrize("cmd", [[], ["ask", "--help"], ["chat", "--help"], ["index", "--help"],
                                  ["index", "code", "--help"], ["experiment", "run", "--help"],
                                  ["experiment", "evaluate", "--help"], ["wiki", "snapshot",
-                                                                        "--help"]])
+                                                                        "--help"],
+                                 ["benchmark", "--help"], ["benchmark", "freeze", "--help"]])
 def test_every_command_has_help(cmd):
     import dwb.cli as cli
 

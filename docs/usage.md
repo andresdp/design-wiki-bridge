@@ -14,6 +14,7 @@
 | Files written | `<repo>/.dwb/` (hidden from git) | `artifacts/` (indexes, wikis, Tavily store), `runs/`, `reports/` |
 | Ask | `dwb ask "…"`, `dwb chat` | `dwb ask "…" --repo flask`, `dwb chat --repo flask` |
 | Experiments | No | `dwb experiment check / run / evaluate` |
+| Question sets | No | `dwb benchmark draft / validate / freeze / check` |
 | API keys | `~/.config/dwb/.env`; a repository's `.env` gives only `OPENAI_API_KEY` and `TAVILY_API_KEY` | `design-wiki-bridge/.env`, read in full |
 
 **Which mode runs?** `dwb` decides from the current folder and the options:
@@ -38,6 +39,7 @@ A pinned checkout under `artifacts/checkouts/` is a normal git repository, so it
   - [Asking questions about a research repository](#asking-questions-about-a-research-repository)
   - [Building the sources](#building-the-sources)
   - [Running and evaluating experiments](#running-and-evaluating-experiments)
+  - [Building the test set](#building-the-test-set)
   - [Adding a research repository](#adding-a-research-repository)
   - [Research configuration](#research-configuration)
   - [Trying user mode on a pinned checkout](#trying-user-mode-on-a-pinned-checkout)
@@ -267,6 +269,22 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
   Pass the A run first. `evaluate` stops if the two saved manifests are not condition A then B or fail the `experiment check` rules; `--allow-unpaired` scores them anyway and records that in `evaluator_config.json`.
 - **Question records** live in `data/questions/{test,dev}/`; see `data/questions/README.md`.
 
+### Building the test set
+
+People select SWE-QA rows, annotate them, and write the custom questions; the `dwb benchmark` commands only move and check records:
+
+```sh
+dwb benchmark draft data/questions/selections/flask.yaml       # drafts/flask.public.jsonl + .excluded.jsonl
+dwb benchmark validate data/questions/test/flask.jsonl         # every problem in one pass; exit 1 if any
+dwb benchmark freeze data/questions/test/flask.jsonl           # validate + dev overlap check, then write .sha256
+dwb benchmark check data/questions/dev/flask.jsonl data/questions/test/flask.jsonl
+```
+
+- **Draft:** the selection must match the pinned SWE-QA revision, split, and repository SHA in `configs/repos.yaml`. A missing split file is downloaded at the pinned revision and its hash checked. Existing drafts are not overwritten unless you pass `--overwrite`. Annotate the drafts, then copy them into `data/questions/test/<repo>.jsonl`.
+- **Validate:** checks the schema, duplicate IDs, the pinned SHA, code spans at the pinned commit, and PDF spans against the repository's corpus (`pdf_corpus` in `configs/chat.yaml`, or `--pdf-corpus`). A missing checkout stops with the clone step.
+- **Freeze:** refuses when validation finds a problem or the set overlaps the repository's dev set. It prints the hash; copy it into the test manifests' `question_set.hash` yourself.
+- **Check:** fails on a shared ID, question text, or SWE-QA row, or when the test file changed after freezing. A missing test file counts as empty.
+- Exit codes: 1 means problems in the records; 2 means a setup or usage error.
 
 ### Adding a research repository
 

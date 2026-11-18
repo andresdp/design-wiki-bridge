@@ -49,6 +49,7 @@ flowchart TB
         workspace["workspace<br/>research mode: artifact discovery"]
         runner["runner<br/>build_components, batch runs"]
         evalcmd["eval.command<br/>evaluate saved runs"]
+        curation["curation<br/>draft, validate, freeze question sets"]
     end
     subgraph L3["3 · Services"]
         direction LR
@@ -89,7 +90,7 @@ flowchart TB
 | Layer | Modules | Responsibility | External libraries |
 |---|---|---|---|
 | 1 Interface | `cli`, `chat`, `init_wizard` | Parse commands and options, run the REPL, and render answers and logs. No retrieval logic | typer, rich, prompt_toolkit |
-| 2 Application | `project`, `workspace`, `runner`, `eval.command` | Choose the mode, find or build the artifacts, wire concrete components into the graph, and run or score a question set | PyYAML |
+| 2 Application | `project`, `workspace`, `runner`, `eval.command`, `curation` | Choose the mode, find or build the artifacts, wire concrete components into the graph, run or score a question set, and curate question sets (draft, validate, freeze, check) | PyYAML, PyMuPDF (PDF page counts) |
 | 3 Query pipeline | `graph`, `merge`, `rerank`, `budget`, `generate` | Answer one question: retrieve, merge, rerank, fit the token budget, generate cited claims. The pipeline depends on retriever interfaces; `runner` injects the concrete adapters | LangGraph, LangChain (`LLMListwiseRerank`, chat models) |
 | 3 Evaluation | `eval.*` (except `command`), `evidence_text` | Score saved traces: span recall, claim correctness, citation support and coverage, cost tables | DeepEval (optional diagnostics), LangChain chat model (judge) |
 | 4 Adapters | `retrieval.*`, `web.tavily_store` | Build and query the indexes, talk to OpenWiki over MCP and resolve wiki references to code spans, and record or replay Tavily | Chroma, OpenAI embeddings, langchain-mcp-adapters, tavily-python |
@@ -111,6 +112,8 @@ flowchart TB
     cli --> init["init_wizard.py"] --> project["project.py<br/>user mode: config, index_project"]
     cli --> runner["runner.py<br/>batch runner, build_components"]
     cli --> evalc["eval/command.py"]
+    cli --> curation["curation.py<br/>dwb benchmark"]
+    curation --> bench
     chat --> workspace["workspace.py<br/>artifact discovery"]
     project --> workspace
     chat --> runner

@@ -37,7 +37,11 @@ exp_app = typer.Typer(no_args_is_help=True,
                       help="Run and evaluate the paired A/B experiments (research workflow).")
 app.add_typer(index_app, name="index")
 app.add_typer(wiki_app, name="wiki")
+bench_app = typer.Typer(no_args_is_help=True,
+                        help="Curate question sets: draft, validate, freeze, and check them "
+                             "(research workflow).")
 app.add_typer(exp_app, name="experiment")
+app.add_typer(bench_app, name="benchmark")
 
 WS = Workspace()  # research mode (design-wiki-bridge: configs/repos.yaml)
 
@@ -373,6 +377,121 @@ def wiki_snapshot(
     LOG.info("Snapshot [bold]%s[/]: %d pages, %d claims", snap.snapshot_id, snap.pages,
              snap.claims)
     print(snap.model_dump_json(indent=2))
+
+
+# -------------------------------------------------------------------------- benchmark
+
+RecordsArg = Annotated[Path, typer.Argument(help="Question records (JSONL), e.g. "
+                                                 "data/questions/test/flask.jsonl",
+                                            exists=True, dir_okay=False)]
+PdfCorpusOpt = Annotated[Path | None, typer.Option(
+    help="PDF corpus to check PDF spans against. [dim]Default: the repository's pdf_corpus in "
+         "configs/chat.yaml[/]")]
+
+
+def _problems(title: str, problems: list[str]) -> None:
+    t = Table(title=title, show_header=False)
+    t.add_column("problem")
+    for p in problems:
+        t.add_row(p)
+    err.print(t)
+
+
+@bench_app.command("draft")
+def benchmark_draft(
+    selection: Annotated[Path, typer.Argument(help="Selection file, e.g. "
+                                                   "data/questions/selections/flask.yaml",
+                                              exists=True, dir_okay=False)],
+    overwrite: Annotated[bool, typer.Option(help="Replace existing drafts files.")] = False,
+) -> None:
+    """Draft public question records from the SWE-QA rows a selection file includes.
+
+    Writes data/questions/drafts/<repo>.public.jsonl and <repo>.excluded.jsonl. Annotate the
+    drafts and copy them into data/questions/test/<repo>.jsonl.
+    """
+    from dwb import curation
+
+    try:
+        res = curation.draft(WS, selection, overwrite=overwrite)
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
+    print(json.dumps({"records": str(res.records_path), "n_records": res.n_records,
+                      "exclusions": str(res.exclusions_path),
+                      "n_excluded": res.n_excluded}, indent=2))
+
+
+@bench_app.command("validate")
+def benchmark_validate(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> None:
+    """Check question records and report every problem; exits 1 when any is found.
+
+    Checks the schema, duplicate IDs, the pinned SHA, code spans at the pinned commit, and PDF
+    spans against the repository's PDF corpus.
+    """
+    from dwb import curation
+
+    try:
+        rep = curation.validate(WS, records, reader_for=curation.git_reader,
+                                pdf_corpus=pdf_corpus)
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
+    if rep.problems:
+        _problems(f"{len(rep.problems)} problems in {records}", rep.problems)
+    print(json.dumps({"path": str(records), "ok": rep.ok, "counts": rep.counts,
+                      "problems": rep.problems}, indent=2))
+    if not rep.ok:
+        raise typer.Exit(1)
+
+
+@bench_app.command("freeze")
+def benchmark_freeze(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> None:
+    """Freeze a validated test set by its hash.
+
+    Validates the records and checks them against the repository's dev set, then writes
+    <records>.sha256. Copy the printed hash into the manifests' question_set.hash.
+    """
+    from dwb import curation
+
+    try:
+        res = curation.freeze_set(WS, records, reader_for=curation.git_reader,
+                                  pdf_corpus=pdf_corpus)
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
+    if not res.ok:
+        _problems(f"Not frozen: {len(res.report.problems)} problems in {records}",
+                  res.report.problems)
+        raise typer.Exit(1)
+    err.print(f"[green]Frozen.[/] Set question_set.hash: {res.digest} in the manifests that "
+              f"use {records}.")
+    print(json.dumps({"path": str(records), "hash": res.digest,
+                      "counts": res.report.counts}, indent=2))
+
+
+@bench_app.command("check")
+def benchmark_check(
+    dev: Annotated[Path, typer.Argument(help="Dev question records, e.g. "
+                                             "data/questions/dev/flask.jsonl")],
+    test: Annotated[Path, typer.Argument(help="Test question records, e.g. "
+                                              "data/questions/test/flask.jsonl")],
+) -> None:
+    """Check that the dev and test sets are disjoint and a frozen test set is unchanged.
+
+    Fails on a shared ID, question text, or SWE-QA row, or when the test file no longer
+    matches its .sha256. A missing test file counts as empty.
+    """
+    from dwb import curation
+
+    try:
+        res = curation.check_sets(dev, test)
+    except WorkspaceError as e:
+        raise _fail(str(e)) from None
+    for w in res.warnings:
+        LOG.warning(w)
+    if res.problems:
+        _problems(f"{dev} vs {test}", res.problems)
+    print(json.dumps({"dev": str(dev), "test": str(test), "ok": res.ok,
+                      "problems": res.problems, "warnings": res.warnings}, indent=2))
+    if not res.ok:
+        raise typer.Exit(1)
 
 
 # ------------------------------------------------------------------------- experiment
