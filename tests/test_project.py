@@ -674,6 +674,63 @@ def test_init_echoes_a_masked_key_and_never_the_key(repo, tty, monkeypatch):
     assert "sk-*****xyz" in r.output and "SECRETVALUE" not in r.output
 
 
+def _saved_key_setup(repo, monkeypatch, value: str | None):
+    """A global .env (in tmp) holding ``value`` and the same value in the environment."""
+    import dwb.init_wizard as wiz
+
+    env = repo / "global.env"
+    if value is not None:
+        env.write_text(f"OPENAI_API_KEY={value}\n")
+    monkeypatch.setattr(wiz, "GLOBAL_ENV", env)
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
+    saved = {}
+    monkeypatch.setattr(wiz, "save_global_key", lambda name, v: saved.update({name: v}))
+    return wiz, saved
+
+
+@pytest.mark.parametrize("answer", ["", "y"])
+def test_init_shows_where_a_saved_key_is_and_keeps_it(repo, tty, monkeypatch, answer):
+    old = "sk-proj-OLDSECRET0000abc"
+    monkeypatch.setenv("OPENAI_API_KEY", old)
+    wiz, saved = _saved_key_setup(repo, monkeypatch, old)
+    answers = "\n".join(["myproj", "", "", "", "n", "", answer]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    assert f"found in {wiz.GLOBAL_ENV} (sk-*****abc)" in r.output
+    assert "Use this OPENAI_API_KEY?" in r.output and "Paste" not in r.output
+    assert saved == {} and "OLDSECRET" not in r.output
+
+
+def test_init_replaces_a_saved_key_when_asked(repo, tty, monkeypatch):
+    old, new = "sk-proj-OLDSECRET0000abc", "sk-proj-NEWSECRET1111xyz"
+    monkeypatch.setenv("OPENAI_API_KEY", old)
+    _, saved = _saved_key_setup(repo, monkeypatch, old)
+    answers = "\n".join(["myproj", "", "", "", "n", "", "n", new]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    assert saved == {"OPENAI_API_KEY": new}
+    assert "sk-*****xyz" in r.output and "SECRET" not in r.output
+
+
+def test_init_does_not_offer_to_replace_a_shell_key(repo, tty, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-SHELLSECRET99def")
+    _, saved = _saved_key_setup(repo, monkeypatch, None)  # not in the global .env
+    answers = "\n".join(["myproj", "", "", "", "n", ""]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    assert "found in your environment" in r.output and "(sk-*****def)" in r.output
+    assert "Use this OPENAI_API_KEY?" not in r.output and saved == {}
+
+
+def test_init_yes_keeps_a_saved_key_without_asking(repo, monkeypatch):
+    old = "sk-proj-OLDSECRET0000abc"
+    monkeypatch.setenv("OPENAI_API_KEY", old)
+    _, saved = _saved_key_setup(repo, monkeypatch, old)
+    r = CliRunner().invoke(cli(), ["init", "--yes"])
+    assert r.exit_code == 0, r.output
+    assert "Use this" not in r.output and saved == {}
+
+
 # ------------------------------------------------------------------------------ progress
 
 

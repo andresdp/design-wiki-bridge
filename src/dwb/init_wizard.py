@@ -211,19 +211,39 @@ def run_init(start: Path, console: Console | None = None, *, yes: bool = False,
     return path
 
 
+def _saved_value(name: str) -> str | None:
+    """The value of ``name`` in the global .env, or None (missing file or key)."""
+    try:
+        from dotenv import dotenv_values
+    except ImportError:  # pragma: no cover
+        return None
+    return dotenv_values(GLOBAL_ENV).get(name) if GLOBAL_ENV.exists() else None
+
+
 def _ensure_key(c: Console, ask: Asker, name: str, purpose: str, *,
                 required: bool) -> str | None:
-    """Offer to save a missing key in the global .env; returns its name when saved."""
-    if os.environ.get(name):
-        c.print(f"{name}: [green]found[/]")
-        return None
-    c.print(f"{name} ({purpose}) is not set.")
-    value = ask.secret(f"Paste {name} to save it in {GLOBAL_ENV} (Enter to skip)")
+    """Offer to save a missing key in the global .env, or to replace the one saved there;
+    returns its name when a key was saved."""
+    current = os.environ.get(name)
+    if current:
+        saved_here = _saved_value(name) == current
+        where = GLOBAL_ENV if saved_here else "your environment (shell or a .env file)"
+        c.print(f"{name}: [green]found[/] in {where} ({mask_secret(current)})")
+        if not saved_here:  # a shell variable wins over the file: a new key there would not apply
+            c.print("  [dim]To use another key, change it where it is set.[/]")
+            return None
+        if ask.yes or ask.confirm(f"Use this {name}?", default=True):
+            return None
+        prompt = f"Paste the new {name} to save it in {GLOBAL_ENV} (Enter to keep the current one)"
+    else:
+        c.print(f"{name} ({purpose}) is not set.")
+        prompt = f"Paste {name} to save it in {GLOBAL_ENV} (Enter to skip)"
+    value = ask.secret(prompt)
     if value:
         save_global_key(name, value)
         ui.keep(f"{name} in {GLOBAL_ENV}")
         ui.note_on_stop(_NOT_WRITTEN, key="init")
         c.print(f"Saved to {GLOBAL_ENV} (readable only by you).")
         return name
-    if required:
+    if required and not current:
         c.print(f"[yellow]Set {name} before `dwb index`: export it, or put it in {GLOBAL_ENV}.[/]")
