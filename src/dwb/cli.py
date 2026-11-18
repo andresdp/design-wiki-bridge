@@ -1,7 +1,9 @@
 """``dwb``: ask questions about a repository with cited answers, and run the experiments.
 
-Run every command from the design-wiki-bridge folder: configuration (``configs/``), artifacts
-(``artifacts/``) and API keys (``.env``) are resolved relative to it. See docs/usage.md.
+Two modes. User mode: inside any git repository, ``dwb init`` writes ``.dwb/config.yaml`` and
+the other commands use it. Research mode: run from the design-wiki-bridge folder, where
+configuration (``configs/``), artifacts (``artifacts/``) and API keys (``.env``) are resolved
+relative to the current folder, and pick a repository with ``--repo``. See docs/usage.md.
 """
 
 from __future__ import annotations
@@ -67,25 +69,52 @@ class _App(TyperGroup):
             raise typer.Exit(1) from None
 
 
+def _examples(*lines: str) -> str:
+    """Help epilog: one example per line (a blank line between them keeps rich from joining)."""
+    return "[bold]Examples[/]\n\n" + "\n\n".join(f"  [dim]$[/] {ln}" for ln in lines)
+
+
+ASK, USER, RESEARCH = "Ask", "User mode", "Research mode"
+
 app = typer.Typer(
     name="dwb", cls=_App, no_args_is_help=True, rich_markup_mode="rich", add_completion=False,
     help="Ask questions about a software repository and get answers that cite the original "
          "code, PDFs and web pages. Also runs the A/B retrieval experiments.\n\n"
-         "Run from the design-wiki-bridge folder. Guide: docs/usage.md",
+         "[bold]User mode[/]: inside any git repository, run [bold]dwb init[/] once, then "
+         "[bold]dwb index[/] and [bold]dwb ask[/] / [bold]dwb chat[/].\n\n"
+         "[bold]Research mode[/]: run from the design-wiki-bridge folder and name a repository "
+         "with [bold]--repo[/]; also the experiment and benchmark commands.\n\n"
+         "Guide: docs/usage.md",
+    epilog=_examples('dwb init', 'dwb ask "How does routing work?"'),
 )
-index_app = typer.Typer(invoke_without_command=True,
-                        help="Build the search indexes used to answer. Inside a project: "
-                             "[bold]dwb index[/] builds everything .dwb/config.yaml lists.")
-wiki_app = typer.Typer(no_args_is_help=True, help="Register OpenWiki snapshots.")
-exp_app = typer.Typer(no_args_is_help=True,
-                      help="Run and evaluate the paired A/B experiments (research workflow).")
-app.add_typer(index_app, name="index")
-app.add_typer(wiki_app, name="wiki")
-bench_app = typer.Typer(no_args_is_help=True,
-                        help="Curate question sets: draft, validate, freeze, and check them "
-                             "(research workflow).")
-app.add_typer(exp_app, name="experiment")
-app.add_typer(bench_app, name="benchmark")
+index_app = typer.Typer(
+    invoke_without_command=True,
+    help="Build the search indexes used to answer. Inside a project: [bold]dwb index[/] "
+         "builds everything .dwb/config.yaml lists. Research mode: [bold]dwb index code "
+         "<repo>[/] and [bold]dwb index pdf <corpus>[/]. Ctrl-C stops; finished indexes "
+         "are kept.",
+    epilog=_examples("dwb index", "dwb index code flask"))
+wiki_app = typer.Typer(
+    no_args_is_help=True, help="Register OpenWiki snapshots (research mode).",
+    epilog=_examples("dwb wiki snapshot flask --provider openai --model gpt-5.6-luna "
+                     "--effort high --elapsed-s 600"))
+exp_app = typer.Typer(
+    no_args_is_help=True,
+    help="Run and evaluate the paired A/B experiments (research mode, from the "
+         "design-wiki-bridge folder).",
+    epilog=_examples("dwb experiment check configs/manifests/flask-A.yaml "
+                     "configs/manifests/flask-B.yaml",
+                     "dwb experiment run configs/manifests/flask-A.yaml"))
+bench_app = typer.Typer(
+    no_args_is_help=True,
+    help="Curate question sets: draft, validate, freeze, and check them (research mode).",
+    epilog=_examples("dwb benchmark draft data/questions/selections/flask.yaml",
+                     "dwb benchmark check data/questions/dev/flask.jsonl "
+                     "data/questions/test/flask.jsonl"))
+app.add_typer(index_app, name="index", rich_help_panel=USER)
+app.add_typer(wiki_app, name="wiki", rich_help_panel=RESEARCH)
+app.add_typer(exp_app, name="experiment", rich_help_panel=RESEARCH)
+app.add_typer(bench_app, name="benchmark", rich_help_panel=RESEARCH)
 
 WS = Workspace()  # research mode (design-wiki-bridge: configs/repos.yaml)
 
@@ -147,7 +176,7 @@ def _main(
         LOG.debug("Loaded environment from %s", p)
 
 
-@app.command()
+@app.command(rich_help_panel=USER, epilog=_examples("dwb init", "dwb init --yes"))
 def init(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Accept every default, no prompts.")]
     = False,
@@ -215,7 +244,9 @@ def _settings(ws: Workspace, repo: str, wiki: bool | None, pdf: bool | None, web
     return ChatSettings(repo=repo, sources=sources, generator=model)
 
 
-@app.command()
+@app.command(rich_help_panel=ASK, epilog=_examples(
+    'dwb ask "How does routing work?"   [dim](user mode)[/]',
+    'dwb ask "How does Flask answer OPTIONS?" --repo flask   [dim](research mode)[/]'))
 def ask(
     question: Annotated[str | None, typer.Argument(
         help="The question, in quotes. Asked for at a terminal when omitted.")] = None,
@@ -227,8 +258,8 @@ def ask(
 ) -> None:
     """Answer one question about the repository, citing the code, PDF pages and web pages used.
 
-    [dim]Examples:[/] dwb ask "How are requests routed?"   (inside a project set up with dwb init)
-              dwb ask "How does Flask answer OPTIONS?" --repo flask   (research mode)
+    Inside a project set up with [bold]dwb init[/], no [bold]--repo[/] is needed; in research
+    mode (design-wiki-bridge folder) name one with [bold]--repo[/].
     """
     from dwb.chat import ChatSession, print_answer
 
@@ -259,7 +290,7 @@ def ask(
         raise typer.Exit(1)
 
 
-@app.command()
+@app.command(rich_help_panel=ASK, epilog=_examples("dwb chat", "dwb chat --repo flask --wiki"))
 def chat(repo: RepoOpt = None, wiki: WikiOpt = None, pdf: PdfOpt = None, web: WebOpt = None,
          model: ModelOpt = None) -> None:
     """Interactive session about the repository; switch sources with /wiki, /pdf, /web.
@@ -305,10 +336,17 @@ def _research_rows(r: dict) -> list[tuple[str, str, str]]:
     return rows
 
 
-@app.command()
+@app.command(rich_help_panel=USER, epilog=_examples("dwb status",
+                                                    "dwb status --embedding-model "
+                                                    "text-embedding-3-small"))
 def status(embedding_model: Annotated[str | None, typer.Option(
         help="Research mode: embedding model the indexes must match.")] = None) -> None:
-    """Show which sources are ready: for this project, or for every research repository."""
+    """Show which sources are ready: for this project, or for every research repository.
+
+    Inside a project it reports that project; from the design-wiki-bridge folder (research
+    mode) it reports every repository, and [bold]--embedding-model[/] picks the model the
+    indexes must match.
+    """
     from dwb.project import ProjectWorkspace, find_project
 
     root = find_project()
@@ -355,7 +393,7 @@ def status(embedding_model: Annotated[str | None, typer.Option(
 # ------------------------------------------------------------------------------ index
 
 
-@index_app.callback()
+@index_app.callback(epilog=_examples("dwb index", "dwb index --no-generate-wiki"))
 def index_all(
     ctx: typer.Context,
     generate_wiki: Annotated[bool | None, typer.Option(
@@ -364,7 +402,10 @@ def index_all(
              "[dim]Default: wiki.generate in .dwb/config.yaml[/]")] = None,
     fake: Annotated[bool, typer.Option(hidden=True)] = False,
 ) -> None:
-    """Index everything the project's .dwb/config.yaml lists, for the HEAD commit."""
+    """Index everything the project's .dwb/config.yaml lists, for the HEAD commit.
+
+    Ctrl-C stops it; indexes already finished are kept.
+    """
     if ctx.invoked_subcommand is not None:
         return
     from dwb.project import ProjectWorkspace, find_project, head_sha, index_project
@@ -399,7 +440,8 @@ def _index_summary(info) -> None:
            ("items", info.n_items), ("embedding", info.embedding_model)])
 
 
-@index_app.command("code")
+@index_app.command("code", rich_help_panel=RESEARCH, epilog=_examples(
+    "dwb index code flask", "dwb index code flask --embedding-model text-embedding-3-small"))
 def index_code(
     repo: RepoArg,
     embedding_model: Annotated[str | None, typer.Option(
@@ -411,7 +453,10 @@ def index_code(
     root: Annotated[Path, typer.Option(hidden=True)] = Path("artifacts/indexes"),
     fake: Annotated[bool, typer.Option(hidden=True)] = False,
 ) -> None:
-    """Chunk REPO's code at its pinned commit and embed it (needed for vector search)."""
+    """Chunk REPO's code at its pinned commit and embed it (needed for vector search).
+
+    Ctrl-C stops it; indexes already finished are kept.
+    """
     from dwb.repo import RepoReader
     from dwb.retrieval.chunking import ChunkingConfig
     from dwb.retrieval.code_index import build_code_index
@@ -439,7 +484,8 @@ def index_code(
     ui.emit(idx.info, human=show)
 
 
-@index_app.command("pdf")
+@index_app.command("pdf", rich_help_panel=RESEARCH,
+                   epilog=_examples("dwb index pdf configs/pdfs/flask.yaml"))
 def index_pdf(
     corpus: Annotated[Path, typer.Argument(help="PDF corpus file, e.g. configs/pdfs/flask.yaml",
                                            exists=True, dir_okay=False)],
@@ -450,7 +496,10 @@ def index_pdf(
     root: Annotated[Path, typer.Option(hidden=True)] = Path("artifacts/indexes"),
     fake: Annotated[bool, typer.Option(hidden=True)] = False,
 ) -> None:
-    """Read the PDFs listed in CORPUS page by page and embed them."""
+    """Read the PDFs listed in CORPUS page by page and embed them.
+
+    Ctrl-C stops it; indexes already finished are kept.
+    """
     from dwb.retrieval.pdf_index import PdfCorpus, build_pdf_index
 
     model = embedding_model or _default_embedding()
@@ -476,7 +525,9 @@ def index_pdf(
 # ------------------------------------------------------------------------------- wiki
 
 
-@wiki_app.command("snapshot")
+@wiki_app.command("snapshot", epilog=_examples(
+    "dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort high "
+    "--elapsed-s 600"))
 def wiki_snapshot(
     repo: RepoArg,
     provider: Annotated[str, typer.Option(help="Provider OpenWiki used, e.g. openai.")],
@@ -539,7 +590,8 @@ def _counts(counts: dict) -> None:
     ui.kv([(k, v) for k, v in counts.items()])
 
 
-@bench_app.command("draft")
+@bench_app.command("draft", epilog=_examples(
+    "dwb benchmark draft data/questions/selections/flask.yaml"))
 def benchmark_draft(
     selection: Annotated[Path, typer.Argument(help="Selection file, e.g. "
                                                    "data/questions/selections/flask.yaml",
@@ -574,7 +626,8 @@ def benchmark_draft(
              "exclusions": str(res.exclusions_path), "n_excluded": res.n_excluded}, human=show)
 
 
-@bench_app.command("validate")
+@bench_app.command("validate", epilog=_examples(
+    "dwb benchmark validate data/questions/test/flask.jsonl"))
 def benchmark_validate(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> None:
     """Check question records and report every problem; exits 1 when any is found.
 
@@ -602,7 +655,8 @@ def benchmark_validate(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> 
         raise typer.Exit(1)
 
 
-@bench_app.command("freeze")
+@bench_app.command("freeze", epilog=_examples(
+    "dwb benchmark freeze data/questions/test/flask.jsonl"))
 def benchmark_freeze(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> None:
     """Freeze a validated test set by its hash.
 
@@ -630,7 +684,8 @@ def benchmark_freeze(records: RecordsArg, pdf_corpus: PdfCorpusOpt = None) -> No
                "use it.")
 
 
-@bench_app.command("check")
+@bench_app.command("check", epilog=_examples(
+    "dwb benchmark check data/questions/dev/flask.jsonl data/questions/test/flask.jsonl"))
 def benchmark_check(
     dev: Annotated[Path, typer.Argument(help="Dev question records, e.g. "
                                              "data/questions/dev/flask.jsonl")],
@@ -667,7 +722,9 @@ def benchmark_check(
 # ------------------------------------------------------------------------- experiment
 
 
-@exp_app.command("run")
+@exp_app.command("run", epilog=_examples(
+    "dwb experiment run configs/manifests/flask-A.yaml",
+    "dwb experiment run configs/manifests/flask-B.yaml --web-mode replay --overwrite"))
 def experiment_run(
     manifest: Annotated[Path, typer.Argument(help="Run manifest, e.g. "
                                                   "configs/manifests/flask-A.yaml",
@@ -678,7 +735,10 @@ def experiment_run(
     overwrite: Annotated[bool, typer.Option(help="Replace an existing run directory.")] = False,
     runs_dir: Annotated[Path, typer.Option(help="Where run directories go.")] = Path("runs"),
 ) -> None:
-    """Run one condition of the experiment over its question set and save the traces."""
+    """Run one condition of the experiment over its question set and save the traces.
+
+    Ctrl-C stops it; traces already written are kept.
+    """
     from dwb.manifest import load_manifest
     from dwb.runner import build_components, load_question_set, run_manifest
 
@@ -722,7 +782,8 @@ def experiment_run(
         raise typer.Exit(1)
 
 
-@exp_app.command("check")
+@exp_app.command("check", epilog=_examples(
+    "dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml"))
 def experiment_check(
     a: Annotated[Path, typer.Argument(help="Condition A manifest.", exists=True)],
     b: Annotated[Path, typer.Argument(help="Condition B manifest.", exists=True)],
@@ -757,7 +818,10 @@ def experiment_check(
         raise typer.Exit(1)
 
 
-@exp_app.command("evaluate")
+@exp_app.command("evaluate", epilog=_examples(
+    "dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/flask-dev",
+    "dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 "
+    "--out reports/flask-dev --no-judge"))
 def experiment_evaluate(
     run_a: Annotated[Path, typer.Argument(help="Run directory of condition A.", exists=True)],
     run_b: Annotated[Path, typer.Argument(help="Run directory of condition B.", exists=True)],
@@ -770,7 +834,10 @@ def experiment_evaluate(
         help="Score runs that fail the A/B pairing check anyway (recorded in the report).")]
         = False,
 ) -> None:
-    """Score two saved runs offline and write the paired report tables."""
+    """Score two saved runs offline and write the paired report tables.
+
+    Ctrl-C stops it; the report is written only at the end, so nothing is kept.
+    """
     from dwb.eval.command import evaluate_runs
 
     _open(f"{run_a.name} vs {run_b.name}", "research mode")
