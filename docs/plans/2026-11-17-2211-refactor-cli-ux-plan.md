@@ -6,7 +6,7 @@ date: 2026-11-17
 
 # CLI UX Consistency - Plan
 
-**Status: proposed.** A plan for review; nothing is implemented. The open decisions at the end need the user's call before any unit starts.
+**Status: approved, not started.** The user accepted the plan and the four recommended decisions (see Resolved decisions). Implementation waits for the benchmark PR to merge, since both edit `src/dwb/cli.py`.
 
 ## Summary
 
@@ -28,26 +28,28 @@ Using `dwb` as a user surfaced that the current output works but does not feel l
 - **CLIG** (clig.dev): stdout for data, stderr for messages; detect a TTY and switch to machine output when piped; honor `NO_COLOR`; show progress for anything slow and print something within ~100 ms; no animations without a TTY; say what changed and suggest the next command; rewrite expected errors as what happened + how to fix, put debug detail behind a flag; prompt only with a TTY and offer `--no-input`; `--version`; examples first in help.
 - **Heroku CLI style guide**: output commands print data, action commands show progress on stderr; `--json` for machine output; yellow and red only for warnings and errors; grep-parseable human output.
 - **Rich / Typer** (the stack already in use): `Progress` with spinner, bar, and elapsed columns, `transient` bars, `console.status` spinners; Typer `rich_help_panel` to group commands, `epilog` for examples, command suggestions for typos.
+- **Atlassian, "10 design principles for delightful CLIs"**: a reaction for every action; progress broken into meaningful steps; human error messages with a fix; text kept short with minimal icons; suggest the next step; prompt for missing input with sensible defaults; clear exit paths (remind that Ctrl-C stops); flags over positional arguments.
+- **sberan/cli-ux** (a crowdsourced link list): mostly pointers to the sources above; its one rule relevant here, avoid `noun:verb` command names, already holds (`dwb` uses `group command`, e.g. `dwb index code`).
 - **OpenWiki CLI** (the reference the user named): a framed, product-like terminal app (Ink); a guided onboarding (`--init`); masked secret prompts; selection glyphs (`○`/`●`); one-shot `-p/--print` mode for scripts; framed text on stderr so piped stdout stays clean; usage-style error messages; a once-only telemetry notice. `dwb` should borrow its feel (framed, calm, guided), not its full-screen TUI: `dwb` is a command suite, and CLIG excludes full-screen programs from its guidance.
 
 ## Requirements
 
 **Visual language**
 
-- R1. One style module defines the symbols, colors, and building blocks every command uses: `✓` done, `✗` failed, `!` warning, `•` list item, `→` next step; green success, yellow warning, red error, cyan accent, dim secondary. ASCII fallbacks apply when the terminal cannot encode the symbols.
+- R1. One style module defines the symbols, colors, and building blocks every command uses: `✓` done, `✗` failed, `!` warning, `•` list item, `→` next step; green success, yellow warning, red error, cyan accent, dim secondary. Symbols are Unicode, with ASCII fallbacks (`ok`, `x`, `!`, `-`, `->`) when the terminal cannot encode them. Messages stay short (one line where possible) and use symbols sparingly: only those five, only where they carry meaning.
 - R2. Every command that works on a repository opens with the same one-line context header: repository, mode, and commit (for example `requests · user mode · b25c87d7cb8d`).
 - R3. Every action command ends with a one-line outcome and, where useful, the next command (`✓ Indexed requests at b25c87d7 → next: dwb chat`).
 
 **Output contract**
 
 - R4. Results go to stdout and progress, messages, and errors to stderr, in both modes.
-- R5. At a terminal, every command prints human output. When stdout is piped, or with a global `--json`, data commands print JSON instead. The JSON shapes of today's research commands are kept, so existing scripts keep working when they pipe.
+- R5. At a terminal, every command prints human output. When stdout is piped (redirected to another program or a file, e.g. `dwb index code flask | jq`, or run from a script), the data commands print JSON instead: `status`, `index code`, `index pdf`, `wiki snapshot`, `experiment check/run/evaluate`, and `benchmark`. Their JSON shapes stay as today, so existing scripts keep working. `ask` and `chat` stay human when piped; `ask --json` gives the trace. A global `--json` forces JSON for any data command at a terminal.
 - R6. Colors and animations are off when the stream is not a terminal, when `NO_COLOR` is set, or with `--no-color`.
 
 **Progress**
 
 - R7. Embedding (code and PDF indexes) shows a progress bar with counts and elapsed time; OpenWiki generation and network waits show a spinner with elapsed time; experiment runs show one bar over questions with running failed/degraded counts and a one-line result per question.
-- R8. Normal output has no timestamps or level labels; `-v` restores them (and per-stage timings); `-q` keeps warnings and errors only.
+- R8. Normal output has no timestamps or level labels; `-v`/`--verbose` restores them (and per-stage timings), as today; `-q` keeps warnings and errors only.
 
 **Errors**
 
@@ -57,18 +59,24 @@ Using `dwb` as a user surfaced that the current output works but does not feel l
 **Help and discoverability**
 
 - R11. Help groups commands by mode: "Ask" (`ask`, `chat`), "User mode" (`init`, `index`, `status`), "Research mode" (`index code|pdf`, `wiki`, `experiment`, `benchmark`). Top-level help states both modes correctly and links `docs/usage.md`.
-- R12. Each command's help ends with one or two examples; `dwb --version` prints the version.
+- R12. Each command's help ends with one or two examples; `dwb --version` prints the version (long form only, since `-v` stays verbose).
 
 **Interactive**
 
-- R13. `chat` opens with a framed header (repository, mode, commit, active sources, `/help`), shows a spinner with elapsed time while answering, and uses the same answer layout as `ask`.
-- R14. `init` shows its sections as numbered steps (`Step 2 of 6: PDF documents`) and ends with a summary of what it wrote plus the next command. Without a terminal it never prompts: it fails with a message naming `--yes`.
+- R13. `chat` opens with a framed header (a `dwb <version>` name line, then repository, mode, commit, active sources, and `/help · /quit or Ctrl-D to leave`), shows a spinner with elapsed time while answering, and uses the same answer layout as `ask`.
+- R14. `init` opens with the same `dwb <version>` name line, shows its sections as numbered steps (`Step 2 of 6: PDF documents`), and ends with a summary of what it wrote plus the next command. Without a terminal it never prompts: it fails with a message naming `--yes`.
+
+**Exit paths and missing input**
+
+- R15. Long-running commands (`index`, `experiment run`, wiki generation) state that Ctrl-C stops them. Ctrl-C prints `! Stopped` with what was kept (finished indexes, traces already written), exits 130, and shows no traceback.
+- R16. Missing input at a terminal offers the choices instead of a bare error: `dwb ask` with no question prompts for it; `--repo` with an unknown name lists the configured repositories; a command run outside both a project and the research folder names both ways to start (`dwb init`, or `--repo` from design-wiki-bridge). Without a terminal these stay errors (exit 2).
 
 ### Scope boundaries
 
 - No change to retrieval, reranking, generation, evaluation, traces, manifests, or any saved artifact. Paired runs stay comparable (`dwb experiment check` unaffected).
 - No full-screen TUI (no Textual/Ink-style app), no streaming answers (the query graph keeps `ainvoke`), no telemetry.
 - No new dependencies: Rich, Typer, and prompt_toolkit are already installed.
+- Considered, not adopted: flags instead of positional arguments (Atlassian #10). The positional operands (`ask "<question>"`, `experiment run <manifest>`, `evaluate <A> <B>`, `benchmark draft <selection>`) are each the command's single obvious input; turning them into flags would break every documented command for little gain.
 
 ---
 
@@ -112,24 +120,27 @@ U1 (foundation) comes first; U2-U5 depend on it and are otherwise independent, s
 ### U1. Presentation foundation
 
 - **Goal:** the `dwb.ui` module, the exception boundary, logging defaults, `--version`, `--json`/`--no-color` globals.
-- **Requirements:** R1, R4, R6, R8, R9, R10; KTD1, KTD4, KTD5.
+- **Requirements:** R1, R4, R6, R8, R9, R10, R15; KTD1, KTD4, KTD5.
 - **Files:** `src/dwb/ui.py` (new), `src/dwb/log.py`, `src/dwb/cli.py`, `tests/test_ui.py` (new), `tests/test_layers.py`, `docs/architecture.md`.
 - **Test scenarios:**
   - Symbols fall back to ASCII when the console encoding cannot represent them.
   - With `NO_COLOR` or a non-TTY stream, rendered output contains no ANSI codes.
   - A `WorkspaceError` prints the two-line `✗`/`→` form and exits 2; an unexpected exception prints the summary, writes the traceback file, and exits 1; `-v` prints the traceback.
   - Default log output has no timestamps or level labels; `-v` has both.
-  - `dwb --version` prints the package version.
+  - `dwb --version` prints the package version; `-v` is still verbose.
+  - Ctrl-C (a `KeyboardInterrupt` raised inside a command) prints `! Stopped`, exits 130, and prints no traceback.
 
 ### U2. Results: one contract for data commands
 
 - **Goal:** human renderers plus the JSON switch for `status`, `index code`, `index pdf`, `wiki snapshot`, `experiment check/run/evaluate`, and `benchmark`; the same `status` table shape in both modes.
-- **Requirements:** R2, R3, R5; KTD3.
+- **Requirements:** R2, R3, R5, R16; KTD3.
 - **Files:** `src/dwb/cli.py`, `src/dwb/ui.py`, existing CLI tests (`tests/test_chat.py`, `tests/test_project.py`, `tests/test_curation.py`, `tests/test_runner.py`).
 - **Test scenarios:**
   - Each data command prints JSON identical to today's when stdout is not a TTY (the current tests run without a TTY and keep passing unchanged).
   - With a TTY-forced console, each prints the header, a table or summary, and the outcome line.
   - `--json` forces JSON at a terminal.
+  - `ask` and `chat` print human output when piped; `ask --json` prints the trace.
+  - An unknown `--repo` lists the configured repositories; `dwb ask` with no question prompts at a terminal and exits 2 without one.
 
 ### U3. Progress for long-running work
 
@@ -149,6 +160,7 @@ U1 (foundation) comes first; U2-U5 depend on it and are otherwise independent, s
 - **Test scenarios:**
   - Top-level help lists the three panels and mentions both modes.
   - Every command's help includes an example.
+  - Long-running commands' help and start line mention that Ctrl-C stops them.
 
 ### U5. Interactive polish: chat and init
 
@@ -156,7 +168,7 @@ U1 (foundation) comes first; U2-U5 depend on it and are otherwise independent, s
 - **Requirements:** R13, R14.
 - **Files:** `src/dwb/chat.py`, `src/dwb/init_wizard.py`, `tests/test_chat.py`, `tests/test_project.py`.
 - **Test scenarios:**
-  - The chat header names repository, mode, commit, and sources; `/sources` uses the same wording.
+  - The chat header shows the `dwb <version>` line, repository, mode, commit, sources, and how to leave; `/sources` uses the same wording.
   - `init` without a TTY and without `--yes` exits 2 naming `--yes`; existing piped-input tests use a test hook rather than a real TTY.
   - `init` ends with the written path and `→ next: dwb index`.
 
@@ -185,9 +197,11 @@ U1 (foundation) comes first; U2-U5 depend on it and are otherwise independent, s
 - No traceback reaches the terminal without `-v`.
 - Experiment traces and run summaries are unchanged for the same inputs.
 
-## Open questions (for the user, before U1)
+## Resolved decisions
 
-- Symbols: Unicode (`✓ ✗ ! • →`) with ASCII fallback, as proposed, or ASCII only?
-- Piped output: switch data commands to JSON automatically when piped (proposed, CLIG), or keep human output unless `--json` is given?
-- `-v`: keep it as `--verbose` (today) or move verbose to `--verbose` only and free `-v`? CLIG reserves `-v` for version; changing it breaks habits.
-- Branding: a small `dwb` name and version line on `chat` and `init` (OpenWiki-style), or none?
+Accepted by the user on 2026-11-17:
+
+- **Symbols:** Unicode (`✓ ✗ ! • →`) with ASCII fallback (R1).
+- **Piped output:** automatic JSON when piped, for the data commands only; `ask` and `chat` stay human (R5).
+- **`-v`:** stays `--verbose`; `--version` is long-form only (R8, R12).
+- **Branding:** a small `dwb <version>` name line at the top of `chat` and `init` only; no banner elsewhere (R13, R14).
