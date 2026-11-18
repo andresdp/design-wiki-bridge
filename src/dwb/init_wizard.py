@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 from rich.console import Console
@@ -16,9 +17,11 @@ from dwb.project import (
     GLOBAL_ENV,
     PdfEntry,
     ProjectConfig,
+    folder_pdfs,
     git_root,
     head_sha,
     is_dirty,
+    is_url,
     openwiki_status,
     openwiki_version,
     save_global_key,
@@ -26,6 +29,11 @@ from dwb.project import (
     write_config,
 )
 from dwb.workspace import WorkspaceError
+
+
+def mask_secret(value: str) -> str:
+    """``sk-*****xyz``: enough to recognize a key, never enough to use it."""
+    return f"{value[:3]}*****{value[-3:]}" if len(value) >= 12 else "*****"
 
 
 class Asker:
@@ -41,8 +49,23 @@ class Asker:
         return default if self.yes else Confirm.ask(q, default=default, console=self.c)
 
     def secret(self, q: str) -> str:
-        return "" if self.yes else Prompt.ask(q, password=True, default="", console=self.c,
-                                              show_default=False)
+        """Read a secret, echoing ``*`` per character, then confirm it masked."""
+        if self.yes:
+            return ""
+        value = ""
+        if sys.stdin.isatty():
+            try:
+                from prompt_toolkit import prompt
+            except ImportError:  # pragma: no cover
+                prompt = None
+            if prompt is not None:
+                value = prompt(f"{q}: ", is_password=True)
+        else:  # piped input (tests, scripts): nothing to echo
+            value = Prompt.ask(q, password=True, default="", console=self.c, show_default=False)
+        value = value.strip()
+        if value:
+            self.c.print(f"  Received {mask_secret(value)}")
+        return value
 
 
 def _section(c: Console, title: str) -> None:
@@ -75,18 +98,33 @@ def run_init(start: Path, console: Console | None = None, *, yes: bool = False,
 
     _section(c, "PDF documents (optional)")
     c.print("Specifications, papers or manuals that explain what the code implements. "
-            "Enter local paths (relative to the repository) or URLs, one per line; "
-            "an empty line finishes.")
+            "Enter local files or folders (relative to the repository; a folder adds every "
+            "PDF inside it) or URLs, one per line; an empty line finishes.")
     pdfs: list[PdfEntry] = []
+    added: set[str] = set()
     while not yes:
-        src = Prompt.ask("PDF", default="", console=c, show_default=False).strip()
+        src = Prompt.ask("PDF file, folder or URL", default="", console=c,
+                         show_default=False).strip()
         if not src:
             break
-        if not re.match(r"https?://", src) and not (root / src).exists():
+        key = src if is_url(src) else str((root / src).resolve())
+        if key in added:
+            c.print(f"[yellow]Already added:[/] {src}")
+            continue
+        if not is_url(src) and not (root / src).exists():
             c.print(f"[red]Not found:[/] {root / src}")
             continue
-        title = Prompt.ask("  Title", default=Path(src.split("?")[0]).stem, console=c)
-        pdfs.append(PdfEntry(source=src, title=title))
+        if not is_url(src) and (root / src).is_dir():
+            n = len(folder_pdfs(root / src))
+            if n == 0:
+                c.print(f"[red]No PDF files in[/] {root / src}")
+                continue
+            c.print(f"  Folder with {n} PDF files (each titled by its file name)")
+            pdfs.append(PdfEntry(source=src))
+        else:
+            title = Prompt.ask("  Title", default=Path(src.split("?")[0]).stem, console=c)
+            pdfs.append(PdfEntry(source=src, title=title))
+        added.add(key)
 
     _section(c, "Web search (optional, Tavily)")
     web = ask.confirm("Use web search by default when answering?", default=False)

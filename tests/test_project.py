@@ -131,8 +131,8 @@ def test_ask_outside_a_project_says_run_dwb_init(tmp_path, monkeypatch):
 
 
 def _project(repo, **over) -> ProjectWorkspace:
-    cfg = ProjectConfig(name="toy", models={"chat": "gen-x", "embedding": "fake-64"},
-                        pdfs=[{"source": "spec.pdf", "title": "Toy spec"}], **over)
+    over.setdefault("pdfs", [{"source": "spec.pdf", "title": "Toy spec"}])
+    cfg = ProjectConfig(name="toy", models={"chat": "gen-x", "embedding": "fake-64"}, **over)
     write_config(repo, cfg)
     return ProjectWorkspace(repo)
 
@@ -414,3 +414,112 @@ def test_custom_span_size_is_carried_into_chat(repo, monkeypatch):
     index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
     m, _ = build_manifest(ws, ChatSettings(repo="toy"))
     assert m.budgets.max_span_tokens == 900
+
+
+# ------------------------------------------------- PDF folders, duplicates, masked API key
+
+
+def _pdf(path: Path, text: str) -> Path:
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), text)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def _index(ws):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    return index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+
+
+def _corpus_docs(repo) -> list[dict]:
+    return yaml.safe_load((repo / ".dwb/pdf_corpus.yaml").read_text())["documents"]
+
+
+def test_the_same_pdf_listed_twice_is_a_clear_error(repo):
+    ws = _project(repo, pdfs=[{"source": "spec.pdf"}, {"source": "spec.pdf"}])
+    with pytest.raises(WorkspaceError, match="spec.pdf.*more than once"):
+        _index(ws)
+    assert not (repo / ".dwb/state.json").exists()  # refused before anything was indexed
+
+
+def test_identical_pdfs_under_two_names_are_a_clear_error(repo):
+    shutil.copy(repo / "spec.pdf", repo / "copy.pdf")
+    ws = _project(repo, pdfs=[{"source": "spec.pdf"}, {"source": "copy.pdf"}])
+    with pytest.raises(WorkspaceError, match="copy.pdf.*same file as spec.pdf"):
+        _index(ws)
+
+
+def test_a_folder_entry_indexes_every_pdf_inside_it(repo):
+    _pdf(repo / "docs/specs/alpha.pdf", "Alpha protocol.")
+    _pdf(repo / "docs/specs/sub/Beta.PDF", "Beta framing.")
+    (repo / "docs/specs/notes.txt").write_text("not a pdf")
+    ws = _project(repo, pdfs=[{"source": "docs/specs"}])
+    state = _index(ws)
+    docs = _corpus_docs(repo)
+    assert [d["doc_id"] for d in docs] == ["alpha", "beta"]
+    assert state["pdf_index_id"].startswith("pdf-toy-pdfs-")
+
+
+def test_folders_and_files_overlapping_are_indexed_once(repo):
+    _pdf(repo / "docs/a/spec.pdf", "Spec A.")
+    _pdf(repo / "docs/b/spec.pdf", "Spec B, a different file with the same name.")
+    ws = _project(repo, pdfs=[{"source": "docs"}, {"source": "docs/a/spec.pdf",
+                                                   "title": "Spec A"}])
+    _index(ws)
+    docs = _corpus_docs(repo)
+    assert [d["doc_id"] for d in docs] == ["spec-a", "spec"]  # unique ids, file kept once
+    assert docs[0]["title"] == "Spec A"  # the explicit entry's title wins
+
+
+def test_a_folder_without_pdfs_is_a_clear_error(repo):
+    (repo / "empty").mkdir()
+    ws = _project(repo, pdfs=[{"source": "empty"}])
+    with pytest.raises(WorkspaceError, match="no PDF files in empty"):
+        _index(ws)
+
+
+def test_init_accepts_folders_and_rejects_repeated_pdfs(repo):
+    _pdf(repo / "docs/specs/alpha.pdf", "Alpha.")
+    _pdf(repo / "docs/specs/beta.pdf", "Beta.")
+    answers = "\n".join([
+        "myproj", "chat-x", "emb-x",
+        "spec.pdf", "Toy spec",   # a file, with its title
+        "spec.pdf",               # the same file again -> rejected
+        "docs/specs",             # a folder -> no title asked
+        "./docs/specs/",          # the same folder again -> rejected
+        "",                       # finish PDFs
+        "n", "",                  # no web, default excluded domains
+    ]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    cfg = ProjectConfig.model_validate(yaml.safe_load((repo / ".dwb/config.yaml").read_text()))
+    assert [(p.source, p.title) for p in cfg.pdfs] == [("spec.pdf", "Toy spec"),
+                                                       ("docs/specs", "")]
+    assert r.output.count("Already added") == 2 and "2 PDF files" in r.output
+
+
+def test_mask_secret_shows_only_the_ends():
+    from dwb.init_wizard import mask_secret
+
+    assert mask_secret("sk-proj-abcdefghijklmnop") == "sk-*****nop"
+    assert mask_secret("short") == "*****"
+
+
+def test_init_echoes_a_masked_key_and_never_the_key(repo, monkeypatch):
+    import dwb.init_wizard as wiz
+    import dwb.project as project
+
+    saved = {}
+    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.setattr(project, "GLOBAL_ENV", repo / "no-global.env")  # not the user's file
+    monkeypatch.setattr(wiz, "save_global_key", lambda name, value: saved.update({name: value}))
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)  # no wiki questions
+    key = "sk-proj-SECRETVALUE123xyz"
+    answers = "\n".join(["myproj", "", "", "", "n", "", key]) + "\n" + "\n" * 10
+    r = CliRunner().invoke(cli(), ["init"], input=answers)
+    assert r.exit_code == 0, r.output
+    assert saved == {"OPENAI_API_KEY": key}
+    assert "sk-*****xyz" in r.output and "SECRETVALUE" not in r.output

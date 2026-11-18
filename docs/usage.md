@@ -50,10 +50,10 @@ dwb chat        # 3. ask away
 Run it anywhere inside the repository. It shows the commit that will be indexed (HEAD) and asks about:
 
 - **Models:** the chat model (answering and reranking) and the embedding model (indexes). Both are OpenAI models.
-- **PDF documents:** specifications, papers, or manuals that explain what the code implements. Give local paths (relative to the repository) or URLs. URLs are downloaded during `dwb index`.
+- **PDF documents:** specifications, papers, or manuals that explain what the code implements. Give local files or folders (relative to the repository) or URLs. A folder adds every PDF inside it, subfolders included, each titled by its file name; new PDFs in it are picked up on the next `dwb index`. URLs are downloaded during `dwb index`. An entry given twice is rejected.
 - **Web search:** whether to use it by default, and which domains to exclude. `init` suggests the project's own hosts (its git host, the docs URLs in `pyproject.toml`/`package.json`, PyPI/npm), so web evidence stays external to the code. Edit the list as you like.
 - **OpenWiki:** whether to use the wiki source. If `openwiki/` is missing or older than HEAD, `init` asks whether `dwb index` should generate or update it. That makes model calls (about 15 minutes for a mid-size repository) and writes `openwiki/`, `AGENTS.md`, and a GitHub workflow into the repository.
-- **API keys:** if a key is missing, paste it (hidden input) to save it in `~/.config/dwb/.env`.
+- **API keys:** if a key is missing, paste it to save it in `~/.config/dwb/.env`. Typing shows `*` per character, and `init` confirms the key as `sk-*****xyz` (first and last three characters only).
 
 The result is **`.dwb/config.yaml`**, a plain YAML file you can edit at any time (see [below](#the-project-file-dwbconfigyaml)). Everything `dwb` writes stays in `.dwb/`, which is hidden from git through `.git/info/exclude`; your `.gitignore` is not touched. `dwb init --yes` accepts every default without asking, and `--force` overwrites an existing config.
 
@@ -162,6 +162,7 @@ pdfs:
     title: "RFC 9110: HTTP Semantics"
   - source: docs/spec.pdf         # relative to the repository root
     title: Internal spec
+  - source: docs/standards/       # a folder: every PDF inside it, titled by file name
 web:
   exclude_domains: [github.com, requests.readthedocs.io, pypi.org]
   max_results: 5
@@ -252,6 +253,8 @@ Progress messages go to stderr, and results (answers, JSON) go to stdout. `dwb -
 | `Wiki not available: openwiki/ missing…` | Set `wiki.generate: true` and `dwb index`, or run `openwiki code --init` yourself, then `dwb index`. |
 | `OpenWiki MCP server lacks … (needs 0.9.0)` | `npm install -g openwiki@0.9.0`, then `hash -r`. |
 | `did not return a PDF` | Download the file in a browser and list the local path under `pdfs:`. |
+| `PDF … is listed more than once` / `listed twice` | Remove the duplicate entry from `pdfs:` (a folder may already contain the file). |
+| `no PDF files in <folder>` | Point the entry at a folder with `.pdf` files, or remove it. |
 | `no code index for <repo> …` (research mode) | `dwb index code <repo>`. |
 | `replay miss` during an experiment | Run that manifest with `--web-mode record` first. |
 | `code index … was built by chunker version 1` / `chunked with max_span_tokens=…` | Rebuild: `dwb index code <repo>` (research; then update the manifest's `code_index_id`) or `dwb index` (project). |

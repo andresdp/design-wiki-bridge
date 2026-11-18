@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import time
 import urllib.request
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -70,8 +71,10 @@ class CodeCfg(_M):
 
 
 class PdfEntry(_M):
-    source: str  # local path (relative to the repo root) or http(s) URL
-    title: str = ""
+    # a local file or folder (relative to the repo root) or an http(s) URL; a folder means
+    # every .pdf inside it, subfolders included
+    source: str
+    title: str = ""  # ignored for folders (each file is titled by its name)
 
 
 class WebCfg(_M):
@@ -103,7 +106,7 @@ class ProjectConfig(_M):
             "# `dwb index` again. Reference: docs/usage.md (design-wiki-bridge).\n"
             "#   models:  chat = answering + reranking model; embedding = index model\n"
             "#   sources: defaults for `dwb ask` / `dwb chat` (the repository is always on)\n"
-            "#   pdfs:    local paths (relative to the repo root) or URLs\n"
+            "#   pdfs:    local files or folders (relative to the repo root) or URLs\n"
             "#   wiki:    OpenWiki-guided repository search; generate = run OpenWiki in\n"
             "#            `dwb index` when openwiki/ is missing or older than HEAD\n"
         )
@@ -391,6 +394,64 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60] or "doc"
 
 
+def is_url(source: str) -> bool:
+    return bool(re.match(r"https?://", source))
+
+
+def folder_pdfs(folder: Path) -> list[Path]:
+    """Every PDF under ``folder``, subfolders included, in a stable order."""
+    return sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf")
+
+
+@dataclass
+class _Pdf:
+    path: Path
+    title: str
+    digest: str
+    source: str  # the config entry it came from
+    explicit: bool  # named directly (file or URL), not found inside a folder
+
+
+def resolve_pdfs(root: Path, entries: list[PdfEntry], download_dir: Path) -> list[_Pdf]:
+    """The config's PDF entries as distinct files: folders expanded, URLs downloaded.
+
+    The same file named twice is a config mistake and an error; a file a folder also
+    contains is kept once (an explicit entry's title wins).
+    """
+    out: list[_Pdf] = []
+    by_digest: dict[str, _Pdf] = {}
+    for e in entries:
+        if is_url(e.source):
+            items = [(_fetch_pdf(e.source, download_dir), e.title, True)]
+        else:
+            p = root / e.source
+            if p.is_dir():
+                files = folder_pdfs(p)
+                if not files:
+                    raise WorkspaceError(f"no PDF files in {e.source} (edit pdfs: in "
+                                         ".dwb/config.yaml)")
+                items = [(f, "", False) for f in files]
+            elif p.exists():
+                items = [(p, e.title, True)]
+            else:
+                raise WorkspaceError(f"PDF not found: {e.source} (edit pdfs: in "
+                                     ".dwb/config.yaml)")
+        for path, title, explicit in items:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            seen = by_digest.get(digest)
+            if seen is None:
+                by_digest[digest] = pdf = _Pdf(path, title, digest, e.source, explicit)
+                out.append(pdf)
+            elif explicit and seen.explicit:
+                what = "more than once" if seen.source == e.source else \
+                    f"twice: {e.source} is the same file as {seen.source}"
+                raise WorkspaceError(f"PDF {e.source} is listed {what}. Remove the duplicate "
+                                     "from pdfs: in .dwb/config.yaml")
+            elif explicit:  # named directly after a folder already brought it in
+                seen.title, seen.explicit = title or seen.title, True
+    return out
+
+
 def pdf_filename(url: str) -> str:
     """Readable stem plus a hash of the full URL, so two URLs never share one download."""
     stem = _slug(Path(url.split("?")[0]).stem or url)
@@ -469,6 +530,9 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
     state: dict[str, Any] = {"sha": sha, "embedding_model": c.models.embedding,
                              "indexed_at": datetime.now(UTC).isoformat()}
 
+    # PDFs are resolved first, so a config mistake stops before any embedding
+    pdfs = resolve_pdfs(root, c.pdfs, ws.dir / "pdfs") if c.pdfs else []
+
     # code (always: the repository is the one source that is always on)
     LOG.info("[bold]Code[/]: %s at %s", c.name, sha[:12])
     cfg = ChunkingConfig(max_span_tokens=c.code.max_span_tokens,
@@ -479,17 +543,18 @@ def index_project(ws: ProjectWorkspace, *, embedding=None, generate_wiki: bool |
     state["code_index_id"] = idx.info.index_id
 
     # PDFs
-    if c.pdfs:
-        LOG.info("[bold]PDFs[/]: %d documents", len(c.pdfs))
-        docs = []
-        for e in c.pdfs:
-            path = _fetch_pdf(e.source, ws.dir / "pdfs") if re.match(r"https?://", e.source) \
-                else (root / e.source)
-            if not path.exists():
-                raise WorkspaceError(f"PDF not found: {e.source} (edit pdfs: in .dwb/config.yaml)")
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            docs.append(PdfDoc(doc_id=_slug(e.title or path.stem), version=f"sha256:{digest[:12]}",
-                               path=str(path.resolve()), title=e.title or path.stem))
+    if pdfs:
+        LOG.info("[bold]PDFs[/]: %d documents", len(pdfs))
+        docs, used = [], set()
+        for f in pdfs:
+            title = f.title or f.path.stem
+            doc_id, n = _slug(title), 1
+            while doc_id in used:  # same name in two folders: keep citations unambiguous
+                n += 1
+                doc_id = f"{_slug(title)}-{n}"
+            used.add(doc_id)
+            docs.append(PdfDoc(doc_id=doc_id, version=f"sha256:{f.digest[:12]}",
+                               path=str(f.path.resolve()), title=title))
         corpus = PdfCorpus(corpus_id=f"{_slug(c.name)}-pdfs", documents=docs)
         (ws.dir / "pdf_corpus.yaml").write_text(yaml.safe_dump(corpus.model_dump(),
                                                                sort_keys=False))
