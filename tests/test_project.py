@@ -144,6 +144,16 @@ def test_ctrl_c_during_init_says_nothing_was_written(repo, tty, monkeypatch):
     assert not (repo / ".dwb" / "config.yaml").exists()
 
 
+def test_ctrl_d_at_an_init_prompt_is_a_stop_not_a_crash(repo, tty, monkeypatch):
+    import dwb.init_wizard as wiz
+
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
+    r = CliRunner().invoke(cli(), ["init"], input="")  # end of input at the first prompt
+    assert r.exit_code == 130, r.output
+    assert "! Stopped" in r.output and "Nothing was written" in r.output
+    assert "Unexpected error" not in r.output
+
+
 def test_ctrl_c_during_init_states_what_was_written(repo, tty, monkeypatch):
     import dwb.init_wizard as wiz
     import dwb.project as project

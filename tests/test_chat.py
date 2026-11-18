@@ -187,6 +187,21 @@ def test_ask_with_no_question_exits_2_without_a_terminal(research):
     assert r.exit_code == 2 and "no question given" in r.output and "--repo" in r.output
 
 
+@pytest.mark.parametrize("stop", ["ctrl-c", "ctrl-d"])
+def test_stopping_at_the_ask_question_prompt_is_a_stop(research, monkeypatch, tty, stop):
+    import typer
+
+    import dwb.cli as cli
+
+    if stop == "ctrl-c":  # Click's prompt turns KeyboardInterrupt into Abort
+        def prompt(*a, **kw):
+            raise typer.Abort()
+        monkeypatch.setattr(typer, "prompt", prompt)
+    r = CliRunner().invoke(cli.app, ["ask", "--repo", "toy"], input="")  # ctrl-d: no input
+    assert r.exit_code == 130, r.output
+    assert "! Stopped" in r.output and "Aborted" not in r.output
+
+
 def test_research_ask_at_a_terminal_has_the_header(research, monkeypatch, tty):
     import dwb.cli as cli
     import dwb.runner as runner

@@ -34,13 +34,28 @@ EXPECTED_ERRORS = (
 
 def _control_flow() -> tuple[type[BaseException], ...]:
     """Click's own exits and usage errors (RuntimeError subclasses): never ours to report."""
-    from typer._click.exceptions import Abort, ClickException, Exit
+    from typer._click.exceptions import ClickException, Exit
 
-    kinds: list[type[BaseException]] = [Exit, Abort, ClickException, typer.Exit, typer.Abort]
+    kinds: list[type[BaseException]] = [Exit, ClickException, typer.Exit]
     try:
         import click
 
-        kinds += [click.exceptions.Exit, click.exceptions.Abort, click.ClickException]
+        kinds += [click.exceptions.Exit, click.ClickException]
+    except ImportError:  # pragma: no cover
+        pass
+    return tuple(kinds)
+
+
+def _stops() -> tuple[type[BaseException], ...]:
+    """A user stop: Ctrl-C anywhere, or Ctrl-C / Ctrl-D (end of input) at a prompt, which
+    Click's prompt turns into Abort and rich's into EOFError. dwb never raises Abort itself."""
+    from typer._click.exceptions import Abort
+
+    kinds: list[type[BaseException]] = [KeyboardInterrupt, EOFError, Abort, typer.Abort]
+    try:
+        import click
+
+        kinds.append(click.exceptions.Abort)
     except ImportError:  # pragma: no cover
         pass
     return tuple(kinds)
@@ -56,11 +71,11 @@ class _App(TyperGroup):
     def invoke(self, ctx):
         try:
             return super().invoke(ctx)
-        except _control_flow():
-            raise
-        except KeyboardInterrupt:
+        except _stops():
             ui.stopped(ctx.meta.get(ui.STOP_KEY, {}))
             raise typer.Exit(130) from None
+        except _control_flow():
+            raise
         except Exception as e:
             if _is_expected(e):
                 ui.error(str(e), getattr(e, "fix", None))
