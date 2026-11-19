@@ -491,6 +491,7 @@ def test_wiki_generation_failures(repo, monkeypatch):
     with pytest.raises(WorkspaceError, match="not installed"):
         _generate_wiki(repo, WikiCfg(), update=False)
     monkeypatch.setattr(project.shutil, "which", lambda name: "/bin/openwiki")
+    (repo / ".openwikiignore").write_text("/.dwb/\n")  # so no git call hits the stub below
     monkeypatch.setattr(project.subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a, 1))
     with pytest.raises(WorkspaceError, match="exited with status 1"):
@@ -880,3 +881,51 @@ def test_init_saves_a_pasted_key_in_the_project_dwb_env(repo, tty, monkeypatch):
     assert stat.S_IMODE(os.stat(env).st_mode) == 0o600
     assert "/.dwb/" in (repo / ".git/info/exclude").read_text()  # never committed
     assert f"saved OPENAI_API_KEY to {env}" in r.output and "SECRETVALUE" not in r.output
+
+
+# ----------------------------------------------- OpenWiki must not read .dwb/ (API keys)
+
+
+def test_openwiki_runs_with_dwb_in_openwikiignore(repo, tmp_path, monkeypatch):
+    from dwb.project import WikiCfg, _generate_wiki
+
+    # the fake openwiki records what its read gate would see
+    _fake_openwiki(tmp_path, monkeypatch, 'cat .openwikiignore\nexit 0\n')
+    _generate_wiki(repo, WikiCfg(), update=False)
+    assert "/.dwb/" in (repo / ".dwb/openwiki.log").read_text().split()
+
+
+def test_dwb_creates_a_hidden_openwikiignore_when_the_repo_has_none(repo):
+    from dwb.project import ensure_openwiki_ignores_dwb
+
+    ensure_openwiki_ignores_dwb(repo)
+    ensure_openwiki_ignores_dwb(repo)  # idempotent
+    assert (repo / ".openwikiignore").read_text() == "/.dwb/\n"
+    assert "/.openwikiignore" in (repo / ".git/info/exclude").read_text().split()
+
+
+def test_dwb_appends_to_the_repos_own_openwikiignore_and_leaves_it_visible(repo):
+    from dwb.project import ensure_openwiki_ignores_dwb
+
+    (repo / ".openwikiignore").write_text("secrets/")  # the repo's file, no final newline
+    ensure_openwiki_ignores_dwb(repo)
+    assert (repo / ".openwikiignore").read_text() == "secrets/\n/.dwb/\n"
+    excl = repo / ".git/info/exclude"
+    assert "/.openwikiignore" not in (excl.read_text().split() if excl.exists() else [])
+
+
+def test_an_existing_dwb_rule_is_kept_as_is(repo):
+    from dwb.project import ensure_openwiki_ignores_dwb
+
+    (repo / ".openwikiignore").write_text(".dwb/\n")
+    ensure_openwiki_ignores_dwb(repo)
+    assert (repo / ".openwikiignore").read_text() == ".dwb/\n"
+
+
+def test_init_protects_dwb_from_openwiki(repo, tty, monkeypatch):
+    import dwb.init_wizard as wiz
+
+    monkeypatch.setattr(wiz, "openwiki_version", lambda: None)
+    r = CliRunner().invoke(cli(), ["init", "--yes"])
+    assert r.exit_code == 0, r.output
+    assert "/.dwb/" in (repo / ".openwikiignore").read_text().split()
