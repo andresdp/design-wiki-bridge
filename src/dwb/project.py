@@ -159,15 +159,40 @@ def find_project(start: Path | None = None) -> Path | None:
     return None
 
 
-def hide_from_git(root: Path) -> None:
-    """Add ``.dwb/`` to .git/info/exclude (the repo's own .gitignore is left alone)."""
+def hide_from_git(root: Path, entry: str = f"/{DWB_DIR}/") -> None:
+    """Add ``entry`` (default ``.dwb/``) to .git/info/exclude; the repo's .gitignore is left
+    alone."""
     git_dir = Path(git(root, "rev-parse", "--git-common-dir"))
     excl = (git_dir if git_dir.is_absolute() else root / git_dir) / "info" / "exclude"
     excl.parent.mkdir(parents=True, exist_ok=True)
-    text = excl.read_text() if excl.exists() else ""
-    if f"/{DWB_DIR}/" not in text.split():
-        excl.write_text(text + ("" if text.endswith("\n") or not text else "\n")
-                        + f"/{DWB_DIR}/\n")
+    _add_line(excl, entry)
+
+
+def _add_line(path: Path, line: str) -> None:
+    """Append ``line`` to ``path`` unless it is already there (one entry per line)."""
+    text = path.read_text() if path.exists() else ""
+    if line not in text.split():
+        path.write_text(text + ("" if text.endswith("\n") or not text else "\n") + line + "\n")
+
+
+OPENWIKI_IGNORE = ".openwikiignore"
+
+
+def ensure_openwiki_ignores_dwb(root: Path) -> None:
+    """Make OpenWiki's read gate refuse ``.dwb/`` (it holds the API keys).
+
+    OpenWiki 0.9.0 lists hidden folders and reads any path its ``.openwikiignore`` does not
+    exclude; git ignore rules do not stop its file tools. A repo without the file gets one
+    holding ``/.dwb/``, hidden from git like ``.dwb/``; a repo's own file gets the rule
+    appended and stays visible."""
+    path = root / OPENWIKI_IGNORE
+    if not path.exists():
+        path.write_text(f"/{DWB_DIR}/\n")
+        hide_from_git(root, f"/{OPENWIKI_IGNORE}")
+        return
+    rules = {ln.strip().strip("/") for ln in path.read_text().splitlines()}
+    if DWB_DIR not in rules:  # `.dwb`, `.dwb/` and `/.dwb/` all cover it
+        _add_line(path, f"/{DWB_DIR}/")
 
 
 def remote_url(root: Path) -> str:
@@ -524,6 +549,7 @@ def _generate_wiki(root: Path, cfg: WikiCfg, update: bool, *, inherit_output: bo
     exe = shutil.which("openwiki")
     if not exe:
         raise WorkspaceError("openwiki is not installed (npm install -g openwiki@0.9.0)")
+    ensure_openwiki_ignores_dwb(root)  # never let the doc agent read .dwb/.env
     env = {**os.environ, "OPENWIKI_TELEMETRY_DISABLED": "1",
            "OPENWIKI_PROVIDER": cfg.provider, "OPENWIKI_MODEL_ID": cfg.model}
     cmd = [exe, "code", "--update" if update else "--init"]
@@ -659,4 +685,5 @@ def write_config(root: Path, cfg: ProjectConfig) -> Path:
     d.mkdir(exist_ok=True)
     (d / CONFIG_NAME).write_text(cfg.to_yaml())
     hide_from_git(root)
+    ensure_openwiki_ignores_dwb(root)
     return d / CONFIG_NAME

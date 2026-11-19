@@ -365,7 +365,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 - If one branch returns nothing, the others still contribute. When nothing is found at all, the graph records an explicit empty context and never substitutes another retriever.
 - The test set is frozen by content hash. Development questions are separate, and the runner rejects any ID or question text shared between dev and test.
 - Nothing leaves the machine except calls to OpenAI, Tavily (only when the web is enabled), and OpenWiki generation (only when requested). Telemetry is off for OpenWiki and Chroma.
-- In user mode, API keys are per project: they come only from `<repo>/.dwb/.env` (or the shell), and only `OPENAI_API_KEY` and `TAVILY_API_KEY` are read from it, so a cloned repository cannot set `OPENAI_BASE_URL` and redirect the key. Neither the repository's own `.env` nor `~/.config/dwb/.env` is read; the latter is used only in research mode.
+- In user mode, API keys are per project: they come only from `<repo>/.dwb/.env` (or the shell), and only `OPENAI_API_KEY` and `TAVILY_API_KEY` are read from it, so a cloned repository cannot set `OPENAI_BASE_URL` and redirect the key. Neither the repository's own `.env` nor `~/.config/dwb/.env` is read; the latter is used only in research mode. OpenWiki 0.9.0's file tools list hidden folders and honor only `.openwikiignore`, not git's ignore rules, so `init` and every wiki generation make sure `.openwikiignore` lists `/.dwb/`.
 - Every network or subprocess call has a timeout: OpenAI clients (180 s, 2 retries), OpenWiki MCP calls (120 s), git (120 s), PDF downloads (60 s).
 
 ## 12. Known limitations and parked work

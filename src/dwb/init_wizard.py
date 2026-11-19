@@ -17,6 +17,7 @@ from dwb.project import (
     DWB_DIR,
     PdfEntry,
     ProjectConfig,
+    ensure_openwiki_ignores_dwb,
     folder_pdfs,
     git_root,
     head_sha,
@@ -245,6 +246,7 @@ def _ensure_key(c: Console, ask: Asker, env: Path, name: str, purpose: str, *,
     value = ask.secret(prompt)
     if value:
         hide_from_git(env.parent.parent)  # before the key exists on disk
+        ensure_openwiki_ignores_dwb(env.parent.parent)
         save_key(name, value, env)
         ui.keep(f"{name} in {env}")
         ui.note_on_stop(_NOT_WRITTEN, key="init")
