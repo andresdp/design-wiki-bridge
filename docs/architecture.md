@@ -92,7 +92,7 @@ flowchart TB
 |---|---|---|---|
 | 1 Interface | `cli`, `chat`, `init_wizard`, `ui` | Parse commands and options, run the REPL, and render answers and logs. No retrieval logic. `ui` owns presentation: the theme and symbols (ASCII fallback), the stdout/stderr consoles resolved per invocation, the error/warning/outcome/header lines, the human-vs-JSON output switch, and the progress renderer (bars and spinners for `ProgressEvent`s on a colored terminal, one plain line per milestone otherwise). `cli` has the one exception boundary: expected errors print `✗`/`→` and exit 2, Ctrl-C prints `! Stopped` and exits 130, anything else prints a two-line summary, writes the traceback to `$XDG_CACHE_HOME/dwb/last-error.log`, and exits 1 | typer, rich, prompt_toolkit |
 | 2 Application | `project`, `workspace`, `runner`, `eval.command`, `curation` | Choose the mode, find or build the artifacts, wire concrete components into the graph, run or score a question set, and curate question sets (draft, validate, freeze, check) | PyYAML, PyMuPDF (PDF page counts) |
-| 3 Query pipeline | `graph`, `merge`, `rerank`, `budget`, `generate` | Answer one question: retrieve, merge, rerank, fit the token budget, generate cited claims. The pipeline depends on retriever interfaces; `runner` injects the concrete adapters | LangGraph, LangChain (`LLMListwiseRerank`, chat models) |
+| 3 Query pipeline | `graph`, `merge`, `rerank`, `budget`, `generate`, `sufficiency` | Answer one question: retrieve, merge, judge whether the local evidence suffices (the web gate), rerank, fit the token budget, generate cited claims. The pipeline depends on retriever interfaces; `runner` injects the concrete adapters | LangGraph, LangChain (`LLMListwiseRerank`, chat models) |
 | 3 Evaluation | `eval.*` (except `command`), `evidence_text` | Score saved traces: span recall, claim correctness, citation support and coverage, cost tables | DeepEval (optional diagnostics), LangChain chat model (judge) |
 | 4 Adapters | `retrieval.*`, `web.tavily_store` | Build and query the indexes, talk to OpenWiki over MCP and resolve wiki references to code spans, and record or replay Tavily | Chroma, OpenAI embeddings, langchain-mcp-adapters, tavily-python |
 | 5 Domain model | `evidence`, `trace`, `manifest`, `prompts`, `benchmark.*` | The shared vocabulary: evidence items and IDs, traces, run manifests, question records, and prompt versions (see §6) | pydantic |
@@ -150,7 +150,10 @@ flowchart TD
     code --> join["join_local (defer=True)<br/>merge + dedup"]
     res --> join
     pdf --> join
-    join -->|"web enabled & item allows web"| webn["web_retrieve<br/>Tavily store (record / replay / live)"]
+    join -->|"web allowed, gate off"| webn["web_retrieve<br/>Tavily store (record / replay / live)"]
+    join -->|"web allowed, gate on"| chk["check_local<br/>LLM judge: is the local evidence enough?"]
+    chk -->|"insufficient, judge failed, or no local evidence"| webn
+    chk -->|"sufficient"| rr
     join -->|"no candidates"| empty(["empty_context"])
     join -->|"otherwise"| rr
     webn --> rr["rerank<br/>LLM listwise, full pool (40)"]
@@ -165,7 +168,8 @@ flowchart TD
 
 - **Routing is deterministic.** Conditional edges read only the manifest and the item's `allowed_sources`; no model decides which branches run.
 - **The local branches run in parallel.** List-valued state (`stages`, `repo_candidates`, `pdf_candidates`, `unresolved_refs`, `errors`, `warnings`) uses `Annotated[list, operator.add]` reducers. `join_local` is added with `defer=True`, so it runs once after every active branch has finished.
-- **The web is evaluated after the join.** The web fallback rule is applied in one place, identically for both conditions.
+- **The web is a wider search after a narrow one.** Web runs only for items whose `allowed_sources` include `web`, when the manifest enables it, and is decided after the join, in one place, for both conditions. With `web.conditional_web_search` on (the default), `check_local` first asks one LLM judge (the generator's pinned model, prompt `sufficiency_v1`, temperature 0) whether the merged local evidence can answer every part of the question. The judge reads the local pool interleaved by branch and cut to the context budget, without a rerank. Web runs when the verdict is insufficient, when there is no local evidence (no judge call), or when the judge fails (the question is then degraded). The verdict, its reason and the evidence IDs the judge saw go to the trace as `web_check`. With the flag off, web runs for every eligible item and no judge is called.
+- **Record runs capture web for every eligible item.** In an experiment record run, `web_retrieve` also runs when the verdict is sufficient: it stores the Tavily response and adds nothing (stage `used: false`, `web_triggered` false), so a replay of either condition finds its web evidence whatever its own verdict. Capture-only calls are left out of latency and cost. Chat never captures this way.
 - **A failing source degrades the question; it does not fail it.** If code, wiki search, wiki read, resolve, PDF or web retrieval raises, that node records the error in its stage and adds a `warnings` entry, and the other branches still answer. A failed rerank call falls back to pool order the same way. Degraded questions are counted in the run summary and as the `degraded` metric. A Tavily replay miss is the exception: it fails the question, because a replay run must not answer without its frozen web evidence.
 - **There is no fallback between repository branches.** If condition B finds nothing and no other source is enabled, the graph ends at `empty_context` rather than quietly switching to vector search.
 - **Execution is `ainvoke`,** with no checkpointer and no streaming. Each node returns a `StageRecord` (latency, counts, tokens, stage-specific extras).
@@ -232,7 +236,7 @@ classDiagram
         +candidates : stage to evidence IDs
         +evidence : ID to locator, provenance, text if not code
         +wiki_section_refs, unresolved_refs, merged_ids
-        +web_triggered, empty_context
+        +web_triggered, web_check, empty_context
         +final_context_ids, aliases E1 to ID
         +claims : AnswerClaim list
         +answer, summary, validation, errors
@@ -343,7 +347,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 | 8 | **LLM listwise reranker, wrapped** (KTD3) | The user's choice. The wrapper ranks the full pool, repairs dropped or duplicated positions, logs usage, and keeps IDs | Cross-encoder (deferred) |
 | 9 | **The context is sized by tokens, not by count** (spike §9–10) | With count-based `top_n`, B's larger spans gave its generator 1.3–4× more text. `top_n` = pool = 40 and A's `code_top_k` = 40 make the 8,000-token budget binding in both conditions | Count-based `top_n` = 12 |
 | 10 | **Structured claims with an explicit `gap` kind** (KTD9, prompt v2) | Claim boundaries come for free for the evaluator, and abstention is separated from hallucination (gap claims are excluded from support and coverage and reported as `abstained`/`gap_claims`) | Inline `[E1]` citations in prose; treating refusals as uncited claims |
-| 11 | **Web is declared per item, and the project's own sites are excluded** (KTD7, spike §8) | Identical in both conditions by construction. The project's docs restate unpinned code behavior and would let either condition answer without finding code | Score- or LLM-based triggers; allowing project docs |
+| 11 | **Web is declared per item, gated on insufficient local evidence, and the project's own sites are excluded** (KTD7 as revised by the conditional-web-search plan, spike §8) | The same judge, prompt and evidence budget apply in both conditions, so the rule stays identical by construction even when the verdicts differ; the report splits gated questions by A/B verdict agreement. The project's docs restate unpinned code behavior and would let either condition answer without finding code | Score thresholds (not comparable between the vector and wiki branches); web whenever allowed (still available: `conditional_web_search: false`); allowing project docs |
 | 12 | **Tavily record/replay store keyed by the normalized request** (KTD8) | The paired comparison needs identical web evidence; a replay miss is an error, never a silent live call. Only `search` and `extract` are used, never `research()` | Live calls per run |
 | 13 | **Manifest-driven runs, frozen copies, file-based traces** (KTD13, R10) | Every run can be reproduced from its directory: models, prompt hashes, budgets, index and snapshot IDs, question-set hash | A database; implicit configuration |
 | 14 | **Evaluation is a separate offline command** (R13) | Scoring never influences generation. A static import check enforces the separation, and judge verdicts are cached | Inline evaluation; DeepEval tracing or Confident AI |
