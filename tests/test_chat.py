@@ -490,3 +490,25 @@ def test_ctrl_c_or_ctrl_d_at_the_prompt_leaves_quietly(research, monkeypatch, ke
     assert r.exit_code == 0, r.output
     assert "Stopped" not in r.output and "Error" not in r.output
     assert closed == [True]
+
+
+def test_sources_line_and_answer_footer_mention_the_web_gate():
+    from rich.console import Console
+
+    from dwb.trace import AnswerClaim, TraceRecord
+
+    assert Sources(web=True, web_gated=True).describe().endswith(
+        "web (when local evidence is insufficient)")
+    assert Sources(web=True).describe().endswith(", web")
+
+    def footer(web_check, triggered):
+        t = TraceRecord(question_id="q", run_id="r", condition="A", web_check=web_check,
+                        web_triggered=triggered, claims=[AnswerClaim(text="x")])
+        con = Console(record=True, width=200)
+        print_answer(t, console=con)
+        return con.export_text()
+
+    assert "web not searched (local evidence judged sufficient)" in footer(
+        {"sufficient": True}, False)
+    assert "web searched (local evidence insufficient)" in footer({"sufficient": False}, True)
+    assert "web" not in footer(None, False).split("claims")[-1]  # no gate: nothing said

@@ -31,10 +31,14 @@ class Sources:
     wiki: bool = False
     pdf: bool = True
     web: bool = False
+    web_gated: bool = False  # web only when the local evidence is judged insufficient
 
     def describe(self) -> str:
         on = ["repository (" + ("OpenWiki-guided" if self.wiki else "vector search") + ")"]
-        on += [s for s in ("pdf", "web") if getattr(self, s)]
+        if self.pdf:
+            on.append("pdf")
+        if self.web:
+            on.append("web (when local evidence is insufficient)" if self.web_gated else "web")
         return ", ".join(on)
 
 
@@ -146,7 +150,8 @@ class ChatSession:
         m = self.manifest
         if m is None:
             return self.settings.sources
-        return Sources(wiki=m.condition == "B", pdf=m.pdf_enabled, web=m.web.enabled)
+        return Sources(wiki=m.condition == "B", pdf=m.pdf_enabled, web=m.web.enabled,
+                       web_gated=m.web.gated)
 
     async def _open(self) -> None:
         from dwb.runner import build_components, start_wiki
@@ -279,6 +284,10 @@ def print_answer(trace: TraceRecord, *, show_context: bool = False, console=None
         stats += f", [red]{unresolved} citation IDs did not resolve[/]"
     if trace.wiki_section_refs:
         stats += f", {len(trace.wiki_section_refs)} wiki sections searched"
+    if trace.web_check is not None:
+        stats += (", web not searched (local evidence judged sufficient)"
+                  if trace.web_check.get("sufficient") is True and not trace.web_triggered
+                  else ", web searched (local evidence insufficient)")
     stats += f", {trace.validation.get('elapsed_s', 0):.1f} s"
     console.print(f"[dim]{stats}[/]")
 
