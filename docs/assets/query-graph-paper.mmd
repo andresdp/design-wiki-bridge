@@ -1,0 +1,35 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	prepare(prepare)
+	code_retrieve(code_retrieve)
+	wiki_retrieve(wiki_retrieve)
+	pdf_retrieve(pdf_retrieve)
+	join_local(join_local<hr/><small><em>defer = True</em></small>)
+	web_retrieve(web_retrieve)
+	rerank(rerank)
+	assemble_context(assemble_context)
+	generate(generate)
+	validate(validate)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> prepare;
+	assemble_context --> generate;
+	code_retrieve --> join_local;
+	generate --> validate;
+	join_local -.-> rerank;
+	join_local -.-> web_retrieve;
+	pdf_retrieve --> join_local;
+	prepare -.-> code_retrieve;
+	prepare -.-> pdf_retrieve;
+	rerank --> assemble_context;
+	web_retrieve --> rerank;
+	validate --> __end__;
+	prepare -.-> wiki_retrieve;
+	wiki_retrieve --> join_local;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
