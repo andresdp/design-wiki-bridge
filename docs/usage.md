@@ -268,7 +268,7 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
   - `replay` uses stored results only.
   - `live` stores nothing and is for latency measurements.
   
-  A `record` run searches the web for every question that allows it, even when the web gate decides the local evidence is enough (it then stores the result and uses nothing). So after one record run, a replay of either condition finds its web evidence whatever its own verdict.
+  A `record` run searches the web for every question that allows it, even when the web gate decides the local evidence is enough (it then stores the result and uses nothing). So after one record run, a replay of either condition finds its web evidence whatever its own verdict. If Tavily fails during such a capture, the question is not degraded, but `run_summary.json` counts it in `web_capture_failed`; record again before replaying.
 - **Web gate:** with `web.conditional_web_search: true` (the default), web runs only when the `check_local` judge finds the local evidence insufficient. A gated manifest needs `prompts.sufficiency` (`experiment run` and `experiment check` stop and name it otherwise); saved runs without it can still be evaluated. The judge uses `models.generator`. Because A and B judge their own evidence, they can disagree: `experiment evaluate` writes `web_gate.csv` with the escalation rate per condition, how many gated questions the two conditions agreed or disagreed on, and how many questions whose reference evidence includes the web the judge kept local.
 - **Evaluate:** `experiment evaluate` scores two runs offline:
   - evidence recall for the candidates and the final context;
