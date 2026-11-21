@@ -284,10 +284,11 @@ def print_answer(trace: TraceRecord, *, show_context: bool = False, console=None
         stats += f", [red]{unresolved} citation IDs did not resolve[/]"
     if trace.wiki_section_refs:
         stats += f", {len(trace.wiki_section_refs)} wiki sections searched"
-    if trace.web_check is not None:
-        stats += (", web not searched (local evidence judged sufficient)"
-                  if trace.web_check.get("sufficient") is True and not trace.web_triggered
-                  else ", web searched (local evidence insufficient)")
+    if trace.web_verdict:
+        stats += {"sufficient": ", web not searched (local evidence judged sufficient)",
+                  "insufficient": ", web searched (local evidence insufficient)",
+                  "judge_failed": ", web searched (the sufficiency check failed)",
+                  }[trace.web_verdict]
     stats += f", {trace.validation.get('elapsed_s', 0):.1f} s"
     console.print(f"[dim]{stats}[/]")
 

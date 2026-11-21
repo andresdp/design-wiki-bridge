@@ -75,6 +75,15 @@ class TraceRecord(BaseModel):
     def degraded(self) -> bool:
         return bool(self.warnings)
 
+    @property
+    def web_verdict(self) -> str:
+        """The web gate's verdict: ``sufficient`` / ``insufficient`` / ``judge_failed``, or
+        empty when no gate ran."""
+        if self.web_check is None:
+            return ""
+        return {True: "sufficient", False: "insufficient"}.get(
+            self.web_check.get("sufficient"), "judge_failed")
+
 
 class TraceWriter:
     """Appends one JSON line per question, flushed and fsynced so a crash keeps completed ones."""

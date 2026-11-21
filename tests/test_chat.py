@@ -512,3 +512,15 @@ def test_sources_line_and_answer_footer_mention_the_web_gate():
         {"sufficient": True}, False)
     assert "web searched (local evidence insufficient)" in footer({"sufficient": False}, True)
     assert "web" not in footer(None, False).split("claims")[-1]  # no gate: nothing said
+
+
+def test_answer_footer_names_a_failed_sufficiency_check():
+    from rich.console import Console
+
+    from dwb.trace import AnswerClaim, TraceRecord
+
+    t = TraceRecord(question_id="q", run_id="r", condition="A", web_triggered=True,
+                    web_check={"sufficient": None}, claims=[AnswerClaim(text="x")])
+    con = Console(record=True, width=200)
+    print_answer(t, console=con)
+    assert "web searched (the sufficiency check failed)" in con.export_text()

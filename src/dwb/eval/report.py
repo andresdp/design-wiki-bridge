@@ -34,14 +34,6 @@ def _counted(stage) -> bool:
     return stage.extra.get("used") is not False
 
 
-def web_check_label(trace: TraceRecord) -> str:
-    """``sufficient`` / ``insufficient`` / ``judge_failed``, or empty when no gate ran."""
-    wc = trace.web_check
-    if wc is None:
-        return ""
-    return {True: "sufficient", False: "insufficient"}.get(wc.get("sufficient"), "judge_failed")
-
-
 def question_row(record: QuestionRecord, trace: TraceRecord, judge: ClaimsJudge | None,
                  rules: MatchRules) -> dict[str, Any]:
     r = recall(record, trace, rules)
@@ -52,7 +44,7 @@ def question_row(record: QuestionRecord, trace: TraceRecord, judge: ClaimsJudge 
         "recall_candidates_jaccard": r.candidates_jaccard,
         "recall_final_jaccard": r.final_jaccard,
         "empty_context": trace.empty_context, "web_triggered": trace.web_triggered,
-        "web_check": web_check_label(trace),
+        "web_check": trace.web_verdict,
         # the reference evidence includes a web source (the gate should not call it sufficient)
         "web_reference": any(a.source_type == "web" for e in record.evidence
                              for a in e.alternatives),

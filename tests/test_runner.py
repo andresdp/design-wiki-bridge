@@ -398,7 +398,7 @@ def test_cli_run_interrupted_after_one_question_reports_what_was_kept(tmp_path, 
 
 
 def test_record_runs_capture_web_even_when_the_gate_says_sufficient(tmp_path):
-    """The runner turns on capture-all for record runs (KTD-W5); replay runs do not."""
+    """The runner turns on capture-all for record runs; replay runs do not."""
     from graph_fakes import judge
     from web.test_tavily_store import StubClient
 

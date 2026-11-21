@@ -56,7 +56,7 @@ async def run_questions(
     ``TraceRecord`` plus the running failed/degraded/empty_context counts) and a done event
     carrying the summary."""
     # record runs capture web for every eligible item, so a replay of either condition
-    # finds it whatever that condition's gate verdict (KTD-W5)
+    # finds it whatever that condition's gate verdict
     graph = build_graph(components, m, capture_all_web=m.web.mode == "record")
     t_run = time.perf_counter()
     run_stages = list(run_stages or [])

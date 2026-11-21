@@ -100,7 +100,7 @@ def test_prompt_hash_changes_with_text(tmp_path):
         PromptRef(path="p.md", sha256=h1).resolve(tmp_path)
 
 
-# --- conditional web search (U1) ---------------------------------------------------------
+# --- conditional web search --------------------------------------------------------------
 
 
 def test_conditional_web_search_defaults_on(tmp_path, base):

@@ -43,6 +43,7 @@ class SufficiencyJudge:
         kw = {"method": structured_method} if structured_method else {}
         self.chain = self.prompt | llm.with_structured_output(_JudgeOutput, **kw)
         self.model_id = model_id or getattr(llm, "model_name", None) or type(llm).__name__
+        self.structured_method = structured_method
 
     async def ajudge(self, question: str, context: Context) -> tuple[Verdict, StageRecord]:
         usage = UsageMetadataCallbackHandler()
@@ -68,6 +69,7 @@ class SufficiencyJudge:
             candidate_ids=list(context.ids),
             count=len(context.ids),
             extra={"model": self.model_id, "prompt_hash": self.prompt_hash, **u.extra(),
+                   "structured_method": self.structured_method,
                    "sufficient": verdict.sufficient, "error": error},
         )
         return verdict, stage

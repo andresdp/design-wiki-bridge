@@ -5,9 +5,9 @@ pdf_retrieve} -> join_local (defer=True) -> [check_local] -> [web_retrieve] -> r
 assemble_context -> generate -> validate. With no candidates the graph ends at
 ``empty_context`` (R5) and never substitutes another retriever.
 
-Web is a wider search after a narrow one: it runs only for items that allow it and, when
-``web.conditional_web_search`` is on, only after ``check_local``'s judge finds the local
-evidence insufficient (KTD7 as revised by the conditional-web-search plan).
+Web runs only for items that allow it and, when ``web.conditional_web_search`` is on, only
+after ``check_local``'s judge finds the local evidence insufficient (KTD7 as revised; see
+docs/architecture.md §4).
 """
 
 from __future__ import annotations
@@ -210,20 +210,23 @@ def build_graph(c: Components, m: RunManifest, *, capture_all_web: bool = False)
         out: dict = {"web_check": {"sufficient": verdict.sufficient, "reason": verdict.reason,
                                    "judged": True, "seen_ids": list(ctx.ids)},
                      "stages": [st]}
-        if verdict.sufficient is None:  # failed judge: search the web (degraded, KTD-W4)
+        if verdict.sufficient is None:  # failed judge: search the web, question degraded
             LOG.warning("    check_local failed, searching the web: %s", st.extra["error"])
             out["warnings"] = [f"check_local: {st.extra['error']} (searched the web)"]
         return out
 
+    def capture_only(s: GraphState) -> bool:
+        """A record run storing web results the gate decided not to use."""
+        return capture_all_web and (s.get("web_check") or {}).get("sufficient") is True
+
     def route_after_check(s: GraphState) -> str:
-        if s["web_check"]["sufficient"] is not True or capture_all_web:
+        if s["web_check"]["sufficient"] is not True or capture_only(s):
             return "web_retrieve"
         return "rerank"
 
     async def web_retrieve(s: GraphState) -> dict:
         t0 = time.perf_counter()
-        # capture only: a record run storing web results the gate decided not to use
-        capture_only = capture_all_web and (s.get("web_check") or {}).get("sufficient") is True
+        capture = capture_only(s)
         try:
             items = await asyncio.to_thread(
                 c.web_store.search, s["query"], max_results=m.web.max_results,
@@ -232,13 +235,13 @@ def build_graph(c: Components, m: RunManifest, *, capture_all_web: bool = False)
         except ReplayMiss:
             raise  # a replay run must not quietly answer without its frozen web evidence
         except Exception as e:
-            if capture_only:  # nothing was going to use it: not a degraded answer
+            if capture:  # nothing was going to use it: not a degraded answer
                 return {"web_candidates": [], "stages": [_stage(
                     "web_retrieve", t0, error=f"{type(e).__name__}: {e}", used=False)]}
             return _degraded("web_retrieve", t0, e, web_candidates=[], web_triggered=True)
-        extra = {"mode": m.web.mode, "used": not capture_only,
+        extra = {"mode": m.web.mode, "used": not capture,
                  **getattr(c.web_store, "last_call", {})}
-        if capture_only:
+        if capture:
             return {"web_candidates": [],
                     "stages": [_stage("web_retrieve", t0, captured=len(items), **extra)]}
         return {"web_candidates": items, "web_triggered": True,
