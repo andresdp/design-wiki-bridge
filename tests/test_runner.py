@@ -395,3 +395,23 @@ def test_cli_run_interrupted_after_one_question_reports_what_was_kept(tmp_path, 
             "Rerun with --overwrite to restart it.") in r.stderr
     assert len(read_traces(tmp_path / traces)) == 1
     assert not (tmp_path / "runs" / m.run_id / "run_summary.json").exists()
+
+
+def test_record_runs_capture_web_even_when_the_gate_says_sufficient(tmp_path):
+    """The runner turns on capture-all for record runs (KTD-W5); replay runs do not."""
+    from graph_fakes import judge
+    from web.test_tavily_store import StubClient
+
+    m = setup(tmp_path, [custom_q()])
+    for mode, expect_calls in (("record", 1), ("replay", 0)):
+        stub = StubClient()
+        store = TavilyStore(tmp_path / mode, "s", mode=mode, client=stub)
+        mm = m.model_copy(update={"web": m.web.model_copy(update={"mode": mode}),
+                                  "run_id": f"r-{mode}"})
+        if mode == "replay":  # replay needs the recording: copy it over
+            shutil.copytree(tmp_path / "record" / "s", tmp_path / "replay" / "s")
+        c = components("A", web_store=store, judge_=judge(True))
+        run_manifest(mm, c, base_dir=tmp_path, runs_dir=tmp_path / "runs")
+        (t,) = read_traces(tmp_path / "runs" / mm.run_id / "traces.jsonl")
+        assert len(stub.calls) == expect_calls and not t.web_triggered
+        assert ("web_retrieve" in [s.name for s in t.stages]) is (mode == "record")

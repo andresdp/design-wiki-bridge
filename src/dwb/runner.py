@@ -55,7 +55,9 @@ async def run_questions(
     question once its trace is written (``outcome`` ok/failed/degraded/empty, ``data`` the
     ``TraceRecord`` plus the running failed/degraded/empty_context counts) and a done event
     carrying the summary."""
-    graph = build_graph(components, m)
+    # record runs capture web for every eligible item, so a replay of either condition
+    # finds it whatever that condition's gate verdict (KTD-W5)
+    graph = build_graph(components, m, capture_all_web=m.web.mode == "record")
     t_run = time.perf_counter()
     run_stages = list(run_stages or [])
     LOG.debug("Run [bold]%s[/]: condition %s, %s @ %s, %d questions → %s", m.run_id,
@@ -220,6 +222,13 @@ def build_components(
     if m.web.enabled:
         LOG.info("Web: Tavily store %s in [bold]%s[/] mode", m.web.store_id, m.web.mode)
         c.web_store = TavilyStore(tavily_root, m.web.store_id or "live", mode=m.web.mode)
+        if m.web.gated:
+            from dwb.sufficiency import SufficiencyJudge
+
+            LOG.info("Web gate: searched only when %s judges the local evidence insufficient",
+                     m.models.generator)
+            c.judge = SufficiencyJudge(gen_llm, base_dir / m.prompts["sufficiency"].path,
+                                       model_id=m.models.generator)
     if m.condition == "A":
         LOG.info("Repository branch A: code index %s", m.indexes.code_index_id)
         index = VectorIndex.open(index_root, m.indexes.code_index_id, emb)
