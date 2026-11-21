@@ -7,8 +7,10 @@ from pathlib import Path
 from dwb.evidence import EvidenceItem, PdfLocator, code_item
 from dwb.generate import Generator
 from dwb.graph import Components
+from dwb.prompts import SUFFICIENCY_PROMPT
 from dwb.rerank import LLMListwiseReranker
 from dwb.retrieval.wiki_types import ResolveResult, Section, SectionRef, UnresolvedRef
+from dwb.sufficiency import SufficiencyJudge
 from fakes import FakeStructuredChat
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,13 +79,24 @@ def cite_all(messages):
     return {"claims": [{"text": "It works this way.", "evidence_ids": ids}], "summary": None}
 
 
-def components(condition, *, wiki=None, resolver=None, pdf=True, web_store=None):
+def judge(sufficient=False, reason=None):
+    """A real ``SufficiencyJudge`` over a fake model. ``sufficient`` may be a callable
+    (``messages -> dict``) to fail or inspect the call."""
+    payload = sufficient if callable(sufficient) else {
+        "sufficient": sufficient, "reason": reason or f"fake verdict {sufficient}"}
+    return SufficiencyJudge(FakeStructuredChat(payload), SUFFICIENCY_PROMPT, model_id="fake")
+
+
+def components(condition, *, wiki=None, resolver=None, pdf=True, web_store=None,
+               judge_=None):
+    """Default judge says insufficient, so web-eligible tests keep the pre-gate routing."""
     llm_rank = FakeStructuredChat(lambda m: {"ranked_document_ids": list(range(60))})
     c = Components(
         reranker=LLMListwiseReranker(llm_rank, pool_cap=40, top_n=12, model_id="fake"),
         generator=Generator(FakeStructuredChat(cite_all), PROMPT, model_id="fake"),
         pdf_retriever=FakeRetriever(pdf_items()) if pdf else None,
         web_store=web_store,
+        judge=judge_ if judge_ is not None else judge(False),
     )
     if condition == "A":
         c.code_retriever = FakeRetriever(code_items())

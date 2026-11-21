@@ -151,9 +151,11 @@ The **repository is always a source**. The others are optional:
 | Repository: vector search (default) | Code, tests, and in-repo docs at the indexed commit, found by similarity to the question | `dwb index` |
 | Repository: **wiki** (`--wiki`) | The same code, found by following the generated OpenWiki documentation to the code it describes. Wiki text itself is never cited. It replaces vector search while on. | `wiki.enabled` and a wiki matching HEAD |
 | **PDFs** (`--pdf`) | Pages from your PDF documents | `pdfs:` in the config |
-| **Web** (`--web`) | Live Tavily web search, minus the excluded domains | `TAVILY_API_KEY` |
+| **Web** (`--web`) | Live Tavily web search, minus the excluded domains. By default it runs only when the repository, wiki and PDF evidence is judged not enough to answer (see below) | `TAVILY_API_KEY` |
 
-The defaults come from `sources:` in the config. **Vector search or wiki?** Vector search finds code that looks similar to the question. The wiki helps with "how do these parts fit together" questions that span files, but it can miss topics the wiki doesn't cover. Try both on the same question.
+The defaults come from `sources:` in the config. **When is the web searched?** With `web.conditional_web_search: true` (the default), `dwb` first gathers repository and PDF evidence, then asks the chat model whether that evidence can answer every part of the question. Only if it cannot (or there is no local evidence) does it search the web. The sources line says `web (when local evidence is insufficient)`, and each answer's footer says whether the web was searched. Set it to `false` to search the web for every question while web is on.
+
+**Vector search or wiki?** Vector search finds code that looks similar to the question. The wiki helps with "how do these parts fit together" questions that span files, but it can miss topics the wiki doesn't cover. Try both on the same question.
 
 ### Reading an answer (both modes)
 
@@ -206,6 +208,7 @@ web:
   exclude_domains: [github.com, requests.readthedocs.io, pypi.org]
   max_results: 5
   search_depth: basic
+  conditional_web_search: true    # web only when the local evidence is judged insufficient
 wiki:
   enabled: false
   generate: false                 # let `dwb index` run OpenWiki when openwiki/ is missing or stale
@@ -265,7 +268,8 @@ dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/
   - `replay` uses stored results only.
   - `live` stores nothing and is for latency measurements.
   
-  Run A with `record` first, so B replays identical web results.
+  A `record` run searches the web for every question that allows it, even when the web gate decides the local evidence is enough (it then stores the result and uses nothing). So after one record run, a replay of either condition finds its web evidence whatever its own verdict. If Tavily fails during such a capture, the question is not degraded, but `run_summary.json` counts it in `web_capture_failed`; record again before replaying.
+- **Web gate:** with `web.conditional_web_search: true` (the default), web runs only when the `check_local` judge finds the local evidence insufficient. A gated manifest needs `prompts.sufficiency` (`experiment run` and `experiment check` stop and name it otherwise); saved runs without it can still be evaluated. The judge uses `models.generator`. Because A and B judge their own evidence, they can disagree: `experiment evaluate` writes `web_gate.csv` with the escalation rate per condition, how many gated questions the two conditions agreed or disagreed on, and how many questions whose reference evidence includes the web the judge kept local.
 - **Evaluate:** `experiment evaluate` scores two runs offline:
   - evidence recall for the candidates and the final context;
   - required-claim correctness and citation support and coverage, from the judge in `configs/eval.yaml`;

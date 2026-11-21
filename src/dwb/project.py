@@ -84,6 +84,8 @@ class WebCfg(_M):
     exclude_domains: list[str] = Field(default_factory=list)
     max_results: int = 5
     search_depth: str = "basic"
+    # true: search the web only when the code/wiki/PDF evidence is judged insufficient
+    conditional_web_search: bool = True
 
 
 class WikiCfg(_M):
@@ -112,6 +114,8 @@ class ProjectConfig(_M):
             "#   pdfs:    local files or folders (relative to the repo root) or URLs\n"
             "#   wiki:    OpenWiki-guided repository search; generate = run OpenWiki in\n"
             "#            `dwb index` when openwiki/ is missing or older than HEAD\n"
+            "#   web:     conditional_web_search = search the web only when the code, wiki\n"
+            "#            and PDF evidence is judged insufficient (false: always, when on)\n"
         )
         return header + yaml.safe_dump(self.model_dump(), sort_keys=False)
 
@@ -350,7 +354,8 @@ class ProjectWorkspace(Workspace):
             models={"generator": c.models.chat, "reranker": c.models.chat,
                     "embedding": c.models.embedding, "temperature": c.models.temperature},
             sources=c.sources.model_dump(),
-            web={"max_results": c.web.max_results, "search_depth": c.web.search_depth},
+            web={"max_results": c.web.max_results, "search_depth": c.web.search_depth,
+                 "conditional_web_search": c.web.conditional_web_search},
             prompt=str(GENERATE_PROMPT),
             # the span size the code index was cut with (checked when chat opens the index)
             budgets={"max_span_tokens": c.code.max_span_tokens},

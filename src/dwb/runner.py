@@ -12,7 +12,7 @@ from dwb.benchmark.freeze import file_hash
 from dwb.benchmark.schemas import QuestionRecord, load_records
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
-from dwb.manifest import MODEL_NET, RunManifest
+from dwb.manifest import MODEL_NET, RunManifest, require_runnable
 from dwb.progress import OnProgress, report
 from dwb.trace import RunDir, StageRecord, TraceRecord
 
@@ -55,7 +55,9 @@ async def run_questions(
     question once its trace is written (``outcome`` ok/failed/degraded/empty, ``data`` the
     ``TraceRecord`` plus the running failed/degraded/empty_context counts) and a done event
     carrying the summary."""
-    graph = build_graph(components, m)
+    # record runs capture web for every eligible item, so a replay of either condition
+    # finds it whatever that condition's gate verdict
+    graph = build_graph(components, m, capture_all_web=m.web.mode == "record")
     t_run = time.perf_counter()
     run_stages = list(run_stages or [])
     LOG.debug("Run [bold]%s[/]: condition %s, %s @ %s, %d questions → %s", m.run_id,
@@ -67,7 +69,7 @@ async def run_questions(
         if startup is not None:
             run_stages.append(startup)
         counts = await _run_all(graph, m, questions, run_dir, on_progress)
-    n_failed, n_degraded, n_empty, n_web, n_unresolved = counts
+    n_failed, n_degraded, n_empty, n_web, n_unresolved, n_capture_failed = counts
     summary = {
         "run_id": m.run_id,
         "condition": m.condition,
@@ -76,11 +78,17 @@ async def run_questions(
         "degraded": n_degraded,
         "empty_context": n_empty,
         "web_triggered": n_web,
+        # record runs: web captures that failed, so replays of those questions may miss
+        "web_capture_failed": n_capture_failed,
         "unresolved_citation_ids": n_unresolved,
         "elapsed_s": round(time.perf_counter() - t_run, 3),
         "run_stages": [s.model_dump() for s in run_stages],
     }
     run_dir.write_summary(summary)
+    if n_capture_failed:
+        LOG.warning("%d web captures failed in this record run; replays of those questions "
+                    "will miss if their gate asks for the web. Rerun with --web-mode record.",
+                    n_capture_failed)
     style = "red" if n_failed else "green"
     LOG.debug("[%s]Done[/]: %d questions, %d failed, %d degraded, %d empty context, %d with web, "
               "%d unresolved citation IDs, %.1f s. Traces: %s", style, len(questions), n_failed,
@@ -107,8 +115,8 @@ async def start_wiki(stack: AsyncExitStack, components: Components) -> StageReco
 async def _run_all(
     graph, m: RunManifest, questions: list[QuestionRecord], run_dir: RunDir,
     on_progress: OnProgress | None,
-) -> tuple[int, int, int, int, int]:
-    n_failed = n_degraded = n_empty = n_web = n_unresolved = 0
+) -> tuple[int, int, int, int, int, int]:
+    n_failed = n_degraded = n_empty = n_web = n_unresolved = n_capture_failed = 0
     total = len(questions)
     with run_dir.writer() as w:
         for i, q in enumerate(questions, start=1):
@@ -127,12 +135,14 @@ async def _run_all(
             n_empty += rec.empty_context
             n_web += rec.web_triggered
             n_unresolved += int(rec.validation.get("n_unresolved_ids", 0) or 0)
+            n_capture_failed += any(s.name == "web_retrieve" and s.extra.get("used") is False
+                                    and s.extra.get("error") for s in rec.stages)
             w.append(rec)
             report(on_progress, "run", "step", done=i, total=total, label=q.id,
                    outcome=outcome(rec), elapsed_s=elapsed,
                    data={"trace": rec, "failed": n_failed, "degraded": n_degraded,
                          "empty_context": n_empty})
-    return n_failed, n_degraded, n_empty, n_web, n_unresolved
+    return n_failed, n_degraded, n_empty, n_web, n_unresolved, n_capture_failed
 
 
 def outcome(rec: TraceRecord) -> str:
@@ -220,6 +230,13 @@ def build_components(
     if m.web.enabled:
         LOG.info("Web: Tavily store %s in [bold]%s[/] mode", m.web.store_id, m.web.mode)
         c.web_store = TavilyStore(tavily_root, m.web.store_id or "live", mode=m.web.mode)
+        if m.web.gated:
+            from dwb.sufficiency import SufficiencyJudge
+
+            LOG.info("Web gate: searched only when %s judges the local evidence insufficient",
+                     m.models.generator)
+            c.judge = SufficiencyJudge(gen_llm, base_dir / m.prompts["sufficiency"].path,
+                                       model_id=m.models.generator)
     if m.condition == "A":
         LOG.info("Repository branch A: code index %s", m.indexes.code_index_id)
         index = VectorIndex.open(index_root, m.indexes.code_index_id, emb)
@@ -285,6 +302,7 @@ def run_manifest(
     on_progress: OnProgress | None = None,
 ) -> dict[str, Any]:
     """Check the question set before anything else, then process every question."""
+    require_runnable(m)
     questions = load_question_set(m, base_dir)
     LOG.info("Question set %s: %d questions (%s)", m.question_set.id, len(questions),
              "frozen, hash verified" if m.question_set.hash else "not frozen (dev)")

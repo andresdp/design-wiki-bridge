@@ -19,7 +19,7 @@ from typing import Any
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
 from dwb.manifest import Indexes, Models, PromptRef, QuestionSetRef, RunManifest, WebConfig
-from dwb.prompts import GENERATE_PROMPT
+from dwb.prompts import GENERATE_PROMPT, SUFFICIENCY_PROMPT
 from dwb.trace import TraceRecord
 from dwb.workspace import Workspace, WorkspaceError
 
@@ -31,10 +31,14 @@ class Sources:
     wiki: bool = False
     pdf: bool = True
     web: bool = False
+    web_gated: bool = False  # web only when the local evidence is judged insufficient
 
     def describe(self) -> str:
         on = ["repository (" + ("OpenWiki-guided" if self.wiki else "vector search") + ")"]
-        on += [s for s in ("pdf", "web") if getattr(self, s)]
+        if self.pdf:
+            on.append("pdf")
+        if self.web:
+            on.append("web (when local evidence is insufficient)" if self.web_gated else "web")
         return ", ".join(on)
 
 
@@ -111,13 +115,17 @@ def build_manifest(ws: Workspace, s: ChatSettings) -> tuple[RunManifest, list[st
         rcfg.web_exclude_domains
     web = WebConfig(enabled=sources.web, mode="record", store_id=f"chat-{s.repo}",
                     max_results=cfg.web.max_results, search_depth=cfg.web.search_depth,
-                    exclude_domains=list(excl))
+                    exclude_domains=list(excl),
+                    conditional_web_search=cfg.web.conditional_web_search)
+    prompts = {"generate": PromptRef(path=cfg.prompt or str(GENERATE_PROMPT))}
+    if web.gated:
+        prompts["sufficiency"] = PromptRef(path=str(SUFFICIENCY_PROMPT))
     m = RunManifest(
         run_id=f"chat-{s.repo}", condition="B" if sources.wiki else "A", repo=s.repo,
         repo_sha=repo.sha, checkout=str(repo.checkout),
         question_set=QuestionSetRef(id="chat", path="-"), indexes=indexes,
         pdf_enabled=sources.pdf, models=models,
-        prompts={"generate": PromptRef(path=cfg.prompt or str(GENERATE_PROMPT))},
+        prompts=prompts,
         budgets=cfg.budgets.model_copy(), web=web,
     )
     return m, notes
@@ -142,7 +150,8 @@ class ChatSession:
         m = self.manifest
         if m is None:
             return self.settings.sources
-        return Sources(wiki=m.condition == "B", pdf=m.pdf_enabled, web=m.web.enabled)
+        return Sources(wiki=m.condition == "B", pdf=m.pdf_enabled, web=m.web.enabled,
+                       web_gated=m.web.gated)
 
     async def _open(self) -> None:
         from dwb.runner import build_components, start_wiki
@@ -275,6 +284,11 @@ def print_answer(trace: TraceRecord, *, show_context: bool = False, console=None
         stats += f", [red]{unresolved} citation IDs did not resolve[/]"
     if trace.wiki_section_refs:
         stats += f", {len(trace.wiki_section_refs)} wiki sections searched"
+    if trace.web_verdict:
+        stats += {"sufficient": ", web not searched (local evidence judged sufficient)",
+                  "insufficient": ", web searched (local evidence insufficient)",
+                  "judge_failed": ", web searched (the sufficiency check failed)",
+                  }[trace.web_verdict]
     stats += f", {trace.validation.get('elapsed_s', 0):.1f} s"
     console.print(f"[dim]{stats}[/]")
 

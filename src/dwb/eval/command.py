@@ -131,6 +131,16 @@ def evaluate_runs(
              out, result["paired"], result["judge_calls"], result["judge_cache_hits"])
     if result["missing_from_one_side"]:
         LOG.warning("Not paired (missing from one run): %s", result["missing_from_one_side"])
+    g = result["web_gate"]
+    if g["n_gated"]:
+        LOG.info("Web gate on %d questions: escalated A %.0f%%, B %.0f%%; %d discordant "
+                 "(answered with web in one condition only)", g["n_gated"],
+                 100 * g["escalation_rate_A"], 100 * g["escalation_rate_B"], g["discordant"])
+        kept = g["web_reference_judged_sufficient_A"] + g["web_reference_judged_sufficient_B"]
+        if kept:
+            LOG.warning("The judge kept %d web-needing questions local (A %d, B %d); see "
+                        "web_gate.csv", kept, g["web_reference_judged_sufficient_A"],
+                        g["web_reference_judged_sufficient_B"])
     return result
 
 

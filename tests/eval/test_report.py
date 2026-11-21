@@ -207,3 +207,60 @@ def test_cli_evaluate_prints_one_line_per_question_without_a_terminal(tmp_path, 
     assert "Evaluating condition A: 1 traces" in lines and f"  [1/1] {record.id}" in lines
     assert "  ✓ Condition B: 1 traces scored" in lines
     assert "\r" not in r.stderr and "\x1b[" not in r.stderr
+
+
+# --- the web gate (conditional web search) ------------------------------------------------
+
+
+def _gated(trace, sufficient, *stages):
+    from dwb.trace import StageRecord
+
+    check = None if sufficient == "off" else {
+        "sufficient": sufficient, "reason": "r", "judged": True, "seen_ids": ["i1"]}
+    extra = [StageRecord(name=n, input_tokens=t, output_tokens=0, latency_ms=lat, extra=x)
+             for n, t, lat, x in stages]
+    return trace.model_copy(update={"web_check": check, "stages": trace.stages + extra})
+
+
+def test_web_check_label_and_gate_cost(record):
+    from dwb.eval.report import cost_rows
+
+    t = _gated(make_trace(), True,
+               ("check_local", 300, 5, {}),
+               ("web_retrieve", 0, 40, {"used": False, "source": "live"}))
+    row = question_row(record, t, None, MatchRules())
+    assert row["web_check"] == "sufficient"
+    assert row["total_tokens"] == 650 + 300  # generate + the judge
+    assert row["latency_ms"] == 12 + 5  # the capture-only web call is not counted
+    web = [r for r in cost_rows([t]) if r["stage"] == "web_retrieve"]
+    assert web == []  # capture-only calls are not web cost
+    assert question_row(record, _gated(make_trace(), False), None,
+                        MatchRules())["web_check"] == "insufficient"
+    assert question_row(record, _gated(make_trace(), None), None,
+                        MatchRules())["web_check"] == "judge_failed"
+    assert question_row(record, make_trace(), None, MatchRules())["web_check"] == ""
+
+
+def test_web_gate_summary_splits_by_verdict_agreement(record):
+    from dwb.eval.report import web_gate_summary
+
+    d = record.model_dump()
+    d["allowed_sources"] = ["code", "pdf", "web"]
+    d["evidence"].append({"id": "e3", "alternatives": [
+        {"source_type": "web", "url": "https://x.org/a"}]})
+    web_ref = type(record).model_validate(d)
+    verdicts = {"q1": (True, True), "q2": (False, False), "q3": (True, False)}
+    rows_a, rows_b = [], []
+    for qid, (va, vb) in verdicts.items():
+        rec = (web_ref if qid == "q3" else record).model_copy(update={"id": qid})
+        rows_a.append(question_row(rec, _gated(make_trace("A", qid=qid), va), None, MatchRules()))
+        rows_b.append(question_row(rec, _gated(make_trace("B", qid=qid), vb), None, MatchRules()))
+    rows_a.append(question_row(record.model_copy(update={"id": "q4"}),
+                               make_trace("A", qid="q4"), None, MatchRules()))  # no gate
+    s = web_gate_summary(rows_a, rows_b)
+    assert (s["both_sufficient"], s["both_insufficient"], s["discordant"]) == (1, 1, 1)
+    assert s["n_gated"] == 3
+    assert s["escalation_rate_A"] == round(1 / 3, 6) and s["escalation_rate_B"] == round(2 / 3, 6)
+    # the success-criterion check: web-needing items the judge called sufficient
+    assert s["web_reference_judged_sufficient_A"] == 1
+    assert s["web_reference_judged_sufficient_B"] == 0

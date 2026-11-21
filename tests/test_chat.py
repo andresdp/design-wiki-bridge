@@ -72,6 +72,24 @@ def test_manifest_from_sources_and_discovery(ws):
     assert m.models.generator == m.models.reranker == "other"
 
 
+def test_chat_web_is_gated_by_default_with_the_shipped_judge_prompt(ws):
+    from dwb.manifest import require_runnable
+    from dwb.prompts import SUFFICIENCY_PROMPT
+
+    m, _ = build_manifest(ws, ChatSettings(repo="toy", sources=Sources(web=True)))
+    assert m.web.conditional_web_search and m.web.gated
+    assert m.prompts["sufficiency"].path == str(SUFFICIENCY_PROMPT)
+    require_runnable(m)
+    m, _ = build_manifest(ws, ChatSettings(repo="toy"))  # web off: no judge prompt needed
+    assert "sufficiency" not in m.prompts
+    cfg = yaml.safe_load((ws.root / "configs" / "chat.yaml").read_text())
+    cfg["web"] = {"conditional_web_search": False}
+    (ws.root / "configs" / "chat.yaml").write_text(yaml.safe_dump(cfg))
+    m, _ = build_manifest(Workspace(root=ws.root),
+                          ChatSettings(repo="toy", sources=Sources(web=True)))
+    assert not m.web.gated and "sufficiency" not in m.prompts
+
+
 def test_missing_artifacts_give_the_fixing_command(ws):
     with pytest.raises(WorkspaceError, match="dwb wiki snapshot toy"):
         build_manifest(ws, ChatSettings(repo="toy", sources=Sources(wiki=True)))
@@ -472,3 +490,37 @@ def test_ctrl_c_or_ctrl_d_at_the_prompt_leaves_quietly(research, monkeypatch, ke
     assert r.exit_code == 0, r.output
     assert "Stopped" not in r.output and "Error" not in r.output
     assert closed == [True]
+
+
+def test_sources_line_and_answer_footer_mention_the_web_gate():
+    from rich.console import Console
+
+    from dwb.trace import AnswerClaim, TraceRecord
+
+    assert Sources(web=True, web_gated=True).describe().endswith(
+        "web (when local evidence is insufficient)")
+    assert Sources(web=True).describe().endswith(", web")
+
+    def footer(web_check, triggered):
+        t = TraceRecord(question_id="q", run_id="r", condition="A", web_check=web_check,
+                        web_triggered=triggered, claims=[AnswerClaim(text="x")])
+        con = Console(record=True, width=200)
+        print_answer(t, console=con)
+        return con.export_text()
+
+    assert "web not searched (local evidence judged sufficient)" in footer(
+        {"sufficient": True}, False)
+    assert "web searched (local evidence insufficient)" in footer({"sufficient": False}, True)
+    assert "web" not in footer(None, False).split("claims")[-1]  # no gate: nothing said
+
+
+def test_answer_footer_names_a_failed_sufficiency_check():
+    from rich.console import Console
+
+    from dwb.trace import AnswerClaim, TraceRecord
+
+    t = TraceRecord(question_id="q", run_id="r", condition="A", web_triggered=True,
+                    web_check={"sufficient": None}, claims=[AnswerClaim(text="x")])
+    con = Console(record=True, width=200)
+    print_answer(t, console=con)
+    assert "web searched (the sufficiency check failed)" in con.export_text()

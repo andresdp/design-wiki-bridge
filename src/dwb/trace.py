@@ -55,7 +55,10 @@ class TraceRecord(BaseModel):
     wiki_section_refs: list[str] = Field(default_factory=list)
     unresolved_refs: list[dict[str, Any]] = Field(default_factory=list)
     merged_ids: dict[str, str] = Field(default_factory=dict)  # dropped id -> surviving id
-    web_triggered: bool = False
+    web_triggered: bool = False  # web evidence entered the candidate pool
+    # the check_local web gate: sufficient (None = judge failed), reason, judged, seen_ids;
+    # None when the gate did not run (web not allowed, or conditional_web_search off)
+    web_check: dict[str, Any] | None = None
     empty_context: bool = False
     final_context_ids: list[str] = Field(default_factory=list)
     aliases: dict[str, str] = Field(default_factory=dict)  # E1 -> stable id
@@ -71,6 +74,15 @@ class TraceRecord(BaseModel):
     @property
     def degraded(self) -> bool:
         return bool(self.warnings)
+
+    @property
+    def web_verdict(self) -> str:
+        """The web gate's verdict: ``sufficient`` / ``insufficient`` / ``judge_failed``, or
+        empty when no gate ran."""
+        if self.web_check is None:
+            return ""
+        return {True: "sufficient", False: "insufficient"}.get(
+            self.web_check.get("sufficient"), "judge_failed")
 
 
 class TraceWriter:
