@@ -166,7 +166,7 @@ flowchart TD
     empty --> T
 ```
 
-- **Routing is deterministic.** Conditional edges read only the manifest and the item's `allowed_sources`; no model decides which branches run.
+- **Routing is deterministic, except the web gate.** Conditional edges read the manifest and the item's `allowed_sources`; no model decides which repository, PDF or downstream stages run. The one judged edge is web: with `web.conditional_web_search` on, the `check_local` verdict decides whether a web-eligible item searches the web (KTD7 as revised).
 - **The local branches run in parallel.** List-valued state (`stages`, `repo_candidates`, `pdf_candidates`, `unresolved_refs`, `errors`, `warnings`) uses `Annotated[list, operator.add]` reducers. `join_local` is added with `defer=True`, so it runs once after every active branch has finished.
 - **The web is a wider search after a narrow one.** Web runs only for items whose `allowed_sources` include `web`, when the manifest enables it, and is decided after the join, in one place, for both conditions. With `web.conditional_web_search` on (the default), `check_local` first asks one LLM judge (the generator's pinned model, prompt `sufficiency_v1`, temperature 0) whether the merged local evidence can answer every part of the question. The judge reads the local pool interleaved by branch and cut to the context budget, without a rerank. Web runs when the verdict is insufficient, when there is no local evidence (no judge call), or when the judge fails (the question is then degraded). The verdict, its reason and the evidence IDs the judge saw go to the trace as `web_check`. With the flag off, web runs for every eligible item and no judge is called.
 - **Record runs capture web for every eligible item.** In an experiment record run, `web_retrieve` also runs when the verdict is sufficient: it stores the Tavily response and adds nothing (stage `used: false`, `web_triggered` false), so a replay of either condition finds its web evidence whatever its own verdict. Capture-only calls are left out of latency and cost. Chat never captures this way.
@@ -337,7 +337,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 
 | # | Decision | Rationale | Rejected alternatives |
 |---|---|---|---|
-| 1 | **Explicit `StateGraph` with deterministic routing** (KTD11) | The two conditions must be controlled and comparable; an agent choosing tools would add an uncontrolled variable | Deep Agents, LLM routing |
+| 1 | **Explicit `StateGraph` with deterministic routing** (KTD11) | The two conditions must be controlled and comparable; an agent choosing tools would add an uncontrolled variable. The web gate (decision 11) is the one LLM-judged edge: one fixed judge, prompt and budget shared by both conditions, deciding only whether to widen the search | Deep Agents, LLM routing |
 | 2 | **Two interchangeable repository branches; everything downstream shared** (R4, R6) | Isolates the effect of how repository evidence is found. `check_paired` fails any A/B pair that differs in a shared stage | Per-condition tuning |
 | 3 | **Deterministic evidence IDs plus per-prompt aliases** (KTD1) | The same span gets the same ID across runs and conditions, which makes recall comparable. Short `E1…En` aliases keep prompts small and give validation a closed set | Random IDs, citing paths inline |
 | 4 | **Wiki guides discovery, never evidence** (R3) | Answers must cite original code; generated text is not ground truth | Citing wiki sections |

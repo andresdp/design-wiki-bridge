@@ -69,7 +69,7 @@ async def run_questions(
         if startup is not None:
             run_stages.append(startup)
         counts = await _run_all(graph, m, questions, run_dir, on_progress)
-    n_failed, n_degraded, n_empty, n_web, n_unresolved = counts
+    n_failed, n_degraded, n_empty, n_web, n_unresolved, n_capture_failed = counts
     summary = {
         "run_id": m.run_id,
         "condition": m.condition,
@@ -78,11 +78,17 @@ async def run_questions(
         "degraded": n_degraded,
         "empty_context": n_empty,
         "web_triggered": n_web,
+        # record runs: web captures that failed, so replays of those questions may miss
+        "web_capture_failed": n_capture_failed,
         "unresolved_citation_ids": n_unresolved,
         "elapsed_s": round(time.perf_counter() - t_run, 3),
         "run_stages": [s.model_dump() for s in run_stages],
     }
     run_dir.write_summary(summary)
+    if n_capture_failed:
+        LOG.warning("%d web captures failed in this record run; replays of those questions "
+                    "will miss if their gate asks for the web. Rerun with --web-mode record.",
+                    n_capture_failed)
     style = "red" if n_failed else "green"
     LOG.debug("[%s]Done[/]: %d questions, %d failed, %d degraded, %d empty context, %d with web, "
               "%d unresolved citation IDs, %.1f s. Traces: %s", style, len(questions), n_failed,
@@ -109,8 +115,8 @@ async def start_wiki(stack: AsyncExitStack, components: Components) -> StageReco
 async def _run_all(
     graph, m: RunManifest, questions: list[QuestionRecord], run_dir: RunDir,
     on_progress: OnProgress | None,
-) -> tuple[int, int, int, int, int]:
-    n_failed = n_degraded = n_empty = n_web = n_unresolved = 0
+) -> tuple[int, int, int, int, int, int]:
+    n_failed = n_degraded = n_empty = n_web = n_unresolved = n_capture_failed = 0
     total = len(questions)
     with run_dir.writer() as w:
         for i, q in enumerate(questions, start=1):
@@ -129,12 +135,14 @@ async def _run_all(
             n_empty += rec.empty_context
             n_web += rec.web_triggered
             n_unresolved += int(rec.validation.get("n_unresolved_ids", 0) or 0)
+            n_capture_failed += any(s.name == "web_retrieve" and s.extra.get("used") is False
+                                    and s.extra.get("error") for s in rec.stages)
             w.append(rec)
             report(on_progress, "run", "step", done=i, total=total, label=q.id,
                    outcome=outcome(rec), elapsed_s=elapsed,
                    data={"trace": rec, "failed": n_failed, "degraded": n_degraded,
                          "empty_context": n_empty})
-    return n_failed, n_degraded, n_empty, n_web, n_unresolved
+    return n_failed, n_degraded, n_empty, n_web, n_unresolved, n_capture_failed
 
 
 def outcome(rec: TraceRecord) -> str:

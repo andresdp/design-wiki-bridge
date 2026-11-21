@@ -170,7 +170,8 @@ def test_cli_experiment_run_piped_prints_the_summary_json(tmp_path, monkeypatch)
     out = json.loads(r.stdout)
     assert r.stdout == json.dumps(out, indent=2) + "\n"  # json.dumps(summary, indent=2)
     assert list(out) == ["run_id", "condition", "questions", "failed", "degraded",
-                         "empty_context", "web_triggered", "unresolved_citation_ids",
+                         "empty_context", "web_triggered", "web_capture_failed",
+                         "unresolved_citation_ids",
                          "elapsed_s", "run_stages"]
     saved = json.loads((tmp_path / "runs" / m.run_id / "run_summary.json").read_text())
     assert all(saved[k] == v for k, v in out.items())
@@ -415,3 +416,76 @@ def test_record_runs_capture_web_even_when_the_gate_says_sufficient(tmp_path):
         (t,) = read_traces(tmp_path / "runs" / mm.run_id / "traces.jsonl")
         assert len(stub.calls) == expect_calls and not t.web_triggered
         assert ("web_retrieve" in [s.name for s in t.stages]) is (mode == "record")
+
+
+def test_gated_manifests_get_the_same_judge_in_both_conditions(tmp_path, monkeypatch):
+    """build_components wires the sufficiency judge from models.generator and
+    prompts.sufficiency when the gate is on, and leaves it out when the gate is off."""
+    from dwb import runner
+    from dwb.prompts import SUFFICIENCY_PROMPT, load_prompt
+    from dwb.sufficiency import SufficiencyJudge
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(runner, "check_code_index", lambda *a, **k: None)
+
+    class FakeIndex:
+        info = None
+
+        @classmethod
+        def open(cls, *a, **k):
+            return cls()
+
+    import dwb.retrieval.vector_store as vs
+    monkeypatch.setattr(vs, "VectorIndex", FakeIndex)
+    m = manifest("A").model_copy(update={"pdf_enabled": False})
+    c = runner.build_components(m, base_dir=ROOT, index_root=tmp_path, tavily_root=tmp_path,
+                                wiki_root=tmp_path)
+    assert isinstance(c.judge, SufficiencyJudge)
+    assert c.judge.model_id == m.models.generator
+    assert c.judge.prompt_hash == load_prompt(SUFFICIENCY_PROMPT)[1]
+    off = m.model_copy(update={"web": m.web.model_copy(update={"conditional_web_search": False})})
+    c = runner.build_components(off, base_dir=ROOT, index_root=tmp_path, tavily_root=tmp_path,
+                                wiki_root=tmp_path)
+    assert c.judge is None
+
+
+def test_a_gated_run_without_its_judge_prompt_stops_before_writing(tmp_path):
+    from dwb.manifest import ManifestError
+
+    m = setup(tmp_path, [custom_q()])
+    m = m.model_copy(update={"prompts": {"generate": m.prompts["generate"]}})
+    with pytest.raises(ManifestError, match="prompts.sufficiency"):
+        run_manifest(m, components("A"), base_dir=tmp_path, runs_dir=tmp_path / "runs")
+    assert not (tmp_path / "runs").exists()
+
+
+def test_experiment_check_fails_when_a_gated_manifest_lacks_its_judge_prompt(tmp_path):
+    import yaml
+    from typer.testing import CliRunner
+
+    from dwb.cli import app
+
+    for cond in ("A", "B"):
+        d = yaml.safe_load((ROOT / "configs" / "manifests" / f"flask-{cond}.yaml").read_text())
+        d["prompts"].pop("sufficiency")
+        (tmp_path / f"{cond}.yaml").write_text(yaml.safe_dump(d))
+    res = CliRunner().invoke(app, ["experiment", "check", str(tmp_path / "A.yaml"),
+                                   str(tmp_path / "B.yaml")])
+    assert res.exit_code != 0
+    assert "prompts.sufficiency" in res.output
+
+
+def test_failed_web_captures_are_counted_in_the_run_summary(tmp_path):
+    from graph_fakes import judge
+
+    class Down:
+        last_call = {}
+
+        def search(self, query, **kw):
+            raise RuntimeError("tavily down")
+
+    m = setup(tmp_path, [custom_q()])
+    m = m.model_copy(update={"web": m.web.model_copy(update={"mode": "record"})})
+    s = run_manifest(m, components("A", web_store=Down(), judge_=judge(True)),
+                     base_dir=tmp_path, runs_dir=tmp_path / "runs")
+    assert s["web_capture_failed"] == 1 and s["degraded"] == 0 and s["failed"] == 0

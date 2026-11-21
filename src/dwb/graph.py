@@ -235,9 +235,12 @@ def build_graph(c: Components, m: RunManifest, *, capture_all_web: bool = False)
         except ReplayMiss:
             raise  # a replay run must not quietly answer without its frozen web evidence
         except Exception as e:
-            if capture:  # nothing was going to use it: not a degraded answer
+            if capture:  # nothing was going to use it: not a degraded answer, but the store
+                # now lacks this request, so a replay whose gate wants the web will miss
+                msg = f"{type(e).__name__}: {e}"
+                LOG.warning("    web capture failed (replays of this question may miss): %s", msg)
                 return {"web_candidates": [], "stages": [_stage(
-                    "web_retrieve", t0, error=f"{type(e).__name__}: {e}", used=False)]}
+                    "web_retrieve", t0, error=msg, used=False)]}
             return _degraded("web_retrieve", t0, e, web_candidates=[], web_triggered=True)
         extra = {"mode": m.web.mode, "used": not capture,
                  **getattr(c.web_store, "last_call", {})}
