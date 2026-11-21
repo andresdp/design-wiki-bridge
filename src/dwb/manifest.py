@@ -82,6 +82,14 @@ class WebConfig(_Strict):
     # The project's own docs/source sites restate (unpinned) code behavior and would let
     # either condition answer without finding the original code; see the spike doc §8.
     exclude_domains: list[str] = Field(default_factory=list)
+    # True: web runs only when a shared LLM judge finds the local evidence insufficient
+    # (the check_local gate). False: web runs whenever the item allows it.
+    conditional_web_search: bool = True
+
+    @property
+    def gated(self) -> bool:
+        """Web is on and gated by the sufficiency judge."""
+        return self.enabled and self.conditional_web_search
 
     @model_validator(mode="after")
     def _store_needed(self) -> WebConfig:
@@ -121,6 +129,15 @@ class RunManifest(_Strict):
             raise ValueError("pdf_enabled requires indexes.pdf_index_id")
         return self
 
+    def run_problems(self) -> list[str]:
+        """What stops this manifest from running. Checked at run start, not at load, so
+        saved runs from before a requirement existed stay readable by ``evaluate``."""
+        if self.web.gated and "sufficiency" not in self.prompts:
+            return ["prompts.sufficiency is required when web is enabled and "
+                    "web.conditional_web_search is true (add e.g. "
+                    "path: src/dwb/prompt_files/sufficiency_v1.md)"]
+        return []
+
     def resolve_prompts(self, base_dir: Path) -> RunManifest:
         """Return a copy with every prompt hash computed and checked against its file."""
         resolved = {k: v.resolve(base_dir) for k, v in self.prompts.items()}
@@ -142,6 +159,11 @@ def load_manifest(path: str | Path) -> RunManifest:
         raise ManifestError(f"invalid manifest {path}:\n{e}") from e
 
 
+def require_runnable(m: RunManifest) -> None:
+    if problems := m.run_problems():
+        raise ManifestError(f"manifest {m.run_id} cannot run: " + "; ".join(problems))
+
+
 class PairedCheck(BaseModel):
     ok: bool
     failures: list[str] = Field(default_factory=list)
@@ -153,10 +175,14 @@ def _diff(label: str, a: Any, b: Any, out: list[str]) -> None:
         out.append(f"{label}: A={a!r} B={b!r}")
 
 
-def check_paired(a: RunManifest, b: RunManifest) -> PairedCheck:
-    """Fail on any shared-stage difference (R6); only report repository-budget differences (R7)."""
+def check_paired(a: RunManifest, b: RunManifest, *, runnable: bool = False) -> PairedCheck:
+    """Fail on any shared-stage difference (R6); only report repository-budget differences (R7).
+    ``runnable`` also fails on what stops either manifest from running (``run_problems``);
+    evaluation of saved runs leaves it off."""
     failures: list[str] = []
     notes: list[str] = []
+    if runnable:
+        failures += [f"{m.condition}: {p}" for m in (a, b) for p in m.run_problems()]
     if a.condition == b.condition:
         failures.append(f"both manifests use condition {a.condition}")
     _diff("repo", a.repo, b.repo, failures)

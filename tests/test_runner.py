@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def setup(tmp_path, records, *, frozen=True, rel="data/questions/test/flask.jsonl"):
-    (tmp_path / "src/dwb/prompt_files").mkdir(parents=True)
-    (tmp_path / "src/dwb/prompt_files/generate_v2.md").write_text(
-        (ROOT / "src/dwb/prompt_files/generate_v2.md").read_text())
+    shutil.copytree(ROOT / "src/dwb/prompt_files", tmp_path / "src/dwb/prompt_files")
     path = tmp_path / rel
     save_records(records, path)
     digest = freeze(path) if frozen else None

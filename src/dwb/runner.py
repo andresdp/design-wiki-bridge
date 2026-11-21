@@ -12,7 +12,7 @@ from dwb.benchmark.freeze import file_hash
 from dwb.benchmark.schemas import QuestionRecord, load_records
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
-from dwb.manifest import MODEL_NET, RunManifest
+from dwb.manifest import MODEL_NET, RunManifest, require_runnable
 from dwb.progress import OnProgress, report
 from dwb.trace import RunDir, StageRecord, TraceRecord
 
@@ -285,6 +285,7 @@ def run_manifest(
     on_progress: OnProgress | None = None,
 ) -> dict[str, Any]:
     """Check the question set before anything else, then process every question."""
+    require_runnable(m)
     questions = load_question_set(m, base_dir)
     LOG.info("Question set %s: %d questions (%s)", m.question_set.id, len(questions),
              "frozen, hash verified" if m.question_set.hash else "not frozen (dev)")

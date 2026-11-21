@@ -17,6 +17,7 @@ sources:
 web:
   max_results: 5
   search_depth: basic
+  conditional_web_search: true   # search the web only when the local evidence is judged insufficient
 
 # Per-repository settings. Repositories themselves (URL, SHA, checkout) are in configs/repos.yaml.
 repos:

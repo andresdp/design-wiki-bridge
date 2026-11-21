@@ -11,6 +11,7 @@ from dwb.manifest import prompt_hash
 USER_MARKER = "---user---"
 PROMPT_DIR = Path(__file__).parent / "prompt_files"  # shipped with the package
 GENERATE_PROMPT = PROMPT_DIR / "generate_v2.md"
+SUFFICIENCY_PROMPT = PROMPT_DIR / "sufficiency_v1.md"  # the check_local web gate's judge
 
 
 def load_prompt(path: str | Path) -> tuple[ChatPromptTemplate, str]:

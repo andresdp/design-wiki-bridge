@@ -72,6 +72,24 @@ def test_manifest_from_sources_and_discovery(ws):
     assert m.models.generator == m.models.reranker == "other"
 
 
+def test_chat_web_is_gated_by_default_with_the_shipped_judge_prompt(ws):
+    from dwb.manifest import require_runnable
+    from dwb.prompts import SUFFICIENCY_PROMPT
+
+    m, _ = build_manifest(ws, ChatSettings(repo="toy", sources=Sources(web=True)))
+    assert m.web.conditional_web_search and m.web.gated
+    assert m.prompts["sufficiency"].path == str(SUFFICIENCY_PROMPT)
+    require_runnable(m)
+    m, _ = build_manifest(ws, ChatSettings(repo="toy"))  # web off: no judge prompt needed
+    assert "sufficiency" not in m.prompts
+    cfg = yaml.safe_load((ws.root / "configs" / "chat.yaml").read_text())
+    cfg["web"] = {"conditional_web_search": False}
+    (ws.root / "configs" / "chat.yaml").write_text(yaml.safe_dump(cfg))
+    m, _ = build_manifest(Workspace(root=ws.root),
+                          ChatSettings(repo="toy", sources=Sources(web=True)))
+    assert not m.web.gated and "sufficiency" not in m.prompts
+
+
 def test_missing_artifacts_give_the_fixing_command(ws):
     with pytest.raises(WorkspaceError, match="dwb wiki snapshot toy"):
         build_manifest(ws, ChatSettings(repo="toy", sources=Sources(wiki=True)))

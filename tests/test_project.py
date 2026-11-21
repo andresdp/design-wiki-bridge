@@ -584,6 +584,23 @@ def test_custom_span_size_is_carried_into_chat(repo, monkeypatch):
     assert m.budgets.max_span_tokens == 900
 
 
+@pytest.mark.parametrize("conditional", [None, False])
+def test_user_mode_web_gate_reaches_the_chat_manifest(repo, conditional):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    from dwb.chat import ChatSettings, Sources, build_manifest
+
+    web = {} if conditional is None else {"conditional_web_search": conditional}
+    cfg = ProjectConfig(name="toy", models={"chat": "gen-x", "embedding": "fake-64"}, web=web)
+    write_config(repo, cfg)
+    ws = ProjectWorkspace(repo)
+    index_project(ws, embedding=DeterministicFakeEmbedding(size=32))
+    m, _ = build_manifest(ws, ChatSettings(repo="toy", sources=Sources(web=True)))
+    expected = conditional is None  # the default is on
+    assert m.web.conditional_web_search is expected
+    assert ("sufficiency" in m.prompts) is expected
+
+
 # ------------------------------------------------- PDF folders, duplicates, masked API key
 
 

@@ -19,7 +19,7 @@ from typing import Any
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
 from dwb.manifest import Indexes, Models, PromptRef, QuestionSetRef, RunManifest, WebConfig
-from dwb.prompts import GENERATE_PROMPT
+from dwb.prompts import GENERATE_PROMPT, SUFFICIENCY_PROMPT
 from dwb.trace import TraceRecord
 from dwb.workspace import Workspace, WorkspaceError
 
@@ -111,13 +111,17 @@ def build_manifest(ws: Workspace, s: ChatSettings) -> tuple[RunManifest, list[st
         rcfg.web_exclude_domains
     web = WebConfig(enabled=sources.web, mode="record", store_id=f"chat-{s.repo}",
                     max_results=cfg.web.max_results, search_depth=cfg.web.search_depth,
-                    exclude_domains=list(excl))
+                    exclude_domains=list(excl),
+                    conditional_web_search=cfg.web.conditional_web_search)
+    prompts = {"generate": PromptRef(path=cfg.prompt or str(GENERATE_PROMPT))}
+    if web.gated:
+        prompts["sufficiency"] = PromptRef(path=str(SUFFICIENCY_PROMPT))
     m = RunManifest(
         run_id=f"chat-{s.repo}", condition="B" if sources.wiki else "A", repo=s.repo,
         repo_sha=repo.sha, checkout=str(repo.checkout),
         question_set=QuestionSetRef(id="chat", path="-"), indexes=indexes,
         pdf_enabled=sources.pdf, models=models,
-        prompts={"generate": PromptRef(path=cfg.prompt or str(GENERATE_PROMPT))},
+        prompts=prompts,
         budgets=cfg.budgets.model_copy(), web=web,
     )
     return m, notes

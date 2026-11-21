@@ -52,6 +52,7 @@ class ChatSourceDefaults(_ChatStrict):
 class ChatWeb(_ChatStrict):
     max_results: int = 5
     search_depth: Literal["basic", "advanced"] = "basic"
+    conditional_web_search: bool = True  # web only when local evidence is judged insufficient
 
 
 class ChatRepo(_ChatStrict):

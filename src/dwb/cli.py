@@ -754,12 +754,13 @@ def experiment_run(
 
     Ctrl-C stops it; traces already written are kept.
     """
-    from dwb.manifest import load_manifest
+    from dwb.manifest import load_manifest, require_runnable
     from dwb.runner import build_components, load_question_set, run_manifest
 
     if web_mode not in (None, "record", "replay", "live"):
         raise _fail("--web-mode must be record, replay or live")
     m = load_manifest(manifest)
+    require_runnable(m)
     if web_mode:
         m = m.model_copy(update={"web": m.web.model_copy(update={"mode": web_mode})})
         if web_mode == "live":
@@ -808,7 +809,7 @@ def experiment_check(
 
     ma, mb = load_manifest(a), load_manifest(b)
     _open(ma.repo, "research mode", ma.repo_sha[:12], f"{ma.run_id} vs {mb.run_id}")
-    res = check_paired(ma, mb)
+    res = check_paired(ma, mb, runnable=True)
     if ui.json_mode():
         for f in res.failures:
             LOG.error("Shared-stage difference: %s", f)
