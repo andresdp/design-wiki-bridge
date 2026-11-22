@@ -1,18 +1,17 @@
-# Example run manifest, condition A (Requests). Placeholder IDs and models must be replaced
-# before the pilot; KTD14 budgets are the proposed defaults, frozen after the U11 pilot.
-run_id: requests-A-dev-001
+# Test manifest, condition A (requests): the paper's paired run over the frozen
+# test set. Record pass first (--web-mode record), then replay A and B.
+run_id: requests-A-test-001
 condition: A
 repo: requests
 repo_sha: b25c87d7cb8d6a18a37fa12442b5f883f9e41741
 checkout: artifacts/checkouts/requests-v2.32.5
 question_set:
-  id: requests-dev
-  path: data/questions/dev/requests.jsonl
-  hash: null
+  id: requests-test
+  path: data/questions/test/requests.jsonl
+  hash: 5bb97f34beb4feb564f9aad416d0aa694a876ba7eef5979809b71433ca36f7b1   # frozen 2026-11-22
 indexes:
   code_index_id: code-requests-3c43be80eea9   # text-embedding-3-large, 876 chunks, chunker v2
-  pdf_index_id: pdf-requests-v1-2fbd3b7d3bdb   # rfc9110 + rfc9112, 240 pages
-pdf_enabled: true
+pdf_enabled: false        # KTD-B3: Requests has no PDF corpus; RFC material is web
 models:
   generator: gpt-5.6-luna   # KTD10: same model as the wiki generator and the reranker
   reranker: gpt-5.6-luna    # same pinned model as the generator
@@ -36,7 +35,7 @@ budgets:
 web:
   enabled: true
   mode: replay
-  store_id: tavily-requests-v1
+  store_id: tavily-requests-v2   # v2: authored benchmark (PDFs off)
   max_results: 5
   search_depth: basic
   conditional_web_search: true   # false: web whenever the item allows it (no judge)

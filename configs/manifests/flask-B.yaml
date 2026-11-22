@@ -1,17 +1,17 @@
-# Example run manifest, condition B (Flask). Placeholder IDs and models must be replaced
-# before the pilot; KTD14 budgets are the proposed defaults, frozen after the U11 pilot.
-run_id: flask-B-dev-001
+# Test manifest, condition B (flask): the paper's paired run over the frozen
+# test set. Record pass first (--web-mode record), then replay A and B.
+run_id: flask-B-test-001
 condition: B
 repo: flask
 repo_sha: 2c1b30d0503cfb064f1cb252e6614a06915a362a
 checkout: artifacts/checkouts/flask-3.1.2
 question_set:
-  id: flask-dev
-  path: data/questions/dev/flask.jsonl
-  hash: null
+  id: flask-test
+  path: data/questions/test/flask.jsonl
+  hash: 6e37606701bd5169284186693101d889684c8799d4efa4d4aa7090cac5428119   # frozen 2026-11-22
 indexes:
   wiki_snapshot_id: wiki-flask-52e1119f2d9c   # configs/wikis/wiki-flask-52e1119f2d9c.json
-  pdf_index_id: pdf-flask-v1-55138d10d333   # rfc9110 + rfc3875, 226 pages
+  pdf_index_id: pdf-flask-books-v1-5b41dac5d845   # Grinberg, Aggarwal, Aronowitz books, 638 pages
 pdf_enabled: true
 models:
   generator: gpt-5.6-luna   # KTD10: same model as the wiki generator and the reranker
@@ -36,11 +36,12 @@ budgets:
 web:
   enabled: true
   mode: replay
-  store_id: tavily-flask-v2   # v2: captured with exclude_domains (v1 predates it)
+  store_id: tavily-flask-v3   # v3: books corpus, werkzeug docs excluded (keys change)
   max_results: 5
   search_depth: basic
   conditional_web_search: true   # false: web whenever the item allows it (no judge)
   exclude_domains:           # the project's own docs and source hosts (spike doc §8)
     - flask.palletsprojects.com
+    - werkzeug.palletsprojects.com
     - github.com
     - pypi.org

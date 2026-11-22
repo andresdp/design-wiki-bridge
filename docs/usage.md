@@ -257,11 +257,11 @@ dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium -
 dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
 dwb experiment run configs/manifests/flask-A.yaml --web-mode record
 dwb experiment run configs/manifests/flask-B.yaml --web-mode record
-dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/flask-dev
+dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 --out reports/flask-test
 ```
 
 - **Conditions:** condition **A** uses vector search and **B** uses OpenWiki-guided search. Everything else is identical: PDFs, the web policy, the reranker, the context budget, the generator, and the citation format. `experiment check` verifies this for each manifest pair.
-- **Manifests:** manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets.
+- **Manifests:** manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets. `<repo>-{A,B}.yaml` run the frozen test set; `<repo>-{A,B}-dev.yaml` run the development set with identical settings (the pilot; tune only on non-variant development questions). Flask uses the three-book PDF index; Requests has PDFs off.
 - **Run:** `experiment run` writes `runs/<run_id>/`, containing the frozen manifest, `traces.jsonl` (one record per question), and `run_summary.json`. Code passages are stored by reference (commit, path, lines); `experiment evaluate` reads their text back from the checkout named in the manifest, so keep that checkout. A test set must be frozen; its hash is in the manifest, and it is checked before anything else runs. `--overwrite` replaces a previous run. If one source fails for a question (for example the OpenWiki server, or the reranker call), the question is still answered from the other sources and marked degraded; `run_summary.json` counts `failed` and `degraded` questions separately. Condition A refuses a code index built with a different `max_span_tokens` or an older chunker version: rebuild it with `dwb index code <repo>` and put the new ID in the manifest.
 - **Web modes:**
   - `record` calls Tavily for searches that aren't stored yet and saves them.
@@ -374,7 +374,7 @@ wiki      ok     wiki-flask-52e1119f2d9c
 A command that ends well prints `✓`, what happened, and the next step:
 
 ```
-flask · research mode · 2c1b30d0503c · flask-A-dev-001 vs flask-B-dev-001
+flask · research mode · 2c1b30d0503c · flask-A-test-001 vs flask-B-test-001
 Kind  Detail
 note  repository candidate budget differs: A=40 B=20 (reported, R7)
 ✓ Paired check passed: the manifests differ only in the repository branch → next: dwb experiment run configs/manifests/flask-A.yaml

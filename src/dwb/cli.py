@@ -835,8 +835,8 @@ def experiment_check(
 
 
 @exp_app.command("evaluate", epilog=_examples(
-    "dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/flask-dev",
-    "dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 "
+    "dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 --out reports/flask-test",
+    "dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 "
     "--out reports/flask-dev --no-judge"))
 def experiment_evaluate(
     run_a: Annotated[Path, typer.Argument(help="Run directory of condition A.", exists=True)],
