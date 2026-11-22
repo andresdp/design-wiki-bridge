@@ -15,7 +15,7 @@ execution: code
 - **Objective:** run the paper's paired A/B experiment on a re-sourced version of the authored cross-source benchmark (`data/questions/cross_source_benchmark.md`) plus 8–10 SWE-QA public questions per repository, for Flask 3.1.2 and Requests 2.32.5, and score it offline, including DeepEval diagnostics.
 - **Authority:** this plan; then `docs/journal-extension-plan.md` (revised here for the test-set composition); then `docs/plans/2026-11-15-1948-feat-cross-source-qa-research-system-plan.md` for graph and run contracts. CLAUDE.md invariants bind (paired shared stages, frozen replayable web, evaluation only over saved traces).
 - **Supersedes:** `docs/plans/2026-11-21-2200-feat-golden-graph-evaluation-plan.md` (untracked draft; delete it when this plan lands). `tests/eval/.dataset.json` stays only as the provenance record of the generated variants; nothing reads it.
-- **Stop conditions:** stop before freezing if a human has not reviewed every agent-drafted or rewritten question; stop before the paired runs if any web-eligible question has no retrievable gold page (U5).
+- **Stop conditions:** stop before freezing if a human has not reviewed every agent-drafted or rewritten question.
 - **Execution profile:** code units U1–U3 on one feature branch; data units U4–U5 need the user in the loop; U6 is operational (model and Tavily cost).
 
 ---
@@ -85,7 +85,7 @@ The 25-question benchmark was written against RFC PDFs, a book and the project p
   - skipped with a reason when there is no answer or no final context; failed questions get no diagnostics (their correctness is already 0);
   - each metric's `evaluation_cost` is recorded; results go to `deepeval_diagnostics.csv` per question and to a per-subset, per-condition summary. DeepEval's metric prompts are not temperature-pinned, so the diagnostics are reported as secondary and their package version is recorded.
 - **KTD-B8. `allowed_sources` policy.** Authored answerable questions allow every local source the repository has (Flask: code+pdf; Requests: code); only code+web questions also allow `web`. Controls are local-only. Public questions stay code-only (no web). The web gate stays on, so web runs for a code+web question only when the judge finds the local evidence insufficient; that outcome is reported, not forced.
-- **KTD-B9. Verify web retrievability before freezing.** A Tavily record pass (U8) queries each web-eligible question's text exactly as the graph sends it, with the manifest's `max_results`, `search_depth` and `exclude_domains`, and counts a hit only when an evidence alternative matches a returned passage under the evaluator's rules (URL without fragment plus passage overlap). Misses get acceptable alternative URLs, a rewording, or are dropped; each question's pre-check text and fix go in its provenance, and the paper states that web items were filtered for Tavily retrievability, so web-stage recall is not an unconditioned estimate. The drafts' checks used Claude's search, not Tavily.
+- **KTD-B9. Measure web retrievability before freezing; do not filter on it.** A Tavily pass queries each web-eligible question's text exactly as the graph sends it, with the manifest's `max_results`, `search_depth` and `exclude_domains`, and counts a hit only when an evidence alternative matches a returned passage under the evaluator's rules (URL without fragment plus passage overlap). One equivalence rule is fixed in advance: an RFC cited on rfc-editor.org also matches its official copies on datatracker.ietf.org and httpwg.org. Questions are not reworded, re-sourced or dropped because of the result, so web-stage recall stays an unconditioned estimate. Each question's pre-check result goes in its provenance. *Revised 2026-11-22:* the first pass (`data/questions/drafts/webcheck-2026-11-22.json`) retrieved gold for 1 of 9 web test questions, because the raw question text is a poor web query; filtering on that would have tuned the test set to the retriever. The web stage is shared by both conditions, so the primary A/B comparison does not depend on it.
 
 - **KTD-B10. Primary analysis is fixed before the runs.** The primary A/B comparison is per repository, over the condition-sensitive questions: public questions plus authored answerable questions that need code evidence (code, code+book, code+web). It reports paired differences and improved/tied/regressed counts, as the journal plan specifies. Book-only questions and controls are sanity checks expected to show no A/B difference. Any subset with fewer than about 10 questions is reported as descriptive counts, without a comparative claim.
 - **KTD-B11. Failures are scored, not rerun away.** A failed question scores 0. A rerun is allowed only for an infrastructure fault (provider outage, timeout), applies to both conditions for that question, and is logged with its cause.
@@ -202,18 +202,18 @@ U1 → U2 (code) and U3 (config) can proceed in parallel after U1; U4 needs U1 (
 **Test expectation:** none -- data; `dwb benchmark validate` is the check (U5).
 **Verification:** every accepted question is in exactly one test file; `benchmark validate` reports no problems for either repository.
 
-### U5. Retrievability check and freeze
+### U5. Retrievability measurement and freeze
 
 **Goal:** frozen, runnable test sets.
 **Requirements:** R2, R8, R11; KTD-B9.
 **Dependencies:** U3, U4, U8.
 **Files:** `data/questions/test/*.jsonl.sha256`, `configs/manifests/*.yaml`, Tavily store under `artifacts/tavily/`.
 **Approach:**
-1. Run the U8 check over the web-eligible test questions; fix misses per KTD-B9 with the user.
+1. Run the retrievability check over the web-eligible test questions and record each result in provenance (KTD-B9; misses are kept).
 2. `dwb benchmark validate`, then `freeze`; copy the hashes into the manifests; `dwb benchmark check <dev> <test>` per repository.
 3. `dwb experiment check` per pair.
 **Test expectation:** none -- operational gate.
-**Verification:** every web-eligible question has a retrievable gold URL; freeze, check and experiment check pass.
+**Verification:** every web-eligible question has its pre-check result in provenance; freeze, check and experiment check pass.
 
 ### U6. Pilot and paired runs
 
@@ -258,7 +258,7 @@ U1 → U2 (code) and U3 (config) can proceed in parallel after U1; U4 needs U1 (
 - `conda run -n taxonomy pytest` and `conda run -n taxonomy ruff check src tests` pass after U1–U3.
 - `dwb benchmark validate`, `freeze` and `check` pass for both repositories (U5).
 - `dwb experiment check` passes for both A/B pairs.
-- The retrievability check finds a gold URL for every web-eligible test question.
+- Every web-eligible test question carries its retrievability pre-check result.
 
 ## Definition of Done
 

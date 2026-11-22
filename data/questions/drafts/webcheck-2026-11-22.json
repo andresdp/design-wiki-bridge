@@ -1,0 +1,345 @@
+[
+  {
+    "split": "test",
+    "id": "flask-cs-web1",
+    "grounding": "code+web",
+    "web_reqs": 1,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://inventivehq.com/blog/what-do-secure-httponly-samesite-cookie-attributes-do",
+      "https://webspecification.com/spec/security/cookie-attributes",
+      "https://nhimg.org/cookie-security-attributes-guide",
+      "https://khimananda.com/blog/secure-session-cookies-with-samesite-and-httponly",
+      "https://www.whiteshield.net/cookie-attributes-the-small-configuration-choices-that-define-web-security"
+    ]
+  },
+  {
+    "split": "test",
+    "id": "flask-cs-web2",
+    "grounding": "code+web",
+    "web_reqs": 1,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9110.html#section-12.5.5",
+          "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Vary",
+          "https://datatracker.ietf.org/doc/html/rfc9110",
+          "https://httpwg.org/specs/rfc9110.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://cvefeed.io/vuln/detail/CVE-2026-27205",
+      "https://advisories.gitlab.com/pypi/flask/CVE-2026-27205",
+      "https://downloads.openwrt.org/snapshots/packages/mipsel_24kc/packages",
+      "https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/packages",
+      "https://downloads.immortalwrt.org/snapshots/packages/aarch64_generic/packages"
+    ]
+  },
+  {
+    "split": "test",
+    "id": "requests-cs-10r",
+    "grounding": "code+web",
+    "web_reqs": 1,
+    "matched": 1,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2",
+          "https://datatracker.ietf.org/doc/html/rfc9112",
+          "https://httpwg.org/specs/rfc9112.html"
+        ],
+        "url_hit": true,
+        "match": true
+      }
+    ],
+    "returned": [
+      "https://www.ietf.org/archive/id/draft-ietf-httpbis-p1-messaging-11.html",
+      "https://httpwg.org/specs/rfc9112.html",
+      "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Messages",
+      "https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html",
+      "https://textbooks.cs.ksu.edu/cis526/02-http/03-request-format/index.html"
+    ]
+  },
+  {
+    "split": "test",
+    "id": "requests-cs-16r",
+    "grounding": "code+web",
+    "web_reqs": 1,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3",
+          "https://datatracker.ietf.org/doc/html/rfc9112",
+          "https://httpwg.org/specs/rfc9112.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://www.linkedin.com/pulse/100-api-interview-questions-beginner-advanced-real-time-scenarios-e9cyf",
+      "https://www.tenable.com/cve/updated",
+      "https://co.maverick.tx.us",
+      "https://www.census.gov/popclock",
+      "https://investor.vanguard.com"
+    ]
+  },
+  {
+    "split": "test",
+    "id": "requests-cs-18r",
+    "grounding": "code+web",
+    "web_reqs": 1,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9110.html#section-15.4.8",
+          "https://www.rfc-editor.org/rfc/rfc9110.html#section-15.4.3",
+          "https://datatracker.ietf.org/doc/html/rfc9110",
+          "https://httpwg.org/specs/rfc9110.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://minily.org/blog/url-redirects-301-302-307-explained",
+      "https://redirect-tester.com/307-vs-308-redirect",
+      "https://motitory.com/blog/http-redirects",
+      "https://pagepro.co/glossary/307-redirect",
+      "https://marketercoffee.com/glossary/307-redirect"
+    ]
+  },
+  {
+    "split": "test",
+    "id": "requests-cs-19r",
+    "grounding": "code+web",
+    "web_reqs": 2,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc6265.html#section-3",
+          "https://datatracker.ietf.org/doc/html/rfc6265",
+          "https://httpwg.org/specs/rfc6265.html"
+        ],
+        "url_hit": false,
+        "match": false
+      },
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9112.html#section-9.3",
+          "https://datatracker.ietf.org/doc/html/rfc9112",
+          "https://httpwg.org/specs/rfc9112.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://medium.com/@sesmiat/understanding-the-journey-of-http-requests-over-tcp-connections-39f32b1ca10d",
+      "https://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html",
+      "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Connection_management_in_HTTP_1.x",
+      "https://en.wikipedia.org/wiki/HTTP_persistent_connection",
+      "https://www.theodo.com/blog/what-happens-during-an-http-request"
+    ]
+  },
+  {
+    "split": "test",
+    "id": "requests-cs-web1",
+    "grounding": "code+web",
+    "web_reqs": 1,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.2",
+          "https://datatracker.ietf.org/doc/html/rfc9110",
+          "https://httpwg.org/specs/rfc9110.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://community.grafana.com/t/requests-that-redirect-with-301-response-code-sends-http-requests-without-header/98009",
+      "https://pythonfix.com/pkg/r/requests",
+      "https://bugzilla.redhat.com/show_bug.cgi?id=2389307",
+      "https://tavily.com/knowledge/company/kEs1zLqgBUJ7",
+      "https://tavily.com/knowledge/company/dyr5wTGZseXI"
+    ]
+  },
+  {
+    "split": "test",
+    "id": "requests-cs-web2",
+    "grounding": "code+web",
+    "web_reqs": 1,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9112.html#section-6.2",
+          "https://www.rfc-editor.org/rfc/rfc9110.html#section-8.6",
+          "https://datatracker.ietf.org/doc/html/rfc9112",
+          "https://httpwg.org/specs/rfc9112.html",
+          "https://datatracker.ietf.org/doc/html/rfc9110",
+          "https://httpwg.org/specs/rfc9110.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://runebook.dev/en/docs/http/rfc9112/section-6",
+      "https://www.http-probe.com/docs/http-overview/body-and-framing.html",
+      "https://community.cloudflare.com/t/cloudflare-randomly-stripping-content-length-header-on-post-if-body-empty/776089",
+      "https://safeguard.sh/resources/blog/tower-http-timeout-layers-request-vs-body-timeouts",
+      "https://techqa.club/v/q/handling-both-json-and-form-values-in-post-request-body-with-unknown-values-in-golang-78252659"
+    ]
+  },
+  {
+    "split": "test",
+    "id": "requests-cs-web3",
+    "grounding": "code+web",
+    "web_reqs": 2,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9110.html#section-4.3.1",
+          "https://developer.mozilla.org/en-US/docs/Glossary/Origin",
+          "https://datatracker.ietf.org/doc/html/rfc9110",
+          "https://httpwg.org/specs/rfc9110.html"
+        ],
+        "url_hit": false,
+        "match": false
+      },
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9110.html#section-15.4",
+          "https://datatracker.ietf.org/doc/html/rfc9110",
+          "https://httpwg.org/specs/rfc9110.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://www.sentinelone.com/vulnerability-database/cve-2026-45300",
+      "https://advisories.gitlab.com/pypi/tornado/CVE-2026-49853",
+      "https://safeguard.sh/resources/blog/http-client-redirect-header-leak-authorization-api-key-2026",
+      "https://safeguard.sh/resources/blog/should-an-sdk-forward-credentials-on-redirects",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=1817980"
+    ]
+  },
+  {
+    "split": "dev",
+    "id": "requests-dev-var-32",
+    "grounding": "code+web",
+    "web_reqs": 1,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2",
+          "https://datatracker.ietf.org/doc/html/rfc9112",
+          "https://httpwg.org/specs/rfc9112.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://docs.python.org/3/builtins/stdtypes.html",
+      "https://www.amridgeuniversity.edu/pdf/Amridge%20University%20Academic%20Catalog%202026-2027.pdf",
+      "https://www.ontario.ca/files/2026-03/mnr-2026-ontario-hunting-regulations-summary-en-2026-03-10.pdf",
+      "https://peter.sh/experiments/chromium-command-line-switches",
+      "https://www.federalregister.gov/documents/2026/04/14/2026-07203/medicare-program-hospital-inpatient-prospective-payment-systems-for-acute-care-hospitals-ipps-and"
+    ]
+  },
+  {
+    "split": "dev",
+    "id": "requests-dev-var-34",
+    "grounding": "code+web",
+    "web_reqs": 1,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3",
+          "https://datatracker.ietf.org/doc/html/rfc9112",
+          "https://httpwg.org/specs/rfc9112.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://developer.chrome.com/articles/fetch-streaming-requests",
+      "https://developer.chrome.com/docs/capabilities/web-apis/fetch-streaming-requests",
+      "https://runebook.dev/en/docs/http/rfc9112/section-6",
+      "https://www.http-probe.com/docs/http-overview/body-and-framing.html",
+      "https://ronutz.com/learn/http-message-framing-content-length-and-chunked"
+    ]
+  },
+  {
+    "split": "dev",
+    "id": "requests-dev-var-35",
+    "grounding": "code+web",
+    "web_reqs": 2,
+    "matched": 0,
+    "url_only": 0,
+    "reqs": [
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc6265.html#section-3",
+          "https://datatracker.ietf.org/doc/html/rfc6265",
+          "https://httpwg.org/specs/rfc6265.html"
+        ],
+        "url_hit": false,
+        "match": false
+      },
+      {
+        "urls": [
+          "https://www.rfc-editor.org/rfc/rfc9112.html#section-9.3",
+          "https://datatracker.ietf.org/doc/html/rfc9112",
+          "https://httpwg.org/specs/rfc9112.html"
+        ],
+        "url_hit": false,
+        "match": false
+      }
+    ],
+    "returned": [
+      "https://www.facebook.com/KodeKloudHQ/videos/interview-how-browser-cookies-actually-workwhen-you-sign-into-a-website-like-app/1642467673891049",
+      "https://www.mycert.org.my/portal/advisory?id=MA-1514.112026",
+      "https://datatracker.ietf.org/doc/draft-hood-agentproto-poppy-over-agtp",
+      "https://www.facebook.com/BostonUniversity/videos/what-are-internet-cookies-really-doing/1398266062135229",
+      "https://www.foodbankccs.org"
+    ]
+  }
+]
