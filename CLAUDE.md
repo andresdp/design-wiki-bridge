@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-`docs/journal-extension-plan.md` owns the study design. The implementation plan is `docs/plans/2026-11-15-1948-feat-cross-source-qa-research-system-plan.md`, and the U1 findings (pinned SHAs, SWE-QA row IDs, the OpenWiki 0.9.0 interface) are in `docs/spikes/2026-11-openwiki-swe-qa-spike.md`. The code lives in the `dwb` package (`src/dwb/`). Both conditions are built. The resolver follows the revised KTD4 order in the spike doc §6. The Flask wiki snapshot is `wiki-flask-52e1119f2d9c`; its manifest is in `configs/wikis/`.
+`docs/journal-extension-plan.md` owns the study design. The implementation plan is `docs/plans/2026-11-15-1948-feat-cross-source-qa-research-system-plan.md`, and the U1 findings (pinned SHAs, SWE-QA row IDs, the OpenWiki 0.9.0 interface) are in `docs/spikes/2026-11-openwiki-swe-qa-spike.md`. The code lives in the `dwb` package (`src/dwb/`). Both conditions are built. The resolver follows the revised KTD4 order in the spike doc §6. The Flask wiki snapshot is `wiki-flask-52e1119f2d9c`; its manifest is in `configs/wikis/`. The test sets (`data/questions/test/`) are frozen (2026-11-22); the authored-benchmark plan is `docs/plans/2026-11-22-1050-feat-authored-benchmark-experiment-plan.md`, and the protocol is `docs/benchmark-and-evaluation.md`.
 
 ## Commands
 
@@ -20,7 +20,7 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 - PDF index: `dwb index pdf configs/pdfs/<repo>.yaml`
 - Register a generated wiki: `dwb wiki snapshot <repo> --provider openai --model <model> --effort <effort> --elapsed-s <s>`
 - Paired gate: `dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml`
-- Run one condition: `dwb experiment run configs/manifests/flask-A.yaml [--web-mode record|replay|live] [--overwrite]`
+- Run one condition: `dwb experiment run configs/manifests/flask-A.yaml [--web-mode record|replay|live] [--overwrite]` (`<repo>-{A,B}.yaml` run the frozen test set; `<repo>-{A,B}-dev.yaml` the development set for the pilot)
 - Evaluate: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name>` (`--no-judge` gives recall and cost only)
 - Curate question sets: `dwb benchmark draft <selection>`, `dwb benchmark validate <records>`, `dwb benchmark freeze <records>`, `dwb benchmark check <dev> <test>` (docs/usage.md, "Building the test set")
 

@@ -1,6 +1,6 @@
 # Question Sets and Evaluation Protocol
 
-Status as of 2026-11-22. This document describes where the question sets stand today and how the paper's experiment will be run and scored. The implementation plan is `docs/plans/2026-11-22-1050-feat-authored-benchmark-experiment-plan.md`; this document is the readable summary of it.
+Status as of 2026-11-22 (test sets frozen). This document describes where the question sets stand and how the paper's experiment will be run and scored. The implementation plan is `docs/plans/2026-11-22-1050-feat-authored-benchmark-experiment-plan.md`; this document is the readable summary of it.
 
 ## 1. The experiment in one paragraph
 
@@ -90,44 +90,44 @@ flowchart LR
 
 | File | Contents | Status |
 |---|---|---|
-| `data/questions/cross_source_benchmark.md` | 25 authored questions: 20 answerable, 5 unanswerable controls. Written against RFC PDFs, one Flask book, the project paper and one Requests docs page | Source text only; not loadable by the harness; untracked |
-| `tests/eval/.dataset.json` | The same 25 questions as a DeepEval dataset, plus 10 variants generated with `deepeval generate` | Provenance record only; nothing reads it; untracked |
-| `data/questions/dev/flask.jsonl`, `dev/requests.jsonl` | Per repository: 1 SWE-QA public question and 2 AI-drafted custom questions that cite RFC PDFs | Used by the earlier pipeline runs (`runs/*-dev-001`) |
-| `data/questions/test/` | Empty | The frozen test set will go here |
-| `data/questions/selections/` | Empty | SWE-QA row selections will go here |
-| `data/questions/drafts/web-items.draft.md` | 10 code+web questions drafted by Claude: 4 re-sourced Requests items, 3 new per repository | Needs your review |
-| `data/questions/drafts/flask-book-resourcing.draft.md` | Book evidence for Flask's RFC-based items, plus 4 new code+book questions (N1–N4) | Needs your review |
+| `data/questions/test/flask.jsonl` | 30 questions: 10 SWE-QA public, 17 authored (code, book, code+book, code+web), 3 controls | Reviewed, frozen (`6e376067…`) |
+| `data/questions/test/requests.jsonl` | 20 questions: 10 SWE-QA public, 8 authored (code, code+web), 2 controls | Reviewed, frozen (`5bb97f34…`) |
+| `data/questions/dev/flask.jsonl`, `dev/requests.jsonl` | 10 and 7: SWE-QA development rows and the generated variants (smoke test only) | Not frozen; no overlap with test |
+| `data/questions/selections/` | Seeded SWE-QA samples (test seed 20261122, dev seed 20261123) | Final |
+| `data/questions/cross_source_benchmark.md`, `tests/eval/.dataset.json` | The original 25 authored questions and the DeepEval dataset with the 10 variants | Source and provenance records; nothing reads them |
+| `data/questions/drafts/` | Re-sourcing notes, SWE-QA drafts and exclusions, the web pre-check report | Records |
+| `configs/manifests/<repo>-{A,B}.yaml`, `<repo>-{A,B}-dev.yaml` | Test and development manifest pairs; Flask uses the book index `pdf-flask-books-v1-5b41dac5d845`, Requests has PDFs off | Pass `dwb experiment check` |
 
-### Why the authored benchmark needs work before it can run
+### Why the authored benchmark was reworked before it could run
 
 - **Format.** The harness's question format requires every authored question to cite code plus an external source. Only 11 of the 25 do. It has no type for unanswerable controls, and no question names a repository.
 - **Corpus change.** The evaluation PDFs for Flask are now the three Flask books, not the RFCs used during testing. Requests gets no PDFs; it uses web pages instead. Ten questions cited RFCs, so they need new sources.
 - **Web rule.** Question 19 cited `requests.readthedocs.io`, which the experiment excludes: a project's own docs restate the code and would let either condition answer without finding it.
 - **Old books.** The books describe Flask 0.12.2 (Grinberg) and 0.10.1 (Aggarwal). Answers must hold for Flask 3.1.2, so book claims that are out of date are excluded from expected answers. Aronowitz states no version and supports no question.
 
-## 3. The test set that will be frozen
+## 3. The frozen test set
 
-Per repository: the re-sourced authored questions, plus 8–10 SWE-QA public questions drawn at random (with a recorded seed) from the eligible rows.
+Per repository: the re-sourced authored questions, plus 10 SWE-QA public questions drawn at random (seed 20261122) from the eligible rows. Every question below was reviewed and accepted; the IDs are in `data/questions/REVIEW.md`.
 
-### Flask (about 29–31 questions)
-
-| Group | Questions | Evidence | Status |
-|---|---|---|---|
-| Code-only | 1–6 | Flask code | Ready to convert |
-| Book-only | 12′ (request object, rewritten), 13 (contexts) | Grinberg pages | 13 ready; 12′ needs review |
-| Code + book | 14′ (automatic OPTIONS), 15′ (static-file route), 17′ (WSGI middleware), N1–N4 (new) | Flask code + Grinberg or Aggarwal | Drafted; needs review |
-| Code + web | 3 new (session-cookie attributes, `Vary: Cookie`, OPTIONS and `Allow`) | Flask code + MDN / rfc-editor.org | Drafted; needs review. The OPTIONS one overlaps 14′; keep one |
-| Controls | 21, 23, 25 | none (expected: decline) | Ready to convert |
-| SWE-QA public | 8–10 | Flask code | To be selected |
-
-### Requests (about 18–20 questions)
+### Flask (30 questions)
 
 | Group | Questions | Evidence | Status |
 |---|---|---|---|
-| Code-only | 7 | Requests code | Ready to convert |
-| Code + web | 10′, 16′, 18′, 19′ (re-sourced from RFC PDFs and the docs page), 3 new (fragments on redirect, body framing, auth headers on redirect) | Requests code + rfc-editor.org / MDN | Drafted; needs review |
-| Controls | 22, 24 | none (expected: decline) | Ready to convert |
-| SWE-QA public | 8–10 | Requests code | To be selected |
+| Code-only | 1–6 | Flask code | Frozen |
+| Book-only | 12′ (request object, rewritten), 13 (contexts) | Grinberg pages | Frozen |
+| Code + book | 14′ (automatic OPTIONS), 15′ (static-file route), 17′ (WSGI middleware), N1–N4 (new) | Flask code + Grinberg or Aggarwal | Frozen |
+| Code + web | 2 new (session-cookie attributes, `Vary: Cookie`) | Flask code + MDN / rfc-editor.org | Frozen (the OPTIONS draft was dropped as a duplicate of 14′) |
+| Controls | 21, 23, 25 | none (expected: decline) | Frozen |
+| SWE-QA public | 10 | Flask code | Frozen |
+
+### Requests (20 questions)
+
+| Group | Questions | Evidence | Status |
+|---|---|---|---|
+| Code-only | 7 | Requests code | Frozen |
+| Code + web | 10′, 16′, 18′, 19′ (re-sourced from RFC PDFs and the docs page), 3 new (fragments on redirect, body framing, auth headers on redirect) | Requests code + rfc-editor.org / MDN | Frozen |
+| Controls | 22, 24 | none (expected: decline) | Frozen |
+| SWE-QA public | 10 | Requests code | Frozen |
 
 ### Removed from the test set
 
@@ -203,12 +203,11 @@ Results go to `deepeval_diagnostics.csv` per question, and to a summary per ques
 
 ## 8. What happens next, and who does it
 
-| Step | Who |
-|---|---|
-| Extend the question format (control type, single-source questions), evaluation changes, corpus and manifests, `webcheck` command | Claude (implementation) |
-| Review the drafts in `data/questions/drafts/` and approve or edit each question | You |
-| Approve the SWE-QA random sample | You |
-| Convert accepted questions, run the web check, validate and freeze | Claude, with your sign-off on any question changed |
-| Pilot, record pass, paired runs, evaluation | Claude (model and Tavily cost) |
-| Independent check of a stratified sample by a second reviewer | A co-author, after freezing |
-| Update the journal plan's test-set section and the paper's method text | Claude drafts, you edit |
+| Step | Who | Status |
+|---|---|---|
+| Extend the question format, evaluation changes, corpus and manifests | Claude | Done |
+| Review the drafts and the SWE-QA sample | You | Done |
+| Convert, web pre-check (measured), validate and freeze | Claude, with your sign-off | Done |
+| Pilot on the development set, record pass, paired runs, evaluation | Claude (model and Tavily cost) | Next |
+| Independent check of a stratified sample by a second reviewer | A co-author | After freezing |
+| Update the paper's method text with the final numbers | Claude drafts, you edit | After the runs |

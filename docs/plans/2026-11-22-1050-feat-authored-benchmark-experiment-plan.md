@@ -206,7 +206,7 @@ U1 → U2 (code) and U3 (config) can proceed in parallel after U1; U4 needs U1 (
 
 **Goal:** frozen, runnable test sets.
 **Requirements:** R2, R8, R11; KTD-B9.
-**Dependencies:** U3, U4, U8.
+**Dependencies:** U3, U4 (U8 replaced by a one-off script).
 **Files:** `data/questions/test/*.jsonl.sha256`, `configs/manifests/*.yaml`, Tavily store under `artifacts/tavily/`.
 **Approach:**
 1. Run the retrievability check over the web-eligible test questions and record each result in provenance (KTD-B9; misses are kept).
@@ -231,6 +231,7 @@ U1 → U2 (code) and U3 (config) can proceed in parallel after U1; U4 needs U1 (
 ### U8. Web retrievability check command
 
 **Goal:** a runnable pre-freeze check for KTD-B9 (no existing command can search Tavily for an unfrozen test file).
+**Status (2026-11-22): not built.** The one pre-check ran as a throwaway script before the freeze (report: `data/questions/drafts/webcheck-2026-11-22.json`); under the revised KTD-B9 the result is recorded, not acted on, so a command adds no value until a new test set is curated.
 **Requirements:** R8; KTD-B9.
 **Dependencies:** U1.
 **Files:** `src/dwb/curation.py`, `src/dwb/cli.py`, `tests/test_curation.py`.

@@ -295,6 +295,10 @@ dwb benchmark check data/questions/dev/flask.jsonl data/questions/test/flask.jso
 - **Validate:** checks the schema, duplicate IDs, the pinned SHA, code spans at the pinned commit, and PDF spans against the repository's corpus (`pdf_corpus` in `configs/chat.yaml`, or `--pdf-corpus`). A missing checkout stops with the clone step.
 - **Freeze:** refuses when validation finds a problem or the set overlaps the repository's dev set. It prints the hash; copy it into the test manifests' `question_set.hash` yourself.
 - **Check:** fails on a shared ID, question text, or SWE-QA row, or when the test file changed after freezing. A missing test file counts as empty.
+- **Question kinds:** `public` (SWE-QA; code only, never web; upstream row IDs required), `custom` (authored; expected claims, at least one evidence span of any source type, and `provenance.author`), and `control` (authored and unanswerable from the corpus).
+- **Writing a control:** `kind: control`, no `evidence`, no `expected_claims`, `allowed_sources` without `web`, a `reference_answer` that states the decline (used only by the report and DeepEval), and `provenance.author`. It scores `control_correct` 1 when every answer claim is a gap claim; correctness and recall do not apply.
+- **Grounding and subsets:** each record's grounding is derived from its evidence source types (`code`, `pdf`, `code+pdf`, `code+web`, …). Reports group results by `public`, `control`, and each authored grounding, plus `primary` (public and authored questions that need code: the A/B comparison) and `all`.
+- **Allowed sources:** authored answerable questions allow every local source the repository has (Flask: code and PDF; Requests: code); only code+web questions also allow `web`; controls and public questions never do.
 - Exit codes: 1 means problems in the records; 2 means a setup or usage error.
 
 ### Adding a research repository
