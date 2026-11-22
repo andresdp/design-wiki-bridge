@@ -153,3 +153,21 @@ def test_check_paired_fails_when_the_gate_differs(tmp_path, path, value):
     res = check_paired(a, b)
     assert not res.ok
     assert any(path[0] in f for f in res.failures)
+
+
+@pytest.mark.parametrize("repo", ["flask", "requests"])
+@pytest.mark.parametrize("suffix", ["", "-dev"])
+def test_shipped_pairs_load_and_pass_the_paired_check(repo, suffix):
+    a = load_manifest(EXAMPLES / f"{repo}-A{suffix}.yaml")
+    b = load_manifest(EXAMPLES / f"{repo}-B{suffix}.yaml")
+    assert check_paired(a, b).ok
+    split = "dev" if suffix else "test"
+    assert a.question_set.path == f"data/questions/{split}/{repo}.jsonl"
+    # the test manifests carry the frozen hash; dev sets are not frozen
+    frozen = (ROOT / f"data/questions/test/{repo}.jsonl.sha256").read_text().strip()
+    assert a.question_set.hash == (None if suffix else frozen)
+
+
+def test_requests_runs_without_a_pdf_index():
+    m = load_manifest(EXAMPLES / "requests-A.yaml")
+    assert m.pdf_enabled is False and m.indexes.pdf_index_id is None

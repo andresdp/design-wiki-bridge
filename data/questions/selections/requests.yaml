@@ -1,0 +1,112 @@
+split: requests
+dataset_revision: f048f07da234b39e32937f115d027c5b71acd54e
+repo: requests
+repo_sha: b25c87d7cb8d6a18a37fa12442b5f883f9e41741
+id_prefix: requests-pub
+criteria: >-
+  (1) not a development row (requests:1);
+  (2) every symbol, file and line range the reference answer relies on exists at
+  the pinned checkout and the answer's key claims match the pinned code (minor
+  line drift allowed if content matches);
+  (3) answerable from the repository's code/tests/in-repo docs alone (no external
+  specs, no web);
+  (4) not trivially answerable from one docstring line and not hopelessly vague;
+  seeded random sample of 10 eligible rows, seed 20261122
+include:
+  - row: 2
+    reason: "sampled; InvalidSchema(RequestException, ValueError) and both raise sites (sessions.py:792, adapters.py:63) verified"
+  - row: 16
+    reason: "sampled; resolve_redirects cookie extract/merge/prepare steps (sessions.py:235-242, 276) verified"
+  - row: 20
+    reason: "sampled; Response lazy _content, __getstate__/__setstate__ and iter_content reuse logic verified in models.py"
+  - row: 27
+    reason: "sampled; prepare_body NotImplementedError for stream+files and _encode_files fp.read() verified in models.py"
+  - row: 29
+    reason: "sampled; morsel_to_cookie max-age to expires conversion (cookies.py:492-518) verified"
+  - row: 33
+    reason: "sampled; ConnectionError hierarchy and HTTPAdapter.send translation sites verified, backed by quickstart docs"
+  - row: 39
+    reason: "sampled; Server context manager and run() event/socket lifecycle (tests/testserver/server.py) verified"
+  - row: 42
+    reason: "sampled; _encode_files 'Data must not be a string' check and prepare_body dispatch verified, test at test_requests.py:914"
+  - row: 44
+    reason: "sampled; prepare_url netloc reconstruction and prepare_auth/get_auth_from_url/HTTPBasicAuth path verified"
+  - row: 46
+    reason: "sampled; CaseInsensitiveDict.__iter__ over _store (structures.py:46-58) and test_list verified"
+exclude:
+  - row: 0
+    reason: "eligible, not sampled"
+  - row: 1
+    reason: "development row (criterion 1)"
+  - row: 3
+    reason: "eligible, not sampled"
+  - row: 4
+    reason: "eligible, not sampled"
+  - row: 5
+    reason: "answer cites tests/certs/valid/ca/ca.crt, which does not exist at the pinned checkout (criterion 2)"
+  - row: 6
+    reason: "eligible, not sampled"
+  - row: 7
+    reason: "eligible, not sampled"
+  - row: 8
+    reason: "eligible, not sampled"
+  - row: 9
+    reason: "eligible, not sampled"
+  - row: 10
+    reason: "hypothetical removal question; answer's overwrite=False precedence claim is wrong since prepare_request converts request cookies to a jar first (sessions.py:471) (criteria 2, 3)"
+  - row: 11
+    reason: "eligible, not sampled"
+  - row: 12
+    reason: "eligible, not sampled"
+  - row: 13
+    reason: "eligible, not sampled"
+  - row: 14
+    reason: "eligible, not sampled"
+  - row: 15
+    reason: "about pytest parametrize mechanics; the answer relies on framework internals, not repository code (criterion 3)"
+  - row: 17
+    reason: "eligible, not sampled"
+  - row: 18
+    reason: "eligible, not sampled"
+  - row: 19
+    reason: "key claim wrong: after streaming, iter_content raises StreamConsumedError rather than reusing chunks, since _content stays False (models.py:839-840) (criterion 2)"
+  - row: 21
+    reason: "eligible, not sampled"
+  - row: 22
+    reason: "key claim wrong: close() does not prevent a double raw.close() when content was never consumed, since _content_consumed is not set by close() (models.py:1028-1039) (criterion 2)"
+  - row: 23
+    reason: "speculative refactoring design question with no ground truth in the repository (criteria 3, 4)"
+  - row: 24
+    reason: "eligible, not sampled"
+  - row: 25
+    reason: "speculative CPython performance question; the answer relies on general runtime knowledge, not repository content (criterion 3)"
+  - row: 26
+    reason: "eligible, not sampled"
+  - row: 28
+    reason: "security rationale is speculative and not in the repo, and the answer misreads the guard (it rejects names starting with '<' OR ending with '>') (criteria 2, 3)"
+  - row: 30
+    reason: "speculative performance question; urlparse cost and call-count claims rely on stdlib/CPython behaviour outside the repo (criterion 3)"
+  - row: 31
+    reason: "rationale for super().__init__() is generic Python MRO knowledge; the code is one line with no rationale in the repo (criteria 3, 4)"
+  - row: 32
+    reason: "speculative micro-performance question about property indirection; not answerable from the repo (criterion 3)"
+  - row: 34
+    reason: "eligible, not sampled"
+  - row: 35
+    reason: "eligible, not sampled"
+  - row: 36
+    reason: "eligible, not sampled"
+  - row: 37
+    reason: "eligible, not sampled"
+  - row: 38
+    reason: "speculative performance question duplicating row 25; relies on CPython string costs, not repo content (criterion 3)"
+  - row: 40
+    reason: "eligible, not sampled"
+  - row: 41
+    reason: "eligible, not sampled"
+  - row: 43
+    reason: "answer relies on a Python 2 HTTPMessage.getheaders() stdlib API that does not exist on Python 3; not verifiable from the repo (criteria 2, 3)"
+  - row: 45
+    reason: "eligible, not sampled"
+  - row: 47
+    reason: "about pytest fixture/parametrize resolution internals; the answer is generic framework description (criterion 3)"

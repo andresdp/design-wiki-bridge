@@ -21,13 +21,13 @@ def _rec(i: int, **kw) -> TraceRecord:
 
 
 def test_append_three_and_reload_in_order(tmp_path):
-    rd = RunDir.start(load_manifest(EXAMPLES / "flask-A.yaml"), tmp_path)
+    rd = RunDir.start(load_manifest(EXAMPLES / "flask-A-dev.yaml"), tmp_path)
     recs = [_rec(i) for i in range(3)]
     with rd.writer() as w:
         for r in recs:
             w.append(r)
     assert read_traces(rd.traces_path) == recs
-    assert load_manifest(rd.manifest_path).run_id == "flask-A-dev-001"
+    assert load_manifest(rd.manifest_path).run_id == "flask-A-dev-002"
 
 
 def test_error_trace_without_answer_round_trips(tmp_path):
@@ -42,7 +42,7 @@ def test_error_trace_without_answer_round_trips(tmp_path):
 
 
 def test_run_dir_refuses_to_clobber(tmp_path):
-    m = load_manifest(EXAMPLES / "flask-A.yaml")
+    m = load_manifest(EXAMPLES / "flask-A-dev.yaml")
     rd = RunDir.start(m, tmp_path)
     rd.write_summary({"questions": 0})
     with pytest.raises(FileExistsError):

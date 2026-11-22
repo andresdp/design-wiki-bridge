@@ -13,3 +13,4 @@ artifacts/
 runs/
 reports/
 /graphify-out
+/.agents

@@ -257,6 +257,7 @@ def validate(ws: Workspace, path: Path, *, reader_for: ReaderFactory = git_reade
         "records": len(records),
         "public": sum(r.kind == "public" for r in records),
         "custom": sum(r.kind == "custom" for r in records),
+        "control": sum(r.kind == "control" for r in records),
         "without_evidence": sum(not r.evidence for r in records),
         "expected_claims": sum(len(r.expected_claims) for r in records),
     }

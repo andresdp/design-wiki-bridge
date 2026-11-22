@@ -195,7 +195,7 @@ def test_cli_experiment_check_piped_and_at_a_terminal(monkeypatch):
     from dwb.manifest import check_paired, load_manifest
 
     monkeypatch.chdir(ROOT)
-    pair = ["configs/manifests/flask-A.yaml", "configs/manifests/flask-B.yaml"]
+    pair = ["configs/manifests/flask-A-dev.yaml", "configs/manifests/flask-B-dev.yaml"]
     a, b = (load_manifest(p) for p in pair)
     r = CliRunner().invoke(cli.app, ["experiment", "check", *pair])
     assert r.exit_code == 0, r.output
@@ -466,7 +466,7 @@ def test_experiment_check_fails_when_a_gated_manifest_lacks_its_judge_prompt(tmp
     from dwb.cli import app
 
     for cond in ("A", "B"):
-        d = yaml.safe_load((ROOT / "configs" / "manifests" / f"flask-{cond}.yaml").read_text())
+        d = yaml.safe_load((ROOT / "configs" / "manifests" / f"flask-{cond}-dev.yaml").read_text())
         d["prompts"].pop("sufficiency")
         (tmp_path / f"{cond}.yaml").write_text(yaml.safe_dump(d))
     res = CliRunner().invoke(app, ["experiment", "check", str(tmp_path / "A.yaml"),

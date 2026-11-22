@@ -1,13 +1,20 @@
-# PDF corpus for Flask. Files live in artifacts/pdfs/ (gitignored). Index with:
+# PDF corpus for Flask: the evaluation corpus (three Flask books). Files live in
+# artifacts/books/ (gitignored). Index with:
 #   dwb index pdf configs/pdfs/flask.yaml
-# Published RFCs never change, so the RFC number is the version.
-corpus_id: flask-v1
+# The books predate Flask 3.1.2 (Grinberg: Flask 0.12.2; Aggarwal: Flask 0.10.1); expected
+# answers use only book claims that still hold for the pinned code. The RFC corpus used
+# during pipeline testing is configs/pdfs/flask-rfc.yaml.
+corpus_id: flask-books-v1
 documents:
-  - doc_id: rfc9110
-    version: rfc9110-2022-06
-    path: artifacts/pdfs/rfc9110.pdf
-    title: "RFC 9110: HTTP Semantics"
-  - doc_id: rfc3875
-    version: rfc3875-2004-10
-    path: artifacts/pdfs/rfc3875.pdf
-    title: "RFC 3875: The Common Gateway Interface (CGI) Version 1.1"
+  - doc_id: grinberg-flask-web-development
+    version: grinberg-2e-2018
+    path: "artifacts/books/Flask Web Development Developing Web Applications With Python, 2nd Edition (Miguel Grinberg) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+    title: "Flask Web Development, 2nd ed. (Miguel Grinberg)"
+  - doc_id: aggarwal-flask-cookbook
+    version: aggarwal-1e-2014
+    path: "artifacts/books/Flask Framework Cookbook (Shalabh Aggarwal) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+    title: "Flask Framework Cookbook (Shalabh Aggarwal)"
+  - doc_id: aronowitz-flask-cookbook
+    version: aronowitz-1e
+    path: "artifacts/books/Flask Framework Cookbook Building Web Applications with Flask (Alexander Aronowitz) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+    title: "Flask Framework Cookbook: Building Web Applications with Flask (Alexander Aronowitz)"

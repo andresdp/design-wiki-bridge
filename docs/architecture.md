@@ -267,7 +267,8 @@ classDiagram
         +models, prompts with sha256, budgets, web
     }
     class QuestionRecord {
-        +id, kind public or custom, repo_sha, question
+        +id, kind public, custom or control, repo_sha, question
+        +grounding (derived from evidence source types)
         +reference_answer, expected_claims
         +evidence : requirements with alternative spans
         +allowed_sources, partial_credit, provenance
@@ -327,7 +328,7 @@ flowchart LR
     HY --> REC["recall<br/>(candidates & final context; KTD15 matching)"]
     HY --> JUD["claims judge<br/>correctness · citation support · coverage<br/>(cached; gap claims excluded)"]
     HY --> COST["per-stage cost<br/>latency, tokens"]
-    REC & JUD & COST --> PAIR["pair A/B by question<br/>means and diffs over the same questions;<br/>improved/tied/regressed; public vs custom"]
+    REC & JUD & COST --> PAIR["pair A/B by question<br/>means and diffs over the same questions;<br/>improved/tied/regressed; per subset: primary,<br/>public, each grounding, control"]
     PAIR --> REP[("reports/:<br/>per_question, paired, paired_summary,<br/>cost, evaluator_config, judge_log")]
 ```
 

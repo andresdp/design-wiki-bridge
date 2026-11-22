@@ -1,0 +1,880 @@
+[
+    {
+        "input": "In Flask 3.1.2, what work does `full_dispatch_request` perform around endpoint dispatch?",
+        "actual_output": null,
+        "expected_output": "It marks that the first request has occurred, sends the request-started signal, runs preprocessing, dispatches only if preprocessing returned `None`, routes exceptions through user-exception handling, and finalizes the resulting value as a response.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-01",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-01",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/app.py`, lines 904–920.",
+            "canonical_question": "In Flask 3.1.2, what work does `full_dispatch_request` perform around endpoint dispatch?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "What happens when a Flask `before_request` handler returns a non-`None` value?",
+        "actual_output": null,
+        "expected_output": "Flask returns that value from preprocessing and stops further request handling; `full_dispatch_request` then finalizes it as the response instead of calling the view dispatch function.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-02",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-02",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/app.py`, lines 904–920 and 1271–1296.",
+            "canonical_question": "What happens when a Flask `before_request` handler returns a non-`None` value?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Which common view return values does Flask convert, and how is a 2-tuple interpreted?",
+        "actual_output": null,
+        "expected_output": "Strings and bytes become response bodies; dicts and lists become JSON responses; generators/iterators become streaming responses; response objects are retained or coerced. A 2-tuple is interpreted as `(body, headers)` when its second element is a headers-like object, otherwise as `(body, status)`.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-03",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-03",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/app.py`, lines 1129–1202.",
+            "canonical_question": "Which common view return values does Flask convert, and how is a 2-tuple interpreted?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "In what order does Flask run after-request handlers, and when does it save the session?",
+        "actual_output": null,
+        "expected_output": "It first runs request-context after-request callbacks, then blueprint callbacks from the current blueprint outward to the app, reversing registration order within each scope. It saves the session after these callbacks, unless the session is a null session.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-04",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-04",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/app.py`, lines 1298–1324.",
+            "canonical_question": "In what order does Flask run after-request handlers, and when does it save the session?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "How does the default session interface load a session, and what does it do with a bad signature?",
+        "actual_output": null,
+        "expected_output": "It obtains the configured signing serializer, reads the session cookie, and loads the signed data using the permanent-session lifetime as the maximum age. If the cookie is missing or has a bad signature, it returns a new empty session. If no secret key produces a serializer, it returns `None`.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-05",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-05",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/sessions.py`, lines 317–349.",
+            "canonical_question": "How does the default session interface load a session, and what does it do with a bad signature?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Why does Flask recommend `send_from_directory` for a client-supplied file path?",
+        "actual_output": null,
+        "expected_output": "It uses `safe_join` to prevent a client-crafted path from escaping the specified directory, and raises 404 when the final path is not an existing regular file. The directory itself must be trusted and must not be client-provided.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-06",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-06",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/helpers.py`, lines 533–574.",
+            "canonical_question": "Why does Flask recommend `send_from_directory` for a client-supplied file path?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Does calling `Response.raise_for_status()` raise for 3xx responses? Which status ranges raise?",
+        "actual_output": null,
+        "expected_output": "No. It raises `HTTPError` for 4xx client errors and 5xx server errors; 3xx responses do not satisfy either condition.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-07",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-07",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Requests `src/requests/models.py`, lines 999–1026.",
+            "canonical_question": "Does calling `Response.raise_for_status()` raise for 3xx responses? Which status ranges raise?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "How does RFC 9110 define a safe method, and which standard methods does it identify as safe?",
+        "actual_output": null,
+        "expected_output": "A method is safe when the client does not request, and does not expect, a state change in the target resource. GET, HEAD, OPTIONS, and TRACE are defined as safe.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-08",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-08",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "`artifacts/pdfs/rfc9110.pdf`, §9.2.1, PDF pp. 72–73.",
+            "canonical_question": "How does RFC 9110 define a safe method, and which standard methods does it identify as safe?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "What does idempotent mean in HTTP, and which methods does RFC 9110 classify as idempotent?",
+        "actual_output": null,
+        "expected_output": "A request method is idempotent when multiple identical requests have the same intended effect on the server as one request. PUT, DELETE, and safe methods are idempotent.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-09",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-09",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "`artifacts/pdfs/rfc9110.pdf`, §9.2.2, PDF p. 73.",
+            "canonical_question": "What does idempotent mean in HTTP, and which methods does RFC 9110 classify as idempotent?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Name the four request-target forms in HTTP/1.1 and their usual contexts.",
+        "actual_output": null,
+        "expected_output": "Origin-form is used for ordinary direct requests; absolute-form is used when requesting through a proxy; authority-form is used with CONNECT; and asterisk-form is used with OPTIONS to address the server as a whole.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-10",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-10",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "`artifacts/pdfs/rfc9112.pdf`, §3.2, PDF pp. 9–10.",
+            "canonical_question": "Name the four request-target forms in HTTP/1.1 and their usual contexts.",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "In CGI 1.1, what is the distinction between `SCRIPT_NAME` and `PATH_INFO`?",
+        "actual_output": null,
+        "expected_output": "`SCRIPT_NAME` identifies the URI path leading to the script, while `PATH_INFO` is the additional path information following the script name. `PATH_INFO` may be empty.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-11",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-11",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "`artifacts/pdfs/rfc3875.pdf`, §§4.1.5–4.1.6, PDF pp. 12–13.",
+            "canonical_question": "In CGI 1.1, what is the distinction between `SCRIPT_NAME` and `PATH_INFO`?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Does CGI 1.1 require a query string to be form-decoded before it is placed in `QUERY_STRING`?",
+        "actual_output": null,
+        "expected_output": "No. `QUERY_STRING` carries the query component of the URL, with the original encoding preserved; CGI does not require form decoding at this stage.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-12",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-12",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "`artifacts/pdfs/rfc3875.pdf`, §4.1.7, PDF p. 13.",
+            "canonical_question": "Does CGI 1.1 require a query string to be form-decoded before it is placed in `QUERY_STRING`?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Which Flask context exposes `request` and `session`, and which exposes `current_app` and `g`?",
+        "actual_output": null,
+        "expected_output": "The request context exposes `request` and `session`; the application context exposes `current_app` and `g`. Flask pushes both contexts before dispatching a request and removes them after it is handled.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-13",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-13",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "*Flask Web Development, 2nd ed.*, PDF pp. 39–40, in the source listed above.",
+            "canonical_question": "Which Flask context exposes `request` and `session`, and which exposes `current_app` and `g`?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Flask automatically creates an OPTIONS response for a matched rule when automatic OPTIONS is enabled. Does RFC 9110 classify OPTIONS as safe, and is that classification contradicted by Flask's dispatch behavior?",
+        "actual_output": null,
+        "expected_output": "OPTIONS is safe under RFC 9110. Flask's branch responds to the OPTIONS request without invoking the endpoint view, which is consistent with the method's safe semantics; the RFC definition concerns the requested effect on the resource, not whether a server performs internal work.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-14",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-14",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Flask `src/flask/app.py`, lines 879–902; `artifacts/pdfs/rfc9110.pdf`, §9.2.1, PDF pp. 72–73.",
+            "canonical_question": "Flask automatically creates an OPTIONS response for a matched rule when automatic OPTIONS is enabled. Does RFC 9110 classify OPTIONS as safe, and is that classification contradicted by Flask's dispatch behavior?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "What conditional-response behavior does Flask's `send_file` expose by default, and what HTTP mechanisms help explain that behavior?",
+        "actual_output": null,
+        "expected_output": "`send_file` defaults `conditional=True`, enabling conditional and range responses when a file path and request environment are available. RFC 9110 describes conditional requests and range requests as HTTP mechanisms for validating or selecting parts of representations.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-15",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-15",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Flask `src/flask/helpers.py`, lines 407–468; `artifacts/pdfs/rfc9110.pdf`, §§13–14, PDF pp. 80–88.",
+            "canonical_question": "What conditional-response behavior does Flask's `send_file` expose by default, and what HTTP mechanisms help explain that behavior?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "What does Requests `stream=True` change, and what does HTTP/1.1 say about message-body framing?",
+        "actual_output": null,
+        "expected_output": "Requests avoids downloading the response content all at once; callers can consume it incrementally with `iter_content`. HTTP/1.1 framing determines the message body's length from rules such as `Content-Length`, `Transfer-Encoding`, or the response's connection semantics. Streaming affects client consumption, not the HTTP framing rules.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-16",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-16",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Requests `src/requests/models.py`, lines 799–835; `artifacts/pdfs/rfc9112.pdf`, §§6 and 6.3, PDF pp. 18–21.",
+            "canonical_question": "What does Requests `stream=True` change, and what does HTTP/1.1 say about message-body framing?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "At Flask's WSGI entry point, what input is used to create the request context, and which CGI 1.1 variables describe the request method and query component?",
+        "actual_output": null,
+        "expected_output": "`wsgi_app` takes a WSGI `environ` mapping and passes it to `request_context`. CGI 1.1 names the request method `REQUEST_METHOD` and the URL query component `QUERY_STRING`.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-17",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-17",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Flask `src/flask/app.py`, lines 1479–1512; `artifacts/pdfs/rfc3875.pdf`, §§4.1.7 and 4.1.12, PDF pp. 13 and 15.",
+            "canonical_question": "At Flask's WSGI entry point, what input is used to create the request context, and which CGI 1.1 variables describe the request method and query component?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "When Requests follows redirects, what does it do with request bodies and entity headers for statuses other than 307/308, and how does that align with RFC 9110's redirect semantics?",
+        "actual_output": null,
+        "expected_output": "Requests removes `Content-Length`, `Content-Type`, and `Transfer-Encoding` and clears the body for redirect statuses other than 307/308, after rebuilding the method. RFC 9110 permits historical method rewriting for 301/302 and specifies that 307/308 preserve the method, matching the special handling in Requests.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-18",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-18",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Requests `src/requests/sessions.py`, lines 159–233; `artifacts/pdfs/rfc9110.pdf`, §§15.4.2–15.4.9, PDF pp. 100–103.",
+            "canonical_question": "When Requests follows redirects, what does it do with request bodies and entity headers for statuses other than 307/308, and how does that align with RFC 9110's redirect semantics?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "How does the pinned Requests implementation persist cookies, and what additional Session behavior does the official documentation describe?",
+        "actual_output": null,
+        "expected_output": "Requests merges the Session cookie jar with request cookies during preparation and extracts response cookies into the Session jar after sending, so later requests can reuse them. The official documentation also describes Session-level persistence of cookies and connection pooling, which can reuse the underlying TCP connection for repeated requests to the same host.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-19",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-19",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "code",
+                "web"
+            ],
+            "source_locators": "Requests `src/requests/sessions.py`, lines 467–477 and 712–718; [Requests Advanced Usage, “Session Objects”](https://requests.readthedocs.io/en/stable/user/advanced/), consulted 2026-11-21.",
+            "canonical_question": "How does the pinned Requests implementation persist cookies, and what additional Session behavior does the official documentation describe?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Which sources are integrated, and what mechanism does the paper describe for preserving attribution?",
+        "actual_output": null,
+        "expected_output": "It integrates PDFs, GitHub repositories, and Web content in a unified retrieval and generation pipeline. The described pipeline preserves source metadata through format-specific processing and uses chunking, retrieval, and reranking to support explicit provenance attribution in generated responses.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-20",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-20",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": true,
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "`artifacts/paper/asse-paper.pdf`, PDF p. 3 (English paper page 2, “Our approach”); see also PDF p. 1, abstract.",
+            "canonical_question": "Which sources are integrated, and what mechanism does the paper describe for preserving attribution?",
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Using only the supplied local code and PDF sources, with Web search disabled: What percentage of Flask's full upstream test suite passed on Python 3.13 in the most recent CI run?",
+        "actual_output": null,
+        "expected_output": "Cannot be answered from the supplied sources. They contain no current upstream CI run result or Python 3.13 pass percentage.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark. Abstention control; do not use Web evidence.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-21",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-21",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": false,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Flask checkout and supplied PDFs; no source in the corpus reports this CI metric.",
+            "canonical_question": "What percentage of Flask's full upstream test suite passed on Python 3.13 in the most recent CI run?",
+            "source_document": "data/questions/cross_source_benchmark.md",
+            "expected_behavior": "abstain_when_not_established_by_local_sources"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Using only the supplied local code and PDF sources, with Web search disabled: What is the median latency improvement, in milliseconds, of Requests 2.32.5 over Requests 2.31.0 on 100 concurrent HTTP/2 connections?",
+        "actual_output": null,
+        "expected_output": "Cannot be answered from the supplied sources. The corpus contains no such benchmark results, and HTTP/2 concurrency is not established as a tested performance scenario here.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark. Abstention control; do not use Web evidence.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-22",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-22",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": false,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Requests checkout and supplied PDFs; no benchmark dataset or measurements for this comparison.",
+            "canonical_question": "What is the median latency improvement, in milliseconds, of Requests 2.32.5 over Requests 2.31.0 on 100 concurrent HTTP/2 connections?",
+            "source_document": "data/questions/cross_source_benchmark.md",
+            "expected_behavior": "abstain_when_not_established_by_local_sources"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Using only the supplied local code and PDF sources, with Web search disabled: Which Flask maintainer first proposed the exact default session-cookie name used by Flask, and on what date?",
+        "actual_output": null,
+        "expected_output": "Cannot be answered from the supplied sources. The code can expose the configured/default cookie-name behavior, but the proposal author and date require historical issue or commit records not included here.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark. Abstention control; do not use Web evidence.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-23",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-23",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": false,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Flask checkout and supplied PDFs; no proposal history is included.",
+            "canonical_question": "Which Flask maintainer first proposed the exact default session-cookie name used by Flask, and on what date?",
+            "source_document": "data/questions/cross_source_benchmark.md",
+            "expected_behavior": "abstain_when_not_established_by_local_sources"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Using only the supplied local code and PDF sources, with Web search disabled: Which TLS cipher suite did the Requests checkout use in the developer's last production deployment?",
+        "actual_output": null,
+        "expected_output": "Cannot be answered from the supplied sources. A source checkout does not identify a deployment's runtime TLS negotiation, and no deployment logs or configuration are supplied.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark. Abstention control; do not use Web evidence.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-24",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-24",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": false,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Requests checkout and supplied PDFs; no deployment configuration or runtime trace is included.",
+            "canonical_question": "Which TLS cipher suite did the Requests checkout use in the developer's last production deployment?",
+            "source_document": "data/questions/cross_source_benchmark.md",
+            "expected_behavior": "abstain_when_not_established_by_local_sources"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Using only the supplied local code and PDF sources, with Web search disabled: How many Flask users in Argentina encountered a session-cookie signature failure during October 2026?",
+        "actual_output": null,
+        "expected_output": "Cannot be answered from the supplied sources. The corpus contains implementation details but no production telemetry, user geography, or October 2026 incident counts.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "Curated seed item copied from the reviewed 25-question benchmark. Abstention control; do not use Web evidence.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-25",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-25",
+            "curation_status": "curated",
+            "answerable_from_local_corpus": false,
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Flask checkout and supplied PDFs; no production analytics or incident data is included.",
+            "canonical_question": "How many Flask users in Argentina encountered a session-cookie signature failure during October 2026?",
+            "source_document": "data/questions/cross_source_benchmark.md",
+            "expected_behavior": "abstain_when_not_established_by_local_sources"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "If Flask preprocessing returns a value, does full_dispatch_request skip view dispatch and finalize that return value?",
+        "actual_output": null,
+        "expected_output": "Yes. If Flask preprocessing returns a value, `full_dispatch_request` stops further handling, skips view dispatch, and finalizes that value as the response.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-02",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-26",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-02",
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/app.py`, lines 904–920 and 1271–1296.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "How does Flask map different view return types to response objects, and how does it disambiguate a 2-tuple as headers versus status?",
+        "actual_output": null,
+        "expected_output": "Flask maps view return types as follows: strings and bytes become response bodies; dicts and lists become JSON responses; generators or iterators become streaming responses; response objects are retained or coerced. For a 2-tuple, Flask treats it as `(body, headers)` if the second element is headers-like; otherwise, it treats it as `(body, status)`.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-03",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-27",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-03",
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/app.py`, lines 1129–1202.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "How does Flask’s request lifecycle proceed from first-request marking through conditional dispatch, exception routing, and response finalization?",
+        "actual_output": null,
+        "expected_output": "Flask marks that the first request has occurred, sends the request-started signal, runs preprocessing, dispatches the request only if preprocessing returns `None`, routes exceptions through user-exception handling, and finalizes the resulting value into a response.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-01",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-28",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-01",
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/app.py`, lines 904–920.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "How do serializer availability, cookie validity, and lifetime max-age determine Flask session loading outcomes?",
+        "actual_output": null,
+        "expected_output": "Flask session loading depends on:\n\n- If no secret key produces a signing serializer, it returns `None`.\n- If the session cookie is missing or has a bad signature, it returns a new empty session.\n- If the cookie is valid, it loads the signed data using the permanent-session lifetime as the maximum age.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-05",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-29",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-05",
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/sessions.py`, lines 317–349.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "How does Flask's `safe_join` path containment behavior differ from the 404 handling used when a resolved file does not exist or is not a regular file?",
+        "actual_output": null,
+        "expected_output": "`safe_join` enforces path containment by preventing a client-crafted path from escaping the trusted directory. Separately, Flask raises 404 if the resolved final path is not an existing regular file. The trusted directory itself must not be client-provided.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-06",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-30",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-06",
+            "source_types": [
+                "code"
+            ],
+            "source_locators": "Flask `src/flask/helpers.py`, lines 533–574.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "How does lacking requested or expected resource state changes make HTTP GET, HEAD, OPTIONS, and TRACE safe methods?",
+        "actual_output": null,
+        "expected_output": "They are considered safe because the client neither requests nor expects a state change in the target resource when using them. HTTP GET, HEAD, OPTIONS, and TRACE are defined as safe methods on that basis.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-08",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-31",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-08",
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "`artifacts/pdfs/rfc9110.pdf`, §9.2.1, PDF pp. 72–73.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "Compare the HTTP request-target forms—origin-form, absolute-form, authority-form, and asterisk-form—and explain their respective use cases.",
+        "actual_output": null,
+        "expected_output": "HTTP request-target forms differ by use case:\n\n- **origin-form**: Used for ordinary direct requests to an origin server.\n- **absolute-form**: Used when making requests through a proxy.\n- **authority-form**: Used with the **CONNECT** method.\n- **asterisk-form**: Used with **OPTIONS** to address the server as a whole.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-10",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-32",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-10",
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "`artifacts/pdfs/rfc9112.pdf`, §3.2, PDF pp. 9–10.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "If a Flask request starts, which globals become available, and when are the application and request contexts pushed and removed?",
+        "actual_output": null,
+        "expected_output": "When a Flask request starts, `request` and `session` become available from the request context, and `current_app` and `g` become available from the application context. Flask pushes both contexts before dispatching the request and removes them after the request is handled.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-13",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-33",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-13",
+            "source_types": [
+                "pdf"
+            ],
+            "source_locators": "*Flask Web Development, 2nd ed.*, PDF pp. 39–40, in the source listed above.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "When using Requests' iter_content to stream a response body, is the body length determined by the streaming API or by HTTP/1.1 message framing?",
+        "actual_output": null,
+        "expected_output": "The body length is determined by HTTP/1.1 message framing (e.g., `Content-Length`, `Transfer-Encoding`, or connection semantics), not by Requests’ `iter_content`. `iter_content` only affects how the client consumes the response incrementally.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-16",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-34",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-16",
+            "source_types": [
+                "code",
+                "pdf"
+            ],
+            "source_locators": "Requests `src/requests/models.py`, lines 799–835; `artifacts/pdfs/rfc9112.pdf`, §§6 and 6.3, PDF pp. 18–21.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    },
+    {
+        "input": "How do Requests Sessions compare cookie persistence and connection pooling when reusing state across later requests?",
+        "actual_output": null,
+        "expected_output": "Requests Sessions reuse state in two ways: they persist cookies by storing response cookies in the Session cookie jar and merging them into later requests, and they use connection pooling to reuse the underlying TCP connection for repeated requests to the same host.",
+        "retrieval_context": null,
+        "context": null,
+        "name": null,
+        "comments": "DeepEval-generated single-turn variant; reviewed against the parent benchmark answer and its cited source locators. Generated context omitted from the final dataset.",
+        "source_file": "data/questions/cross_source_benchmark.md#item-19",
+        "tools_called": null,
+        "expected_tools": null,
+        "additional_metadata": {
+            "benchmark_id": "cross-source-gen-35",
+            "curation_status": "generated_and_source_checked",
+            "generation_method": "deepeval-generate-goldens",
+            "deepeval_version": "4.1.8",
+            "derived_from": "cross-source-19",
+            "source_types": [
+                "code",
+                "web"
+            ],
+            "source_locators": "Requests `src/requests/sessions.py`, lines 467–477 and 712–718; [Requests Advanced Usage, “Session Objects”](https://requests.readthedocs.io/en/stable/user/advanced/), consulted 2026-11-21.",
+            "answerable_from_local_corpus": true,
+            "source_document": "data/questions/cross_source_benchmark.md"
+        },
+        "custom_column_key_values": null
+    }
+]

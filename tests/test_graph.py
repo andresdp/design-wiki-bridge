@@ -15,7 +15,7 @@ SHARED_DOWNSTREAM = ["join_local", "rerank", "assemble_context", "generate", "va
 
 
 def manifest(cond, **web):
-    m = load_manifest(ROOT / "configs" / "manifests" / f"flask-{cond}.yaml")
+    m = load_manifest(ROOT / "configs" / "manifests" / f"flask-{cond}-dev.yaml")
     if web:
         m = m.model_copy(update={"web": m.web.model_copy(update=web)})
     return m

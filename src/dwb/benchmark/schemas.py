@@ -70,7 +70,9 @@ class Provenance(_Strict):
 
 class QuestionRecord(_Strict):
     id: str = Field(min_length=1)
-    kind: Literal["public", "custom"]
+    # public: SWE-QA; custom: authored, answerable; control: authored, unanswerable from the
+    # corpus (the expected outcome is a decline)
+    kind: Literal["public", "custom", "control"]
     repo: str
     repo_sha: str
     question: str
@@ -91,22 +93,33 @@ class QuestionRecord(_Strict):
                 raise ValueError("public items may not allow 'web' (R8)")
             if not (self.provenance.upstream_split and self.provenance.upstream_row_id):
                 raise ValueError("public items need upstream_split and upstream_row_id")
-        else:
+        elif self.kind == "custom":
             if not self.expected_claims:
                 raise ValueError("custom items need expected_claims")
-            types = {a.source_type for req in self.evidence for a in req.alternatives}
-            if "code" not in types or not types & {"pdf", "web"}:
-                raise ValueError(
-                    "custom items need at least one code and one external (pdf/web) span"
-                )
+            if not self.evidence:
+                raise ValueError("custom items need at least one evidence span")
             if not self.provenance.author:
                 raise ValueError("custom items need provenance.author")
+        else:  # control: nothing in the corpus answers it, and the web may not either
+            if self.evidence or self.expected_claims:
+                raise ValueError("control items have no evidence and no expected_claims")
+            if "web" in self.allowed_sources:
+                raise ValueError("control items may not allow 'web'")
+            if not self.provenance.author:
+                raise ValueError("control items need provenance.author")
         claim_ids = {c.id for c in self.expected_claims}
         for req in self.evidence:
             missing = set(req.supports_claims) - claim_ids
             if missing:
                 raise ValueError(f"evidence {req.id} supports unknown claims {sorted(missing)}")
         return self
+
+    @property
+    def grounding(self) -> str:
+        """The annotated evidence's source types, e.g. ``code``, ``pdf``, ``code+web``;
+        ``none`` without annotated evidence (controls, unannotated public items)."""
+        types = {a.source_type for req in self.evidence for a in req.alternatives}
+        return "+".join(t for t in ("code", "pdf", "web") if t in types) or "none"
 
     def code_spans(self) -> list[AnnotatedSpan]:
         return [a for r in self.evidence for a in r.alternatives if a.source_type == "code"]

@@ -26,16 +26,17 @@ def test_pairing_reports_and_excludes_missing(record):
     assert missing == ["q2"] and len(paired) == 1
     assert paired[0]["recall_final_diff"] == 0.5
     s = {(r["subset"], r["metric"]): r for r in paired_summary(paired)}
-    assert s[("custom", "recall_final")]["improved"] == 1
-    assert s[("public", "recall_final")]["n_paired"] == 0
-    assert s[("custom", "correctness")]["tied"] == 1
+    assert s[("code+pdf", "recall_final")]["improved"] == 1
+    assert s[("primary", "recall_final")]["improved"] == 1  # code+pdf needs code
+    assert ("public", "recall_final") not in s  # only subsets present are reported
+    assert s[("code+pdf", "correctness")]["tied"] == 1
 
 
 def test_evaluate_command_writes_all_tables(tmp_path, record):
     save_records([record], tmp_path / "data" / "dev.jsonl")
-    base = yaml.safe_load((ROOT / "configs" / "manifests" / "flask-A.yaml").read_text())
+    base = yaml.safe_load((ROOT / "configs" / "manifests" / "flask-A-dev.yaml").read_text())
     for cond, final in (("A", ("i1",)), ("B", ("i1", "i2"))):
-        m = load_manifest(ROOT / "configs" / "manifests" / f"flask-{cond}.yaml")
+        m = load_manifest(ROOT / "configs" / "manifests" / f"flask-{cond}-dev.yaml")
         m = m.model_copy(update={"question_set": m.question_set.model_copy(
             update={"path": "data/dev.jsonl"})})
         rd = RunDir.start(m, tmp_path / "runs")
@@ -54,16 +55,16 @@ def test_evaluate_command_writes_all_tables(tmp_path, record):
     from fakes import FakeStructuredChat
 
     out = tmp_path / "report"
-    res = evaluate_runs(tmp_path / "runs" / "flask-A-dev-001",
-                        tmp_path / "runs" / "flask-B-dev-001",
+    res = evaluate_runs(tmp_path / "runs" / "flask-A-dev-002",
+                        tmp_path / "runs" / "flask-B-dev-002",
                         out, config_path=cfg, base_dir=tmp_path,
                         judge_llm=FakeStructuredChat(judge_fn))
     for f in ("per_question.csv", "paired.csv", "paired_summary.csv", "cost.csv",
               "evaluator_config.json", "judge_log.jsonl", "report_summary.json"):
         assert (out / f).exists() and (out / f).stat().st_size > 0, f
     assert res["paired"] == 1 and res["judge_calls"] > 0
-    again = evaluate_runs(tmp_path / "runs" / "flask-A-dev-001",
-                          tmp_path / "runs" / "flask-B-dev-001", tmp_path / "report2",
+    again = evaluate_runs(tmp_path / "runs" / "flask-A-dev-002",
+                          tmp_path / "runs" / "flask-B-dev-002", tmp_path / "report2",
                           config_path=cfg, base_dir=tmp_path,
                           judge_llm=FakeStructuredChat(judge_fn))
     assert again["judge_calls"] == 0 and again["judge_cache_hits"] > 0
@@ -129,7 +130,7 @@ def _two_runs(tmp_path, record, conds=("A", "B"), mutate=None):
     save_records([record], tmp_path / "data" / "dev.jsonl")
     dirs = []
     for i, cond in enumerate(conds):
-        m = load_manifest(ROOT / "configs" / "manifests" / f"flask-{cond}.yaml")
+        m = load_manifest(ROOT / "configs" / "manifests" / f"flask-{cond}-dev.yaml")
         m = m.model_copy(update={"question_set": m.question_set.model_copy(
             update={"path": "data/dev.jsonl"}), "run_id": f"r{i}-{cond}"})
         if mutate and i == 1:
@@ -264,3 +265,60 @@ def test_web_gate_summary_splits_by_verdict_agreement(record):
     # the success-criterion check: web-needing items the judge called sufficient
     assert s["web_reference_judged_sufficient_A"] == 1
     assert s["web_reference_judged_sufficient_B"] == 0
+
+
+def control_record():
+    from dwb.benchmark.schemas import QuestionRecord
+
+    return QuestionRecord(id="ctl", kind="control", repo="flask", repo_sha="x",
+                          question="What is Flask's market share?", allowed_sources=["code"],
+                          reference_answer="Not answerable from the corpus.",
+                          provenance={"author": "x"})
+
+
+def test_control_that_declines_scores_one_without_judge_calls():
+    from dwb.trace import AnswerClaim
+
+    j = make_judge()
+    t = make_trace(qid="ctl", claims=[AnswerClaim(text="Not in the evidence.", kind="gap")])
+    row = question_row(control_record(), t, j, MatchRules())
+    assert row["subset"] == "control" and row["control_correct"] == 1.0
+    assert row["correctness"] is None and row["recall_final"] is None
+    assert row["citation_support"] is None and j.stats.calls == 0
+
+
+def test_control_with_an_answer_claim_scores_zero():
+    j = make_judge()
+    row = question_row(control_record(), make_trace(qid="ctl"), j, MatchRules())
+    assert row["control_correct"] == 0.0 and j.stats.calls == 0
+
+
+def test_failed_control_scores_zero_and_is_paired():
+    j = make_judge()
+    failed = make_trace("B", qid="ctl", claims=[], errors=["boom"])
+    a = [question_row(control_record(), make_trace("A", qid="ctl", claims=[
+        __import__("dwb.trace", fromlist=["AnswerClaim"]).AnswerClaim(text="n/a", kind="gap")]),
+        j, MatchRules())]
+    b = [question_row(control_record(), failed, j, MatchRules())]
+    assert b[0]["control_correct"] == 0.0 and b[0]["latency_ms"] is None and j.stats.calls == 0
+    s = {(r["subset"], r["metric"]): r for r in paired_summary(pair(a, b)[0])}
+    cc = s[("control", "control_correct")]
+    assert cc["n_paired"] == 1 and cc["regressed"] == 1
+    assert s[("primary", "control_correct")]["n_paired"] == 0  # controls are not primary
+
+
+def test_summary_has_one_block_per_subset_plus_primary_and_all(record):
+    j = make_judge()
+    public = record.model_copy(update={
+        "id": "p", "kind": "public", "expected_claims": [], "reference_answer": "ref",
+        "provenance": record.provenance.model_copy(update={"upstream_row_id": "1"})})
+    code = record.model_copy(update={"id": "c", "evidence": record.evidence[:1]})
+    recs = [record, public, code]
+    rows = {c: [question_row(r, make_trace(c, qid=r.id), j, MatchRules()) for r in recs]
+            for c in "AB"}
+    assert [r["subset"] for r in rows["A"]] == ["code+pdf", "public", "code"]
+    s = paired_summary(pair(rows["A"], rows["B"])[0])
+    subsets = list(dict.fromkeys(r["subset"] for r in s))
+    assert subsets == ["primary", "public", "code", "code+pdf", "all"]
+    n = {r["subset"]: r["n_paired"] for r in s if r["metric"] == "recall_final"}
+    assert n["primary"] == 3 and n["all"] == 3

@@ -257,11 +257,11 @@ dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium -
 dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
 dwb experiment run configs/manifests/flask-A.yaml --web-mode record
 dwb experiment run configs/manifests/flask-B.yaml --web-mode record
-dwb experiment evaluate runs/flask-A-dev-001 runs/flask-B-dev-001 --out reports/flask-dev
+dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 --out reports/flask-test
 ```
 
 - **Conditions:** condition **A** uses vector search and **B** uses OpenWiki-guided search. Everything else is identical: PDFs, the web policy, the reranker, the context budget, the generator, and the citation format. `experiment check` verifies this for each manifest pair.
-- **Manifests:** manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets.
+- **Manifests:** manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets. `<repo>-{A,B}.yaml` run the frozen test set; `<repo>-{A,B}-dev.yaml` run the development set with identical settings (the pilot; tune only on non-variant development questions). Flask uses the three-book PDF index; Requests has PDFs off.
 - **Run:** `experiment run` writes `runs/<run_id>/`, containing the frozen manifest, `traces.jsonl` (one record per question), and `run_summary.json`. Code passages are stored by reference (commit, path, lines); `experiment evaluate` reads their text back from the checkout named in the manifest, so keep that checkout. A test set must be frozen; its hash is in the manifest, and it is checked before anything else runs. `--overwrite` replaces a previous run. If one source fails for a question (for example the OpenWiki server, or the reranker call), the question is still answered from the other sources and marked degraded; `run_summary.json` counts `failed` and `degraded` questions separately. Condition A refuses a code index built with a different `max_span_tokens` or an older chunker version: rebuild it with `dwb index code <repo>` and put the new ID in the manifest.
 - **Web modes:**
   - `record` calls Tavily for searches that aren't stored yet and saves them.
@@ -295,6 +295,10 @@ dwb benchmark check data/questions/dev/flask.jsonl data/questions/test/flask.jso
 - **Validate:** checks the schema, duplicate IDs, the pinned SHA, code spans at the pinned commit, and PDF spans against the repository's corpus (`pdf_corpus` in `configs/chat.yaml`, or `--pdf-corpus`). A missing checkout stops with the clone step.
 - **Freeze:** refuses when validation finds a problem or the set overlaps the repository's dev set. It prints the hash; copy it into the test manifests' `question_set.hash` yourself.
 - **Check:** fails on a shared ID, question text, or SWE-QA row, or when the test file changed after freezing. A missing test file counts as empty.
+- **Question kinds:** `public` (SWE-QA; code only, never web; upstream row IDs required), `custom` (authored; expected claims, at least one evidence span of any source type, and `provenance.author`), and `control` (authored and unanswerable from the corpus).
+- **Writing a control:** `kind: control`, no `evidence`, no `expected_claims`, `allowed_sources` without `web`, a `reference_answer` that states the decline (used only by the report and DeepEval), and `provenance.author`. It scores `control_correct` 1 when every answer claim is a gap claim; correctness and recall do not apply.
+- **Grounding and subsets:** each record's grounding is derived from its evidence source types (`code`, `pdf`, `code+pdf`, `code+web`, …). Reports group results by `public`, `control`, and each authored grounding, plus `primary` (public and authored questions that need code: the A/B comparison) and `all`.
+- **Allowed sources:** authored answerable questions allow every local source the repository has (Flask: code and PDF; Requests: code); only code+web questions also allow `web`; controls and public questions never do.
 - Exit codes: 1 means problems in the records; 2 means a setup or usage error.
 
 ### Adding a research repository
@@ -374,7 +378,7 @@ wiki      ok     wiki-flask-52e1119f2d9c
 A command that ends well prints `✓`, what happened, and the next step:
 
 ```
-flask · research mode · 2c1b30d0503c · flask-A-dev-001 vs flask-B-dev-001
+flask · research mode · 2c1b30d0503c · flask-A-test-001 vs flask-B-test-001
 Kind  Detail
 note  repository candidate budget differs: A=40 B=20 (reported, R7)
 ✓ Paired check passed: the manifests differ only in the repository branch → next: dwb experiment run configs/manifests/flask-A.yaml
