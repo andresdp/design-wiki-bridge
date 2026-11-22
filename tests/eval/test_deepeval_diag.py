@@ -11,3 +11,76 @@ def test_test_case_uses_saved_context_only(record):
 def test_skipped_without_answer(record):
     t = make_trace().model_copy(update={"answer": None})
     assert run_diagnostics(record, t, "unused")["skipped"]
+
+
+class StubMetric:
+    def __init__(self, name, calls, cost=0.01):
+        self.name, self.calls, self.evaluation_cost = name, calls, cost
+        self.score = None
+
+    def measure(self, case):
+        self.calls.append(self.name)
+        self.score = 0.8
+
+
+def stub_factory(calls, cost=0.01):
+    return lambda name, model: StubMetric(name, calls, cost)
+
+
+def control():
+    from dwb.benchmark.schemas import QuestionRecord
+
+    return QuestionRecord(id="ctl", kind="control", repo="flask", repo_sha="x",
+                          question="Unanswerable?", allowed_sources=["code"],
+                          reference_answer="Not answerable.", provenance={"author": "x"})
+
+
+def test_control_runs_faithfulness_only():
+    calls = []
+    out = run_diagnostics(control(), make_trace(qid="ctl"), "m",
+                          metric_factory=stub_factory(calls))
+    assert calls == ["faithfulness"]
+    assert out["contextual_recall"] is None and out["contextual_recall_skipped"]
+    assert out["faithfulness"] == 0.8 and out["faithfulness_cost"] == 0.01
+
+
+def test_answerable_runs_both_and_records_cost(record):
+    calls = []
+    out = run_diagnostics(record, make_trace(), "m", metric_factory=stub_factory(calls, 0.02))
+    assert calls == ["contextual_recall", "faithfulness"]
+    assert out["contextual_recall_cost"] == 0.02 and out["skipped"] == ""
+
+
+def test_failed_trace_gets_no_row_and_empty_context_is_skipped(record):
+    calls = []
+    f = stub_factory(calls)
+    assert run_diagnostics(record, make_trace(errors=["boom"]), "m", metric_factory=f) is None
+    out = run_diagnostics(record, make_trace(final=()), "m", metric_factory=f)
+    assert out["skipped"] == "empty final context" and calls == []
+
+
+def test_metric_error_is_recorded_not_raised(record):
+    class Boom(StubMetric):
+        def measure(self, case):
+            raise RuntimeError("judge down")
+
+    out = run_diagnostics(record, make_trace(), "m",
+                          metric_factory=lambda n, m: Boom(n, []))
+    assert out["faithfulness"] is None and "judge down" in out["faithfulness_error"]
+
+
+def test_summary_per_condition_and_subset(record):
+    from dwb.eval.deepeval_diag import deepeval_summary
+
+    calls = []
+    rows = []
+    for cond in "AB":
+        for rec, subset in ((record, "code+pdf"), (control(), "control")):
+            d = run_diagnostics(rec, make_trace(cond, qid=rec.id), "m",
+                                metric_factory=stub_factory(calls))
+            rows.append({"question_id": rec.id, "condition": cond, "subset": subset, **d})
+    s = {(r["condition"], r["subset"], r["metric"]): r for r in deepeval_summary(rows)}
+    assert s[("A", "control", "contextual_recall")]["n_scored"] == 0
+    assert s[("A", "control", "contextual_recall")]["n_skipped"] == 1
+    assert s[("B", "all", "faithfulness")]["n_scored"] == 2
+    assert s[("A", "all", "faithfulness")]["evaluation_cost"] == 0.02

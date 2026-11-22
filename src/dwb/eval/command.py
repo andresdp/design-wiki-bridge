@@ -116,8 +116,10 @@ def evaluate_runs(
             if run_deepeval:
                 from dwb.eval.deepeval_diag import run_diagnostics
 
-                diagnostics.append({"question_id": t.question_id, "condition": t.condition,
-                                    **run_diagnostics(rec, t, cfg["deepeval"]["model"])})
+                diag = run_diagnostics(rec, t, cfg["deepeval"]["model"])
+                if diag is not None:  # a failed trace gets no diagnostics (KTD-B7)
+                    diagnostics.append({"question_id": t.question_id, "condition": t.condition,
+                                        "subset": row["subset"], **diag})
             report(on_progress, "evaluate", "step", done=i, total=total, label=t.question_id,
                    outcome="ok")
         report(on_progress, "evaluate", "done", done=total, total=total, label=label)
@@ -125,6 +127,10 @@ def evaluate_runs(
               "judge_prompt_hashes": ({"claim": judge.claim_hash, "support": judge.support_hash}
                                       if judge else None),
               "runs": {"A": str(run_a), "B": str(run_b)}, "paired_check": paired_check}
+    if run_deepeval:
+        from dwb.eval.deepeval_diag import deepeval_version
+
+        config["deepeval_version"] = deepeval_version()
     result = write_report(out, rows["A"], rows["B"], traces["A"], traces["B"], config, judge,
                           diagnostics if run_deepeval else None)
     LOG.info("Report written to [bold]%s[/]: %d paired questions, %d judge calls, %d cache hits",

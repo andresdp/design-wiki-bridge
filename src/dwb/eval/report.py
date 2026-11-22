@@ -17,8 +17,8 @@ from dwb.trace import TraceRecord
 
 METRICS = ("recall_candidates", "recall_final", "recall_candidates_jaccard",
            "recall_final_jaccard", "correctness", "citation_support", "coverage",
-           "abstained", "gap_claims", "failed", "degraded", "context_items", "context_tokens",
-           "total_tokens", "latency_ms")
+           "control_correct", "abstained", "gap_claims", "failed", "degraded", "context_items",
+           "context_tokens", "total_tokens", "latency_ms")
 # abstaining / gap claims are not errors, but fewer of them means more of the question answered
 LOWER_IS_BETTER = {"abstained", "gap_claims", "failed", "degraded", "context_tokens",
                    "total_tokens", "latency_ms"}
@@ -26,6 +26,25 @@ COST_METRICS = ("context_tokens", "total_tokens", "latency_ms")
 TIE_EPS = 1e-9
 # LLM stages whose tokens make up a question's cost; check_local is the web gate's judge
 LLM_STAGES = ("check_local", "rerank", "generate")
+# report subsets (KTD-B10): "primary" is the condition-sensitive A/B comparison, public
+# questions plus authored answerable ones that need code; the rest are per-type breakdowns
+PRIMARY = "primary"
+SUBSET_ORDER = ("public", "code", "code+pdf", "code+web", "code+pdf+web", "pdf", "web",
+                "pdf+web", "control")
+
+
+def subset_of(record: QuestionRecord) -> str:
+    """``public`` or ``control`` by kind; an authored answerable question by its grounding."""
+    return record.kind if record.kind in ("public", "control") else record.grounding
+
+
+def in_primary(subset: str) -> bool:
+    return subset == "public" or subset.startswith("code")
+
+
+def declined(trace: TraceRecord) -> bool:
+    """The answer declines: it has claims and every one is a "not established" gap claim."""
+    return bool(trace.claims) and all(c.kind == "gap" for c in trace.claims)
 
 
 def _counted(stage) -> bool:
@@ -38,7 +57,8 @@ def question_row(record: QuestionRecord, trace: TraceRecord, judge: ClaimsJudge 
                  rules: MatchRules) -> dict[str, Any]:
     r = recall(record, trace, rules)
     row: dict[str, Any] = {
-        "question_id": record.id, "kind": record.kind, "condition": trace.condition,
+        "question_id": record.id, "kind": record.kind, "subset": subset_of(record),
+        "condition": trace.condition,
         "run_id": trace.run_id,
         "recall_candidates": r.candidates, "recall_final": r.final,
         "recall_candidates_jaccard": r.candidates_jaccard,
@@ -55,7 +75,7 @@ def question_row(record: QuestionRecord, trace: TraceRecord, judge: ClaimsJudge 
         "warnings": "; ".join(trace.warnings),
         "unresolved_citation_ids": trace.validation.get("n_unresolved_ids", 0),
         # whole-answer abstention (every claim is a gap) and partial gaps, separate from errors
-        "abstained": float(bool(trace.claims) and all(c.kind == "gap" for c in trace.claims)),
+        "abstained": float(declined(trace)),
         "gap_claims": float(sum(1 for c in trace.claims if c.kind == "gap")),
         "context_items": float(len(trace.final_context_ids)),
         "context_tokens": next((s.input_tokens for s in trace.stages
@@ -64,7 +84,16 @@ def question_row(record: QuestionRecord, trace: TraceRecord, judge: ClaimsJudge 
                             if s.name in LLM_STAGES),
         "latency_ms": sum(s.latency_ms for s in trace.stages if _counted(s)),
         "correctness": None, "citation_support": None, "coverage": None,
+        "control_correct": None,
     }
+    if record.kind == "control":
+        # unanswerable (R6): correct only when the answer declines; a failed control has no
+        # answer and scores 0. The claim judge is never called, recall does not apply.
+        row["control_correct"] = float(not trace.errors and declined(trace))
+        if trace.errors:
+            for m in COST_METRICS:
+                row[m] = None
+        return row
     if trace.errors:
         for m in COST_METRICS:
             row[m] = None
@@ -103,7 +132,7 @@ def pair(rows_a: list[dict], rows_b: list[dict]) -> tuple[list[dict], list[str]]
     missing = sorted(set(a) ^ set(b))
     paired = []
     for qid in sorted(set(a) & set(b)):
-        row = {"question_id": qid, "kind": a[qid]["kind"]}
+        row = {"question_id": qid, "kind": a[qid]["kind"], "subset": a[qid]["subset"]}
         for m in METRICS:
             va, vb = a[qid].get(m), b[qid].get(m)
             row[f"{m}_A"], row[f"{m}_B"] = va, vb
@@ -112,16 +141,25 @@ def pair(rows_a: list[dict], rows_b: list[dict]) -> tuple[list[dict], list[str]]
     return paired, missing
 
 
+def summary_subsets(paired: list[dict]) -> list[str]:
+    """``primary``, then each subset present in a fixed order (unknown ones last), then
+    ``all``."""
+    present = {p["subset"] for p in paired}
+    ordered = [s for s in SUBSET_ORDER if s in present] + sorted(present - set(SUBSET_ORDER))
+    return [PRIMARY, *ordered, "all"]
+
+
 def paired_summary(paired: list[dict]) -> list[dict]:
     out = []
-    for kind in ("public", "custom", "all"):
-        rows = [p for p in paired if kind == "all" or p["kind"] == kind]
+    for subset in summary_subsets(paired):
+        rows = [p for p in paired if subset == "all" or p["subset"] == subset
+                or (subset == PRIMARY and in_primary(p["subset"]))]
         for m in METRICS:
             both = [p for p in rows if p[f"{m}_diff"] is not None]  # same questions on both sides
             diffs = [p[f"{m}_diff"] for p in both]
             sign = -1 if m in LOWER_IS_BETTER else 1
             out.append({
-                "subset": kind, "metric": m, "n_paired": len(diffs),
+                "subset": subset, "metric": m, "n_paired": len(diffs),
                 "n_excluded": len(rows) - len(both),
                 "mean_A": _mean([p[f"{m}_A"] for p in both]),
                 "mean_B": _mean([p[f"{m}_B"] for p in both]),
@@ -193,7 +231,10 @@ def write_report(out: Path, rows_a: list[dict], rows_b: list[dict], traces_a: li
     write_csv(out / "paired_summary.csv", summary)
     write_csv(out / "cost.csv", cost_rows(traces_a) + cost_rows(traces_b))
     if diagnostics is not None:
+        from dwb.eval.deepeval_diag import deepeval_summary
+
         write_csv(out / "deepeval_diagnostics.csv", diagnostics)
+        write_csv(out / "deepeval_summary.csv", deepeval_summary(diagnostics))
     (out / "evaluator_config.json").write_text(json.dumps(config, indent=2, sort_keys=True))
     if judge is not None:
         with (out / "judge_log.jsonl").open("w") as fh:
