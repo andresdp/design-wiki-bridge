@@ -218,7 +218,8 @@ def test_clean_file_has_no_problems_and_counts(tmp_path):
     with_corpus(tmp_path)
     rep = run_validate(ws, write_records(tmp_path, pub(), cus()))
     assert rep.ok and rep.problems == []
-    assert rep.counts == {"records": 2, "public": 1, "custom": 1, "without_evidence": 1,
+    assert rep.counts == {"records": 2, "public": 1, "custom": 1, "control": 0,
+                          "without_evidence": 1,
                           "expected_claims": 1}
 
 

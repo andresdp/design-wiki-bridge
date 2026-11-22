@@ -62,10 +62,54 @@ def test_custom_without_claims_fails():
         custom(expected_claims=[], evidence=[])
 
 
-def test_custom_without_external_span_fails():
-    with pytest.raises(ValidationError, match="external"):
-        custom(evidence=[{"id": "e1", "alternatives": [
-            {"source_type": "code", "path": "a.py", "start_line": 1, "end_line": 2}]}])
+CODE_ONLY = [{"id": "e1", "supports_claims": ["c1"], "alternatives": [
+    {"source_type": "code", "path": "a.py", "start_line": 1, "end_line": 2}]}]
+PDF_ONLY = [{"id": "e1", "supports_claims": ["c1"], "alternatives": [
+    {"source_type": "pdf", "doc_id": "grinberg", "page": 40}]}]
+
+
+def control(**kw):
+    base = dict(
+        id="toy-ctl-000", kind="control", repo="toy", repo_sha="fixture",
+        question="How many users hit this bug last month?", allowed_sources=["code", "pdf"],
+        reference_answer="The supplied sources do not establish this.",
+        provenance={"author": "annotator-1"},
+    )
+    base.update(kw)
+    return QuestionRecord(**base)
+
+
+def test_single_source_custom_questions_are_valid():
+    assert custom(evidence=CODE_ONLY).grounding == "code"
+    assert custom(evidence=PDF_ONLY).grounding == "pdf"
+    assert custom().grounding == "code+pdf"
+
+
+def test_custom_without_evidence_fails():
+    with pytest.raises(ValidationError, match="evidence"):
+        custom(evidence=[])
+
+
+def test_control_is_valid_and_has_no_grounding():
+    c = control()
+    assert c.kind == "control" and c.grounding == "none"
+
+
+@pytest.mark.parametrize("change,match", [
+    ({"evidence": CODE_ONLY}, "evidence"),
+    ({"expected_claims": [{"id": "c1", "text": "x"}]}, "expected_claims"),
+    ({"allowed_sources": ["code", "web"]}, "web"),
+    ({"provenance": {}}, "author"),
+])
+def test_control_rules(change, match):
+    with pytest.raises(ValidationError, match=match):
+        control(**change)
+
+
+def test_public_grounding_comes_from_its_evidence():
+    assert public().grounding == "none"
+    assert public(evidence=CODE_ONLY, expected_claims=[{"id": "c1", "text": "x"}]
+                  ).grounding == "code"
 
 
 def test_unknown_supported_claim_fails():
@@ -87,6 +131,6 @@ def test_span_past_end_of_file_fails_against_toy_repo():
 
 
 def test_round_trip(tmp_path):
-    recs = [public(), custom()]
+    recs = [public(), custom(), control()]
     save_records(recs, tmp_path / "x.jsonl")
     assert load_records(tmp_path / "x.jsonl") == recs
