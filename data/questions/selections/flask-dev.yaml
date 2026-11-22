@@ -1,0 +1,19 @@
+split: flask
+dataset_revision: f048f07da234b39e32937f115d027c5b71acd54e
+file_sha256: null
+repo: flask
+repo_sha: 2c1b30d0503cfb064f1cb252e6614a06915a362a
+id_prefix: flask-dev-pub
+criteria: 'development rows: the original dev row plus 3 eligible-not-sampled rows
+  from the test screening, drawn with random.Random(20261123); reference answers not
+  verified (development use only)'
+include:
+- row: 0
+  reason: development
+- row: 39
+  reason: development
+- row: 41
+  reason: development
+- row: 46
+  reason: development
+exclude: []

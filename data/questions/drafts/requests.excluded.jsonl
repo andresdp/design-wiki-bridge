@@ -1,0 +1,38 @@
+{"row_id":"requests:0","reason":"eligible, not sampled"}
+{"row_id":"requests:1","reason":"development row (criterion 1)"}
+{"row_id":"requests:3","reason":"eligible, not sampled"}
+{"row_id":"requests:4","reason":"eligible, not sampled"}
+{"row_id":"requests:5","reason":"answer cites tests/certs/valid/ca/ca.crt, which does not exist at the pinned checkout (criterion 2)"}
+{"row_id":"requests:6","reason":"eligible, not sampled"}
+{"row_id":"requests:7","reason":"eligible, not sampled"}
+{"row_id":"requests:8","reason":"eligible, not sampled"}
+{"row_id":"requests:9","reason":"eligible, not sampled"}
+{"row_id":"requests:10","reason":"hypothetical removal question; answer's overwrite=False precedence claim is wrong since prepare_request converts request cookies to a jar first (sessions.py:471) (criteria 2, 3)"}
+{"row_id":"requests:11","reason":"eligible, not sampled"}
+{"row_id":"requests:12","reason":"eligible, not sampled"}
+{"row_id":"requests:13","reason":"eligible, not sampled"}
+{"row_id":"requests:14","reason":"eligible, not sampled"}
+{"row_id":"requests:15","reason":"about pytest parametrize mechanics; the answer relies on framework internals, not repository code (criterion 3)"}
+{"row_id":"requests:17","reason":"eligible, not sampled"}
+{"row_id":"requests:18","reason":"eligible, not sampled"}
+{"row_id":"requests:19","reason":"key claim wrong: after streaming, iter_content raises StreamConsumedError rather than reusing chunks, since _content stays False (models.py:839-840) (criterion 2)"}
+{"row_id":"requests:21","reason":"eligible, not sampled"}
+{"row_id":"requests:22","reason":"key claim wrong: close() does not prevent a double raw.close() when content was never consumed, since _content_consumed is not set by close() (models.py:1028-1039) (criterion 2)"}
+{"row_id":"requests:23","reason":"speculative refactoring design question with no ground truth in the repository (criteria 3, 4)"}
+{"row_id":"requests:24","reason":"eligible, not sampled"}
+{"row_id":"requests:25","reason":"speculative CPython performance question; the answer relies on general runtime knowledge, not repository content (criterion 3)"}
+{"row_id":"requests:26","reason":"eligible, not sampled"}
+{"row_id":"requests:28","reason":"security rationale is speculative and not in the repo, and the answer misreads the guard (it rejects names starting with '<' OR ending with '>') (criteria 2, 3)"}
+{"row_id":"requests:30","reason":"speculative performance question; urlparse cost and call-count claims rely on stdlib/CPython behaviour outside the repo (criterion 3)"}
+{"row_id":"requests:31","reason":"rationale for super().__init__() is generic Python MRO knowledge; the code is one line with no rationale in the repo (criteria 3, 4)"}
+{"row_id":"requests:32","reason":"speculative micro-performance question about property indirection; not answerable from the repo (criterion 3)"}
+{"row_id":"requests:34","reason":"eligible, not sampled"}
+{"row_id":"requests:35","reason":"eligible, not sampled"}
+{"row_id":"requests:36","reason":"eligible, not sampled"}
+{"row_id":"requests:37","reason":"eligible, not sampled"}
+{"row_id":"requests:38","reason":"speculative performance question duplicating row 25; relies on CPython string costs, not repo content (criterion 3)"}
+{"row_id":"requests:40","reason":"eligible, not sampled"}
+{"row_id":"requests:41","reason":"eligible, not sampled"}
+{"row_id":"requests:43","reason":"answer relies on a Python 2 HTTPMessage.getheaders() stdlib API that does not exist on Python 3; not verifiable from the repo (criteria 2, 3)"}
+{"row_id":"requests:45","reason":"eligible, not sampled"}
+{"row_id":"requests:47","reason":"about pytest fixture/parametrize resolution internals; the answer is generic framework description (criterion 3)"}

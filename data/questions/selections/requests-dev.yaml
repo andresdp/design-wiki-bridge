@@ -1,0 +1,19 @@
+split: requests
+dataset_revision: f048f07da234b39e32937f115d027c5b71acd54e
+file_sha256: null
+repo: requests
+repo_sha: b25c87d7cb8d6a18a37fa12442b5f883f9e41741
+id_prefix: requests-dev-pub
+criteria: 'development rows: the original dev row plus 3 eligible-not-sampled rows
+  from the test screening, drawn with random.Random(20261123); reference answers not
+  verified (development use only)'
+include:
+- row: 1
+  reason: development
+- row: 26
+  reason: development
+- row: 36
+  reason: development
+- row: 40
+  reason: development
+exclude: []

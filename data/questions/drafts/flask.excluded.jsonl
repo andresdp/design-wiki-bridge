@@ -1,0 +1,38 @@
+{"row_id":"flask:0","reason":"development question (flask:0), excluded by rule"}
+{"row_id":"flask:3","reason":"speculative premise: UnexpectedUnicodeError is defined but never used in the repo; the answer's architectural claims about error-handler routing are not supported by the code"}
+{"row_id":"flask:5","reason":"eligible, not sampled"}
+{"row_id":"flask:6","reason":"trivial: FakePath.__fspath__ is a one-line method returning self.path"}
+{"row_id":"flask:7","reason":"eligible, not sampled"}
+{"row_id":"flask:9","reason":"eligible, not sampled"}
+{"row_id":"flask:10","reason":"contradicted by pinned code: stream_with_context in 3.1.2 pushes app_ctx and req_ctx after the sentinel yield, not with ctx: before it as the answer claims"}
+{"row_id":"flask:11","reason":"vague, leading premise ('hidden coupling that causes issues'); the answer is mostly opinion rather than code-grounded facts"}
+{"row_id":"flask:12","reason":"trivial: the _lazy_sha1 docstring states the whole answer (defer hashlib.sha1 access for FIPS builds)"}
+{"row_id":"flask:13","reason":"eligible, not sampled"}
+{"row_id":"flask:14","reason":"eligible, not sampled"}
+{"row_id":"flask:15","reason":"eligible, not sampled"}
+{"row_id":"flask:16","reason":"eligible, not sampled"}
+{"row_id":"flask:17","reason":"eligible, not sampled"}
+{"row_id":"flask:19","reason":"contradicted by the repo: the answer claims cross-request consistency, but the SessionInterface docstring (sessions.py 141-146) says concurrent requests have no ordering guarantee"}
+{"row_id":"flask:20","reason":"eligible, not sampled"}
+{"row_id":"flask:21","reason":"eligible, not sampled"}
+{"row_id":"flask:23","reason":"eligible, not sampled"}
+{"row_id":"flask:24","reason":"eligible, not sampled"}
+{"row_id":"flask:25","reason":"eligible, not sampled"}
+{"row_id":"flask:26","reason":"eligible, not sampled"}
+{"row_id":"flask:28","reason":"eligible, not sampled"}
+{"row_id":"flask:29","reason":"contradicted by pinned code: session.accessed only adds Vary: Cookie; should_set_cookie never consults it, so it does not trigger serialization"}
+{"row_id":"flask:30","reason":"speculative performance premise; overhead claims for repeated filter registration cannot be verified from the repository"}
+{"row_id":"flask:31","reason":"eligible, not sampled"}
+{"row_id":"flask:32","reason":"speculative performance premise (serializer instantiation 'bottleneck') not supported by the code or docs"}
+{"row_id":"flask:33","reason":"trivial: answered by the single comment in PassDict.to_json ('JSON objects may only have string keys'); the answer also leans on an external RFC"}
+{"row_id":"flask:34","reason":"eligible, not sampled"}
+{"row_id":"flask:37","reason":"vague/trivial: the 'lower-level helper' is just value.__html__() called in the one-line TagMarkup.to_json"}
+{"row_id":"flask:38","reason":"eligible, not sampled"}
+{"row_id":"flask:39","reason":"eligible, not sampled"}
+{"row_id":"flask:40","reason":"eligible, not sampled"}
+{"row_id":"flask:41","reason":"eligible, not sampled"}
+{"row_id":"flask:42","reason":"eligible, not sampled"}
+{"row_id":"flask:43","reason":"eligible, not sampled"}
+{"row_id":"flask:45","reason":"eligible, not sampled"}
+{"row_id":"flask:46","reason":"eligible, not sampled"}
+{"row_id":"flask:47","reason":"speculative performance premise (MRO traversal overhead); complexity claims cannot be verified from the repository"}

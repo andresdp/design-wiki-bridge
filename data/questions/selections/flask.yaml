@@ -1,0 +1,114 @@
+split: flask
+dataset_revision: f048f07da234b39e32937f115d027c5b71acd54e
+repo: flask
+repo_sha: 2c1b30d0503cfb064f1cb252e6614a06915a362a
+id_prefix: flask-pub
+criteria: >-
+  (1) Not a development row (flask:0 is reserved for development).
+  (2) Every symbol, file and line range the reference answer relies on exists at
+  the pinned checkout and the answer's key claims match the pinned code (minor
+  line-number drift is accepted when the content matches).
+  (3) Answerable from the repository's code, tests and in-repo docs alone (no
+  external specs, no web).
+  (4) Not trivially answerable from one docstring/comment line and not hopelessly
+  vague or built on a speculative premise.
+  Then a seeded random sample of 10 eligible rows, seed 20261122
+  (random.Random(20261122).sample(sorted(eligible_indexes), 10)).
+include:
+  - row: 1
+    reason: "sampled; _got_registered_once / _check_setup_finished / setupmethod all present at the cited lines (sansio/blueprints.py, sansio/scaffold.py)"
+  - row: 2
+    reason: "sampled; Flask and Blueprint send_static_file/get_send_file_max_age duplicates and the blueprint max_age comment match app.py and blueprints.py exactly"
+  - row: 4
+    reason: "sampled; test_blueprint_with_subdomain lines match; chain through BlueprintSetupState, testing.EnvironBuilder and create_url_adapter verifiable (small corrections noted)"
+  - row: 8
+    reason: "sampled; FlaskCliRunner.invoke creates ScriptInfo(create_app=lambda: self.app) exactly as cited in testing.py 265-298"
+  - row: 18
+    reason: "sampled; Blueprint.add_url_rule records a lambda via record(); deferred functions run in register() at the cited lines"
+  - row: 22
+    reason: "sampled; ResponseValue Mapping/TypedDict comment, StatusJSON test file and make_response dict/status handling verified (CHANGES version needs correction)"
+  - row: 27
+    reason: "sampled; open_resource read-only check and open_instance_resource contrast verified in app.py and docs/config.rst"
+  - row: 35
+    reason: "sampled; make_config swaps root_path for instance_path when instance_relative is true, as cited in sansio/app.py 482-496"
+  - row: 36
+    reason: "sampled; FlaskGroup.get_command three-stage lookup verified (lines drift by about +8)"
+  - row: 44
+    reason: "sampled; Config.from_object uses dir(obj), and test_config_from_class Base/Test inheritance verified"
+exclude:
+  - row: 0
+    reason: "development question (flask:0), excluded by rule"
+  - row: 3
+    reason: "speculative premise: UnexpectedUnicodeError is defined but never used in the repo; the answer's architectural claims about error-handler routing are not supported by the code"
+  - row: 5
+    reason: "eligible, not sampled"
+  - row: 6
+    reason: "trivial: FakePath.__fspath__ is a one-line method returning self.path"
+  - row: 7
+    reason: "eligible, not sampled"
+  - row: 9
+    reason: "eligible, not sampled"
+  - row: 10
+    reason: "contradicted by pinned code: stream_with_context in 3.1.2 pushes app_ctx and req_ctx after the sentinel yield, not with ctx: before it as the answer claims"
+  - row: 11
+    reason: "vague, leading premise ('hidden coupling that causes issues'); the answer is mostly opinion rather than code-grounded facts"
+  - row: 12
+    reason: "trivial: the _lazy_sha1 docstring states the whole answer (defer hashlib.sha1 access for FIPS builds)"
+  - row: 13
+    reason: "eligible, not sampled"
+  - row: 14
+    reason: "eligible, not sampled"
+  - row: 15
+    reason: "eligible, not sampled"
+  - row: 16
+    reason: "eligible, not sampled"
+  - row: 17
+    reason: "eligible, not sampled"
+  - row: 19
+    reason: "contradicted by the repo: the answer claims cross-request consistency, but the SessionInterface docstring (sessions.py 141-146) says concurrent requests have no ordering guarantee"
+  - row: 20
+    reason: "eligible, not sampled"
+  - row: 21
+    reason: "eligible, not sampled"
+  - row: 23
+    reason: "eligible, not sampled"
+  - row: 24
+    reason: "eligible, not sampled"
+  - row: 25
+    reason: "eligible, not sampled"
+  - row: 26
+    reason: "eligible, not sampled"
+  - row: 28
+    reason: "eligible, not sampled"
+  - row: 29
+    reason: "contradicted by pinned code: session.accessed only adds Vary: Cookie; should_set_cookie never consults it, so it does not trigger serialization"
+  - row: 30
+    reason: "speculative performance premise; overhead claims for repeated filter registration cannot be verified from the repository"
+  - row: 31
+    reason: "eligible, not sampled"
+  - row: 32
+    reason: "speculative performance premise (serializer instantiation 'bottleneck') not supported by the code or docs"
+  - row: 33
+    reason: "trivial: answered by the single comment in PassDict.to_json ('JSON objects may only have string keys'); the answer also leans on an external RFC"
+  - row: 34
+    reason: "eligible, not sampled"
+  - row: 37
+    reason: "vague/trivial: the 'lower-level helper' is just value.__html__() called in the one-line TagMarkup.to_json"
+  - row: 38
+    reason: "eligible, not sampled"
+  - row: 39
+    reason: "eligible, not sampled"
+  - row: 40
+    reason: "eligible, not sampled"
+  - row: 41
+    reason: "eligible, not sampled"
+  - row: 42
+    reason: "eligible, not sampled"
+  - row: 43
+    reason: "eligible, not sampled"
+  - row: 45
+    reason: "eligible, not sampled"
+  - row: 46
+    reason: "eligible, not sampled"
+  - row: 47
+    reason: "speculative performance premise (MRO traversal overhead); complexity claims cannot be verified from the repository"
