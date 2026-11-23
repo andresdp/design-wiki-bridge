@@ -125,9 +125,11 @@ def evaluate_runs(
                       _fmt(row["citation_support"]), _fmt(row["coverage"]),
                       f" ({judge.stats.calls - calls0} judge calls)" if judge else "")
             if run_deepeval:
-                from dwb.eval.deepeval_diag import run_diagnostics
+                from dwb.eval.deepeval_diag import default_metric_factory, run_diagnostics
 
-                diag = run_diagnostics(rec, t, cfg["deepeval"]["model"], cache=de_cache)
+                diag = run_diagnostics(rec, t, cfg["deepeval"]["model"], cache=de_cache,
+                                       metric_factory=default_metric_factory(
+                                           cfg["deepeval"].get("price_per_million")))
                 if diag is not None:  # a failed trace gets no diagnostics (KTD-B7)
                     diagnostics.append({"question_id": t.question_id, "condition": t.condition,
                                         "subset": row["subset"], **diag})

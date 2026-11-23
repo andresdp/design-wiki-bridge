@@ -10,5 +10,6 @@ matching:                    # KTD15
   web_passage_overlap: 0.5
 deepeval:
   enabled: false             # diagnostics only: contextual recall, faithfulness
-  model: gpt-5.4-mini-2026-03-17   # dated mini snapshot: diagnostics only, ~cheaper (KTD-B13)
+  model: gpt-5.4-mini-2026-03-17   # dated mini snapshot: diagnostics only (KTD-B13)
+  price_per_million: {input: 0.75, output: 4.50}   # USD; DeepEval's table lists only gpt-5.4-mini
   cache: artifacts/deepeval_cache.jsonl   # reuse rows across pairwise reports (A/B, A/C, B/C)

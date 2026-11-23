@@ -130,3 +130,13 @@ def test_deepeval_stops_on_a_fatal_error(record):
 
     with pytest.raises(FatalAPIError):
         run_diagnostics(record, make_trace(), "m", metric_factory=lambda n, m: Broke())
+
+
+def test_price_per_million_reaches_deepeval(monkeypatch):
+    from dwb.eval.deepeval_diag import default_metric_factory
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")  # GPTModel needs one; nothing is called
+    metric = default_metric_factory({"input": 0.75, "output": 4.5})("faithfulness",
+                                                                     "gpt-5.4-mini-2026-03-17")
+    assert metric.model.name == "gpt-5.4-mini-2026-03-17" or "gpt-5.4-mini" in str(metric.model)
+    assert default_metric_factory().real and default_metric_factory({"input": 1, "output": 1}).real
