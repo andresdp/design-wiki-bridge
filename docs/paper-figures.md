@@ -1,6 +1,6 @@
 # Paper figures
 
-Conceptual diagrams for the journal paper, drawn at the level of the method rather than the code. Figure 1 suits the introduction or the start of the method section, Figure 2 the method section (wiki search, section reads, span resolution, and citation assembly), and Figure 3 the benchmark and study design section. The implementation view is in [`architecture.md`](architecture.md).
+Conceptual diagrams for the journal paper, drawn at the level of the method rather than the code. They were drafted before condition C (both routes) was added and before the test set was frozen: the paper also compares C, and the frozen sets have 10 public and 8–17 authored questions per repository (`benchmark-and-evaluation.md`). Figure 1 suits the introduction or the start of the method section, Figure 2 the method section (wiki search, section reads, span resolution, and citation assembly), and Figure 3 the benchmark and study design section. The implementation view is in [`architecture.md`](architecture.md).
 
 Each figure is mermaid with a draft caption. To export a vector figure, paste the block into [mermaid.live](https://mermaid.live) and download SVG, or run `mmdc -i fig.mmd -o fig.pdf` with the mermaid CLI. The colors are placeholders. Redraw in the journal's style if needed, keeping the same elements.
 

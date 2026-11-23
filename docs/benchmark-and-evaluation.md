@@ -1,6 +1,6 @@
 # Question Sets and Evaluation Protocol
 
-Status as of 2026-11-22 (test sets frozen; condition C added after the dev pilot, before any test run). This document describes where the question sets stand and how the paper's experiment will be run and scored. The implementation plan is `docs/plans/2026-11-22-1050-feat-authored-benchmark-experiment-plan.md`; this document is the readable summary of it.
+Status as of 2026-11-23: test sets frozen (2026-11-22); condition C added after the dev pilot, before any test run; the paired test runs and their evaluation are complete (results in [`results/2026-11-23-test-set-results.md`](results/2026-11-23-test-set-results.md)). This document describes the question sets and how the paper's experiment was run and scored. The implementation plan is `docs/plans/2026-11-22-1050-feat-authored-benchmark-experiment-plan.md`; this document is the readable summary of it.
 
 ## 1. The experiment in one paragraph
 
@@ -24,7 +24,7 @@ Three conditions answer the same questions about two pinned repositories, Flask 
 
 **Subjects.** Two Python libraries with public SWE-QA splits and links to external specifications: Flask 3.1.2 (with three Flask books as PDF sources) and Requests 2.32.5 (with web sources only).
 
-**Questions.** About 30 per Flask and 19 per Requests, in four groups:
+**Questions.** 30 for Flask and 20 for Requests, in four groups:
 - SWE-QA public questions (code-only);
 - authored single-source questions (code or book);
 - authored cross-source questions (code with a book or a web page);
@@ -215,6 +215,6 @@ DeepEval uses its own pinned model, `gpt-5.4-mini-2026-03-17`, cheaper than the 
 | Extend the question format, evaluation changes, corpus and manifests | Claude | Done |
 | Review the drafts and the SWE-QA sample | You | Done |
 | Convert, web pre-check (measured), validate and freeze | Claude, with your sign-off | Done |
-| Pilot on the development set, record pass, paired runs, evaluation | Claude (model and Tavily cost) | Next |
-| Independent check of a stratified sample by a second reviewer | A co-author | After freezing |
-| Update the paper's method text with the final numbers | Claude drafts, you edit | After the runs |
+| Pilot on the development set, record pass, paired runs, evaluation | Claude (model and Tavily cost) | Done (2026-11-23; `results/2026-11-23-test-set-results.md`) |
+| Independent check of a stratified sample by a second reviewer | A co-author | Pending |
+| Update the paper's method text with the final numbers | Claude drafts, you edit | First draft done (kept outside the repository) |

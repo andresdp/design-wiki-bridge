@@ -4,7 +4,7 @@
 
 # Design Wiki Bridge
 
-> **Status: in progress.** The three conditions, the shared stages, the batch runner, and offline evaluation are built. Condition B runs end to end on the Flask wiki snapshot. Still to do: the Requests wiki, the benchmark content, and the real-model pilot (see [`docs/spikes/2026-11-openwiki-swe-qa-spike.md`](docs/spikes/2026-11-openwiki-swe-qa-spike.md)).
+> **Status (2026-11-23):** the three conditions, the shared stages, the batch runner and offline evaluation are built; the test sets are frozen, and the paired test runs and their evaluation are complete. Results, interpretation and limitations: [`docs/results/2026-11-23-test-set-results.md`](docs/results/2026-11-23-test-set-results.md).
 
 Cross-source question answering over software projects with verifiable citations. The system uses a generated repository wiki ([LangChain OpenWiki](https://github.com/langchain-ai/openwiki)) only as a map for finding the original code and test evidence. Answers then combine that evidence with external specifications (PDFs, Web pages) and cite each claim to an original source span.
 
@@ -18,7 +18,7 @@ This is the research code for the journal extension (Electronic Journal of SADIO
 
 ## Approach
 
-A LangGraph `StateGraph` with deterministic routing normalizes the question and fans out to the sources the item allows. It merges and deduplicates candidates, optionally adds Web evidence, reranks, assembles a token-budgeted context with `E1…En` aliases, and generates structured claims that cite those aliases. Validation maps the aliases back to stable evidence IDs and logs any that don't resolve. The two conditions differ only in the repository branch:
+A LangGraph `StateGraph` with deterministic routing normalizes the question and fans out to the sources the item allows. It merges and deduplicates candidates, optionally adds Web evidence, reranks, assembles a token-budgeted context with `E1…En` aliases, and generates structured claims that cite those aliases. Validation maps the aliases back to stable evidence IDs and logs any that don't resolve. The three conditions differ only in the repository branch:
 
 | Condition | Repository retrieval |
 |---|---|
@@ -30,10 +30,13 @@ All conditions share the PDF retrieval, the item-declared Tavily Web policy (rec
 
 ## Benchmark
 
-- **Repositories:** Flask 3.1.2 and Requests v2.32.5 (pytest 8.4.2 in reserve), pinned in [`configs/repos.yaml`](configs/repos.yaml).
-- **Public items:** 12–15 [SWE-QA](https://huggingface.co/datasets/swe-qa/SWE-QA-Benchmark) questions per repository (dataset revision pinned; row ID = `<split>:<line index>`).
-- **Custom items:** 6–8 cross-source questions per repository, authored with claims that can be checked independently against code or tests *and* an external specification (WSGI, HTTP semantics).
+- **Repositories:** Flask 3.1.2 and Requests v2.32.5, pinned in [`configs/repos.yaml`](configs/repos.yaml). Flask's PDF sources are three Flask books; Requests uses web pages (RFCs, MDN) as external sources.
+- **Frozen test sets (2026-11-22):** Flask 30 questions (10 [SWE-QA](https://huggingface.co/datasets/swe-qa/SWE-QA-Benchmark) public items, 17 authored, 3 unanswerable controls) and Requests 20 (10 public, 8 authored, 2 controls). Authored items carry required claims and annotated evidence spans; some need code plus a book or a web specification. A separate development set (10 + 7) was used for the pilot. Details: [`docs/benchmark-and-evaluation.md`](docs/benchmark-and-evaluation.md) and [`data/questions/README.md`](data/questions/README.md).
 - **Scoring:** offline, over saved traces: span recall, required-claim correctness, citation support and coverage, per-stage cost, all reported as paired differences between conditions (B − A primary; C − A and C − B secondary). DeepEval runs as optional diagnostics.
+
+## Results
+
+On the frozen test sets, replacing vector search with the wiki route (B − A) lowered required-claim correctness by 0.20 in both repositories, mainly because the wiki route never reached the needed code for 20–39% of the questions. Combining both routes (C) recovered those losses but added little over vector search alone (+0.02 Flask, +0.06 Requests). The wiki route was 12–14% cheaper in tokens and about 10% faster per question, but the most expensive per correct answer. Citation support stayed between 0.79 and 0.90 in every condition. Full results, interpretation, limitations and practitioner guidance: [`docs/results/2026-11-23-test-set-results.md`](docs/results/2026-11-23-test-set-results.md).
 
 ## Setup
 
@@ -42,7 +45,7 @@ conda activate taxonomy
 pip install --no-deps -e .          # installs the `dwb` command
 ```
 
-Put `OPENAI_API_KEY` (and `TAVILY_API_KEY` for web search) in a `.env` file in this folder. Run `dwb` from here.
+For the research harness, put `OPENAI_API_KEY` (and `TAVILY_API_KEY` for web search) in a `.env` file in this folder and run `dwb` from here. As a tool in another repository, `dwb init` stores the keys in that repository's `.dwb/.env`. The wiki source needs [OpenWiki](https://github.com/langchain-ai/openwiki) 0.9.0 (`npm install -g openwiki@0.9.0`).
 
 ## Usage
 
@@ -65,12 +68,13 @@ dwb status                    # what is indexed, and whether HEAD moved since
 dwb ask "How does Flask answer OPTIONS?" --repo flask --wiki
 dwb index code flask   ·   dwb index pdf configs/pdfs/flask.yaml   ·   dwb wiki snapshot flask …
 dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
-dwb experiment run configs/manifests/flask-A.yaml --web-only
-dwb experiment run configs/manifests/flask-A.yaml --web-mode replay
-dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 --out reports/flask-test
+dwb experiment run configs/manifests/flask-A.yaml --web-only           # record the web results once
+dwb experiment run configs/manifests/flask-{A,B,C}.yaml --web-mode replay
+dwb experiment run configs/manifests/flask-C.yaml --web-mode replay --resume   # after a stop
+dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 --out reports/flask-test-AB --deepeval
 ```
 
-The repository is always a source; the wiki, PDFs, and the web are optional. Answers cite original code, PDF pages, and web pages, never wiki text.
+The repository is always a source; the wiki, PDFs, and the web are optional. Answers cite original code, PDF pages, and web pages, never wiki text. In `ask` and `chat`, `--wiki` currently replaces vector search (condition B), which was the weaker configuration in the test runs; vector search is the default.
 
 ## Development
 
@@ -91,7 +95,8 @@ src/dwb/       evidence, manifest, trace, budget, rerank, generate, graph, runne
   web/         Tavily record/replay store
   eval/        matching, recall, claim judges, DeepEval diagnostics, report
 data/questions/  test/ (frozen), dev/, selections/
-docs/          usage.md (guide), journal-extension-plan.md, plans/, spikes/
+docs/          usage.md (guide), architecture.md, benchmark-and-evaluation.md (protocol),
+               results/ (findings), journal-extension-plan.md, plans/, spikes/
 artifacts/     gitignored: repo checkouts, SWE-QA files, indexes, wiki snapshots, Tavily store
-runs/          gitignored: run traces
+runs/, reports/  gitignored: run traces and evaluation reports
 ```

@@ -1,6 +1,7 @@
 # Journal extension plan (55JAIIO → Electronic Journal of SADIO)
 
-**Target:** the extended version of the 55JAIIO paper for the Electronic Journal of SADIO (EJS), 2027; submission deadline 2026-12-01. Draft: `paper/ejs-extension/`.  
+**Target:** the extended version of the 55JAIIO paper for the Electronic Journal of SADIO (EJS), 2027; submission deadline 2026-12-01. The paper draft is kept outside the repository (`paper/` is gitignored).  
+**Status (2026-11-23):** test runs and evaluation complete; findings in [`results/2026-11-23-test-set-results.md`](results/2026-11-23-test-set-results.md). The plan below is the original design; where the frozen benchmark differs, the "As frozen" notes and `benchmark-and-evaluation.md` are authoritative.  
 **Scope:** LangGraph, one wiki generator (LangChain OpenWiki), two SWE-QA repositories, Tavily for Web evidence, and DeepEval for offline scoring. Jev is deferred.
 
 ## Contribution and research questions

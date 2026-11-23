@@ -11,7 +11,7 @@ Records follow `dwb.benchmark.schemas.QuestionRecord`. People curate, annotate, 
 
 ## Current sets (2026-11-22)
 
-- `test/flask.jsonl` (30) and `test/requests.jsonl` (20): SWE-QA public questions (seeded sample, `selections/<repo>.yaml`), authored questions from `cross_source_benchmark.md` (re-sourced to the Flask books and to web pages for Requests), and unanswerable controls (`kind: control`). All 50 reviewed and accepted (`REVIEW.md`). Frozen on 2026-11-22: Flask `6e376067…`, Requests `5bb97f34…` (`test/<repo>.jsonl.sha256`, also in `configs/manifests/<repo>-{A,B}.yaml`). Do not edit; a change needs a new freeze and new run IDs.
+- `test/flask.jsonl` (30) and `test/requests.jsonl` (20): SWE-QA public questions (seeded sample, `selections/<repo>.yaml`), authored questions from `cross_source_benchmark.md` (re-sourced to the Flask books and to web pages for Requests), and unanswerable controls (`kind: control`). All 50 reviewed and accepted (`REVIEW.md`). Frozen on 2026-11-22: Flask `6e376067…`, Requests `5bb97f34…` (`test/<repo>.jsonl.sha256`, also in `configs/manifests/<repo>-{A,B,C}.yaml`). Do not edit; a change needs a new freeze and new run IDs.
 - `dev/flask.jsonl` (10) and `dev/requests.jsonl` (7): SWE-QA development rows (`selections/<repo>-dev.yaml`) and generated variants.
 - Drafting notes: `drafts/web-items.draft.md`, `drafts/flask-book-resourcing.draft.md`.
 - Web retrievability pre-check (measured, not filtered; KTD-B9): `drafts/webcheck-2026-11-22.json`; each web question's result is in its provenance.
