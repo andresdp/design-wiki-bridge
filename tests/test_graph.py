@@ -140,3 +140,34 @@ def test_wiki_refs_in_trace_but_never_in_context_or_claims():
         assert t.evidence[i]["source_type"] in ("code", "pdf")
         assert "openwiki/" not in str(t.evidence[i]["locator"])
         assert "dispatch_request" not in t.evidence[i].get("text", "")
+
+
+def test_condition_c_runs_both_repository_branches_into_one_shared_downstream():
+    from dwb.evidence import code_item
+
+    wiki_spans = [code_item(SHA, f"src/flask/w{i}.py", 1, 10, "x", branch="wiki", rank=i + 1)
+                  for i in range(2)]
+    t = run(manifest("C"), components("C", pdf=False, resolver=FakeResolver(wiki_spans)),
+            public_q())
+    n = names(t)
+    assert {"code_retrieve", "wiki_search", "wiki_read", "resolve"} <= set(n)
+    for stage in SHARED_DOWNSTREAM:
+        assert n.count(stage) == 1
+    branches = {t.evidence[i]["provenance"]["branch"] for i in t.candidates["repo"]}
+    assert branches == {"vector", "wiki"}
+
+
+def test_condition_c_merges_a_span_both_branches_found_and_keeps_both_ids():
+    # the fake wiki resolves to the same first two spans the vector search returns
+    t = run(manifest("C"), components("C", pdf=False), public_q())
+    survivors = [t.evidence[i] for i in t.candidates["merged"]]
+    assert len(survivors) == 3  # 3 vector spans; the 2 wiki duplicates merge into them
+    assert sum("wiki" in s["provenance"].get("also_from", []) for s in survivors) == 2
+
+
+def test_condition_c_still_answers_when_the_wiki_is_empty():
+    from graph_fakes import FakeWiki
+
+    t = run(manifest("C"), components("C", pdf=False, wiki=FakeWiki()), public_q())
+    assert not t.empty_context and t.final_context_ids
+    assert {t.evidence[i]["provenance"]["branch"] for i in t.candidates["repo"]} == {"vector"}

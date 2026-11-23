@@ -171,3 +171,38 @@ def test_shipped_pairs_load_and_pass_the_paired_check(repo, suffix):
 def test_requests_runs_without_a_pdf_index():
     m = load_manifest(EXAMPLES / "requests-A.yaml")
     assert m.pdf_enabled is False and m.indexes.pdf_index_id is None
+
+
+def test_condition_c_requires_the_code_index_and_the_wiki(tmp_path, base):
+    for drop in ("code_index_id", "wiki_snapshot_id"):
+        data = yaml.safe_load(yaml.safe_dump(base))
+        data["condition"] = "C"
+        data["indexes"] = {"code_index_id": "code-x", "wiki_snapshot_id": "wiki-x",
+                           "pdf_index_id": data["indexes"].get("pdf_index_id")}
+        del data["indexes"][drop]
+        with pytest.raises(ManifestError, match=drop):
+            load_manifest(_write(tmp_path, data))
+
+
+@pytest.mark.parametrize("repo", ["flask", "requests"])
+@pytest.mark.parametrize("suffix", ["", "-dev"])
+@pytest.mark.parametrize("other", ["A", "B"])
+def test_shipped_c_manifests_pair_with_a_and_b(repo, suffix, other):
+    o = load_manifest(EXAMPLES / f"{repo}-{other}{suffix}.yaml")
+    c = load_manifest(EXAMPLES / f"{repo}-C{suffix}.yaml")
+    res = check_paired(o, c)
+    assert res.ok, res.failures
+    assert any(f"{other}={20 if other == 'B' else 40} C=60" in n for n in res.notes)
+    assert c.indexes.code_index_id == load_manifest(
+        EXAMPLES / f"{repo}-A{suffix}.yaml").indexes.code_index_id
+    assert c.indexes.wiki_snapshot_id == load_manifest(
+        EXAMPLES / f"{repo}-B{suffix}.yaml").indexes.wiki_snapshot_id
+
+
+def test_a_c_pair_fails_on_a_different_code_index():
+    a = load_manifest(EXAMPLES / "flask-A-dev.yaml")
+    c = load_manifest(EXAMPLES / "flask-C-dev.yaml")
+    c = c.model_copy(update={"indexes": c.indexes.model_copy(
+        update={"code_index_id": "code-other"})})
+    res = check_paired(a, c)
+    assert not res.ok and any("code_index_id" in f for f in res.failures)

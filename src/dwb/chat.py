@@ -18,7 +18,15 @@ from typing import Any
 
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
-from dwb.manifest import Indexes, Models, PromptRef, QuestionSetRef, RunManifest, WebConfig
+from dwb.manifest import (
+    USES_WIKI,
+    Indexes,
+    Models,
+    PromptRef,
+    QuestionSetRef,
+    RunManifest,
+    WebConfig,
+)
 from dwb.prompts import GENERATE_PROMPT, SUFFICIENCY_PROMPT
 from dwb.trace import TraceRecord
 from dwb.workspace import Workspace, WorkspaceError
@@ -150,7 +158,7 @@ class ChatSession:
         m = self.manifest
         if m is None:
             return self.settings.sources
-        return Sources(wiki=m.condition == "B", pdf=m.pdf_enabled, web=m.web.enabled,
+        return Sources(wiki=m.condition in USES_WIKI, pdf=m.pdf_enabled, web=m.web.enabled,
                        web_gated=m.web.gated)
 
     async def _open(self) -> None:

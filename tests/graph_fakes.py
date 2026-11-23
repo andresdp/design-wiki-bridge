@@ -98,9 +98,9 @@ def components(condition, *, wiki=None, resolver=None, pdf=True, web_store=None,
         web_store=web_store,
         judge=judge_ if judge_ is not None else judge(False),
     )
-    if condition == "A":
+    if condition in ("A", "C"):
         c.code_retriever = FakeRetriever(code_items())
-    else:
+    if condition in ("B", "C"):
         c.wiki = wiki if wiki is not None else FakeWiki(wiki_refs(), wiki_sections())
         c.resolver = resolver or FakeResolver(code_items(2, branch="wiki"))
     return c

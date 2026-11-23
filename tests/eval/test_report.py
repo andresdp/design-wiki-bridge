@@ -150,7 +150,7 @@ def test_evaluate_rejects_swapped_runs(tmp_path, record):
     from dwb.eval.command import UnpairedRunsError
 
     (a, b), cfg = _two_runs(tmp_path, record)
-    with pytest.raises(UnpairedRunsError, match="condition A then B"):
+    with pytest.raises(UnpairedRunsError, match="in letter order"):
         evaluate_runs(b, a, tmp_path / "out", config_path=cfg, base_dir=tmp_path,
                       use_judge=False)
 
@@ -322,3 +322,73 @@ def test_summary_has_one_block_per_subset_plus_primary_and_all(record):
     assert subsets == ["primary", "public", "code", "code+pdf", "all"]
     n = {r["subset"]: r["n_paired"] for r in s if r["metric"] == "recall_final"}
     assert n["primary"] == 3 and n["all"] == 3
+
+
+def test_a_c_pair_is_labelled_by_condition(tmp_path, record):
+    import csv
+
+    (a, c), cfg = _two_runs(tmp_path, record, conds=("A", "C"))
+    res = evaluate_runs(a, c, tmp_path / "out", config_path=cfg, base_dir=tmp_path,
+                        use_judge=False)
+    assert res["paired"] == 1
+    with (tmp_path / "out" / "paired_summary.csv").open() as fh:
+        cols = next(csv.reader(fh))
+    assert {"mean_A", "mean_C", "mean_diff_C_minus_A"} <= set(cols)
+    assert "mean_B" not in cols
+
+
+def test_c_before_a_is_rejected(tmp_path, record):
+    import pytest
+
+    from dwb.eval.command import UnpairedRunsError
+
+    (a, c), cfg = _two_runs(tmp_path, record, conds=("A", "C"))
+    with pytest.raises(UnpairedRunsError, match="in letter order"):
+        evaluate_runs(c, a, tmp_path / "out", config_path=cfg, base_dir=tmp_path,
+                      use_judge=False)
+
+
+def _wiki_trace(condition, paths, lines=(1, 2)):
+    t = make_trace(condition)
+    ev = dict(t.evidence)
+    for i, p in enumerate(paths):
+        ev[f"w{i}"] = {"source_type": "code", "text": "x", "provenance": {"branch": "wiki"},
+                       "locator": {"kind": "code", "commit": "x", "path": p,
+                                   "start_line": lines[0], "end_line": lines[1]}}
+    return t.model_copy(update={"evidence": ev})
+
+
+def test_wiki_gold_coverage_counts_a_requirement_when_any_alternative_is_reached(record):
+    from dwb.eval.report import wiki_gold_coverage
+
+    assert wiki_gold_coverage(record, _wiki_trace("B", ["alt.py"])) == (1.0, "evidence_spans")
+    assert wiki_gold_coverage(record, _wiki_trace("B", ["other.py"])) == (0.0,
+                                                                           "evidence_spans")
+    # the right file but other lines (e.g. another function) does not count
+    assert wiki_gold_coverage(record, _wiki_trace("B", ["a.py"], (40, 60))) == (
+        0.0, "evidence_spans")
+    # condition A has no wiki route; the vector span on a.py does not count
+    assert wiki_gold_coverage(record, _wiki_trace("A", ["a.py"])) == (None, None)
+
+
+def test_wiki_gold_coverage_uses_paths_named_in_a_public_reference_answer():
+    from dwb.benchmark.schemas import QuestionRecord
+    from dwb.eval.report import gold_files, wiki_gold_coverage
+
+    q = QuestionRecord(
+        id="p", kind="public", repo="flask", repo_sha="x", question="Where?",
+        reference_answer="Defined in `tests/test_helpers.py` at line 102; see "
+                         "./src/flask/helpers.py too. Import tests.test_helpers.",
+        provenance={"upstream_split": "flask", "upstream_row_id": "flask:1"})
+    assert gold_files(q) == [{"src/flask/helpers.py"}, {"tests/test_helpers.py"}]
+    assert wiki_gold_coverage(q, _wiki_trace("C", ["src/flask/helpers.py"])) == (
+        0.5, "reference_answer_files")
+
+
+def test_wiki_merged_into_a_vector_span_still_counts():
+    from dwb.eval.report import wiki_files
+
+    t = make_trace("C")
+    ev = dict(t.evidence)
+    ev["i1"] = {**ev["i1"], "provenance": {"branch": "vector", "also_from": ["wiki"]}}
+    assert wiki_files(t.model_copy(update={"evidence": ev})) == {"a.py"}

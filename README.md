@@ -4,7 +4,7 @@
 
 # Design Wiki Bridge
 
-> **Status: in progress.** Both conditions, the shared stages, the batch runner, and offline evaluation are built. Condition B runs end to end on the Flask wiki snapshot. Still to do: the Requests wiki, the benchmark content, and the real-model pilot (see [`docs/spikes/2026-11-openwiki-swe-qa-spike.md`](docs/spikes/2026-11-openwiki-swe-qa-spike.md)).
+> **Status: in progress.** The three conditions, the shared stages, the batch runner, and offline evaluation are built. Condition B runs end to end on the Flask wiki snapshot. Still to do: the Requests wiki, the benchmark content, and the real-model pilot (see [`docs/spikes/2026-11-openwiki-swe-qa-spike.md`](docs/spikes/2026-11-openwiki-swe-qa-spike.md)).
 
 Cross-source question answering over software projects with verifiable citations. The system uses a generated repository wiki ([LangChain OpenWiki](https://github.com/langchain-ai/openwiki)) only as a map for finding the original code and test evidence. Answers then combine that evidence with external specifications (PDFs, Web pages) and cite each claim to an original source span.
 
@@ -24,15 +24,16 @@ A LangGraph `StateGraph` with deterministic routing normalizes the question and 
 |---|---|
 | **A. Langflow-style baseline** | Top-k AST code chunks from a Chroma index of the pinned repository. |
 | **B. OpenWiki** | `openwiki_search` and `openwiki_read` over MCP, then resolving the selected sections' Claim evidence (`repo://path#Lx-Ly`) and symbol references to original spans at the same commit. |
+| **C. Both** | A and B in parallel; the shared reranker picks from both candidate pools under the same pool and context budget (added after the dev pilot). |
 
-Both conditions share the PDF retrieval, the item-declared Tavily Web policy (record/replay store), the LLM listwise reranker, the context budget, the generator, and the citation format. `dwb experiment check` enforces this for every A/B manifest pair.
+All conditions share the PDF retrieval, the item-declared Tavily Web policy (record/replay store), the LLM listwise reranker, the context budget, the generator, and the citation format. `dwb experiment check` enforces this for every manifest pair (A/B, A/C, B/C).
 
 ## Benchmark
 
 - **Repositories:** Flask 3.1.2 and Requests v2.32.5 (pytest 8.4.2 in reserve), pinned in [`configs/repos.yaml`](configs/repos.yaml).
 - **Public items:** 12–15 [SWE-QA](https://huggingface.co/datasets/swe-qa/SWE-QA-Benchmark) questions per repository (dataset revision pinned; row ID = `<split>:<line index>`).
 - **Custom items:** 6–8 cross-source questions per repository, authored with claims that can be checked independently against code or tests *and* an external specification (WSGI, HTTP semantics).
-- **Scoring:** offline, over saved traces: span recall, required-claim correctness, citation support and coverage, per-stage cost, all reported as paired A/B differences. DeepEval runs as optional diagnostics.
+- **Scoring:** offline, over saved traces: span recall, required-claim correctness, citation support and coverage, per-stage cost, all reported as paired differences between conditions (B − A primary; C − A and C − B secondary). DeepEval runs as optional diagnostics.
 
 ## Setup
 

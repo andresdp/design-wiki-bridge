@@ -12,7 +12,7 @@ from dwb.benchmark.freeze import file_hash
 from dwb.benchmark.schemas import QuestionRecord, load_records
 from dwb.graph import Components, build_graph, trace_from_state
 from dwb.log import get_logger
-from dwb.manifest import MODEL_NET, RunManifest, require_runnable
+from dwb.manifest import MODEL_NET, USES_CODE_INDEX, USES_WIKI, RunManifest, require_runnable
 from dwb.progress import OnProgress, report
 from dwb.trace import RunDir, StageRecord, TraceRecord
 
@@ -237,25 +237,26 @@ def build_components(
                      m.models.generator)
             c.judge = SufficiencyJudge(gen_llm, base_dir / m.prompts["sufficiency"].path,
                                        model_id=m.models.generator)
-    if m.condition == "A":
-        LOG.info("Repository branch A: code index %s", m.indexes.code_index_id)
+    if m.condition in USES_CODE_INDEX:
+        LOG.info("Repository branch %s: code index %s", m.condition, m.indexes.code_index_id)
         index = VectorIndex.open(index_root, m.indexes.code_index_id, emb)
         check_code_index(index.info, m)
         c.code_retriever = CodeRetriever(index)
-    else:
+    if m.condition in USES_WIKI:
         from dwb.repo import RepoReader
         from dwb.retrieval.openwiki_client import OpenWikiClient, restore_snapshot
         from dwb.retrieval.resolver import WikiResolver
 
         if not m.checkout:
-            raise ValueError("condition B needs manifest.checkout (git checkout at repo_sha)")
+            raise ValueError(f"condition {m.condition} needs manifest.checkout (git checkout "
+                             f"at repo_sha)")
         checkout = base_dir / m.checkout
         if restore_wiki:
-            LOG.info("Repository branch B: restoring wiki snapshot %s into %s",
-                     m.indexes.wiki_snapshot_id, checkout)
+            LOG.info("Repository branch %s: restoring wiki snapshot %s into %s",
+                     m.condition, m.indexes.wiki_snapshot_id, checkout)
             restore_snapshot(wiki_root / m.indexes.wiki_snapshot_id, checkout)
         else:
-            LOG.info("Repository branch B: OpenWiki in %s", checkout / "openwiki")
+            LOG.info("Repository branch %s: OpenWiki in %s", m.condition, checkout / "openwiki")
         c.wiki = OpenWikiClient(checkout, command=openwiki_bin)
         c.resolver = WikiResolver(RepoReader.from_git(checkout, m.repo_sha),
                                   max_span_tokens=m.budgets.max_span_tokens)

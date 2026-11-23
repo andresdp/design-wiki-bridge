@@ -1,14 +1,14 @@
 # Question Sets and Evaluation Protocol
 
-Status as of 2026-11-22 (test sets frozen). This document describes where the question sets stand and how the paper's experiment will be run and scored. The implementation plan is `docs/plans/2026-11-22-1050-feat-authored-benchmark-experiment-plan.md`; this document is the readable summary of it.
+Status as of 2026-11-22 (test sets frozen; condition C added after the dev pilot, before any test run). This document describes where the question sets stand and how the paper's experiment will be run and scored. The implementation plan is `docs/plans/2026-11-22-1050-feat-authored-benchmark-experiment-plan.md`; this document is the readable summary of it.
 
 ## 1. The experiment in one paragraph
 
-Two conditions answer the same questions about two pinned repositories, Flask 3.1.2 and Requests 2.32.5. **Condition A** finds repository evidence by vector search over the code. **Condition B** finds it by following the generated OpenWiki pages to the code they describe. Everything else is shared: the PDF retriever, web search (Tavily, with replayed results), the sufficiency judge that decides whether to search the web, the reranker, the context budget, the generator and the citation format. Each question is answered once per condition, and the answers are scored offline from the saved traces.
+Three conditions answer the same questions about two pinned repositories, Flask 3.1.2 and Requests 2.32.5. **Condition A** finds repository evidence by vector search over the code. **Condition B** finds it by following the generated OpenWiki pages to the code they describe. **Condition C** does both and lets the shared reranker choose from the two pools. Everything else is shared: the PDF retriever, web search (Tavily, with replayed results), the sufficiency judge that decides whether to search the web, the reranker, the context budget, the generator and the citation format. Each question is answered once per condition, and the answers are scored offline from the saved traces.
 
 ## 1a. Experimental setup (as it will be described in the paper)
 
-**Design.** A paired, within-question comparison of two configurations of one question-answering system. The system (a LangGraph pipeline) is treated as a configurable black box. It takes a question and a configuration, and returns a cited answer plus a trace of the evidence it used. Every question is answered under both configurations, so each question serves as its own control.
+**Design.** A paired, within-question comparison of three configurations of one question-answering system. The system (a LangGraph pipeline) is treated as a configurable black box. It takes a question and a configuration, and returns a cited answer plus a trace of the evidence it used. Every question is answered under every configuration, so each question serves as its own control.
 
 **System under test.**
 - **Inputs:** the question text and the question's allowed source types (code, PDF, web).
@@ -18,8 +18,9 @@ Two conditions answer the same questions about two pinned repositories, Flask 3.
 **Independent variable.** One configuration parameter, the repository-retrieval mode:
 - **A (baseline):** repository evidence found by vector search over the code.
 - **B (wiki-guided):** repository evidence found through generated OpenWiki pages, resolved to code at the same commit. Wiki text is not cited.
+- **C (combined):** both, in parallel; the reranker picks from both candidate pools under the same pool size and context budget, so C gets no more context than A or B. Added after the development pilot (2026-11-22) and before any test run: in the pilot, B's failures were questions about code the wiki never cites, which vector search found. C asks whether the wiki adds anything on top of vector search.
 
-**Controlled variables.** Every other configuration parameter is identical in A and B. A paired configuration check (`dwb experiment check`) verifies this before any run.
+**Controlled variables.** Every other configuration parameter is identical in A, B and C. A paired configuration check (`dwb experiment check`) verifies this before any run.
 
 **Subjects.** Two Python libraries with public SWE-QA splits and links to external specifications: Flask 3.1.2 (with three Flask books as PDF sources) and Requests 2.32.5 (with web sources only).
 
@@ -44,10 +45,10 @@ Authored questions carry expected claims and annotated evidence spans. The set i
 **Procedure.**
 1. A pilot on separate development questions.
 2. A record pass that stores all web results.
-3. The paired runs of configurations A and B, both replaying the same stored web evidence.
+3. The runs of configurations A, B and C, all replaying the same stored web evidence.
 4. Offline scoring of the saved outputs by a judge model different from the system's generator.
 
-**Analysis.** For each repository: paired B − A differences, with improved, tied and regressed counts, over the questions that need code evidence. Groups under about 10 questions, book-only questions and controls are reported descriptively. A co-author independently checks a stratified sample of judgments.
+**Analysis.** For each repository: paired B − A differences (the primary comparison, fixed before the pilot), with improved, tied and regressed counts, over the questions that need code evidence. C − A (does the wiki add to vector search?) and C − B (does vector search fill the wiki's gaps?) are secondary comparisons over the same questions. Groups under about 10 questions, book-only questions and controls are reported descriptively. A co-author independently checks a stratified sample of judgments.
 
 ```mermaid
 flowchart LR
@@ -62,16 +63,18 @@ flowchart LR
         IV{"Repository retrieval<br/>(independent variable)"}
         IVA["A: vector search"]
         IVB["B: wiki-guided"]
-        FIX["Fixed parameters<br/>(identical in A and B):<br/>commit, PDF corpus, replayed web,<br/>models, prompts, budgets"]
+        IVC["C: both"]
+        FIX["Fixed parameters<br/>(identical in A, B and C):<br/>commit, PDF corpus, replayed web,<br/>models, prompts, budgets"]
         IV --- IVA
         IV --- IVB
+        IV --- IVC
     end
 
     SYS[["QA system<br/>(LangGraph pipeline,<br/>black box)"]]
 
     Q --> SYS
     CFG --> SYS
-    SYS --> OUT[("Cited answers + traces<br/>for A and for B")]
+    SYS --> OUT[("Cited answers + traces<br/>for A, B and C")]
 
     subgraph E["Offline evaluation (separate judge model)"]
         M1["Evidence recall"]
@@ -153,25 +156,25 @@ Per repository: the re-sourced authored questions, plus 10 SWE-QA public questio
 |---|---|---|
 | Repository | `artifacts/checkouts/flask-3.1.2` at `2c1b30d0` | `artifacts/checkouts/requests-v2.32.5` at `b25c87d7` |
 | PDFs | Grinberg, Aggarwal and Aronowitz books (new index) | none |
-| Wiki (condition B) | pinned OpenWiki snapshot | pinned OpenWiki snapshot |
+| Wiki (conditions B and C) | pinned OpenWiki snapshot | pinned OpenWiki snapshot |
 | Web | Tavily, replayed; excludes flask.palletsprojects.com, werkzeug.palletsprojects.com, github.com, pypi.org | Tavily, replayed; excludes requests.readthedocs.io, docs.python-requests.org, github.com, pypi.org |
 
 ## 5. How a question is answered
 
-1. Repository search (A or B) and, where allowed, PDF search run in parallel and are merged.
+1. Repository search (A, B, or both for C) and, where allowed, PDF search run in parallel and are merged.
 2. If the question allows web, the sufficiency judge decides whether the local evidence answers every part of the question. Web is searched only if it does not, if there is no local evidence, or if the judge fails.
 3. The reranker orders the evidence, the context is cut to 8,000 tokens, and the generator answers as cited claims. A claim the evidence does not support is written as "not established by the evidence".
 
 ## 6. How the experiment is run
 
-1. **Pilot** on the development set, A and B per repository, to check the pipeline end to end.
+1. **Pilot** on the development set, A, B and C per repository, to check the pipeline end to end.
 2. **Record pass** per repository: Tavily is called live and every web result is stored, including for questions whose judge says the local evidence is enough. `web_capture_failed` must be 0.
-3. **Paired runs**: condition A and condition B on the frozen test set, both replaying the stored web results, so both see identical web evidence.
-4. **Failures** are scored as 0. A question is rerun only for an infrastructure fault (provider outage, timeout), and then in both conditions, with the cause logged.
+3. **Paired runs**: conditions A, B and C on the frozen test set, all replaying the stored web results, so all see identical web evidence.
+4. **Failures** are scored as 0. A question is rerun only for an infrastructure fault (provider outage, timeout), and then in every condition, with the cause logged.
 
 ## 7. How answers are scored
 
-All scoring runs afterwards, with `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name> --deepeval`, from the saved traces. The judge model (`gpt-5.5-2026-04-23`) differs from the generator.
+All scoring runs afterwards from the saved traces, one report per pair of conditions: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name> --deepeval`, then A/C and B/C the same way. Judge verdicts and DeepEval rows are cached, so a run scored in two reports gets identical scores and costs once. The judge model (`gpt-5.5-2026-04-23`) differs from the generator.
 
 ### Primary metrics
 
@@ -181,12 +184,16 @@ All scoring runs afterwards, with `dwb experiment evaluate runs/<A> runs/<B> --o
 | Claim correctness | Share of the required claims the answer states correctly | Answerable questions |
 | Citation support and coverage | Are the answer's claims supported by the evidence they cite, and is every claim cited? | Answerable questions |
 | Decline accuracy (`control_correct`) | Did the system decline (all claims "not established")? | Controls only |
-| Web gate | How often each condition searched the web; agreement between A and B | Web-eligible questions |
+| Web gate | How often each condition searched the web; agreement between the two conditions compared | Web-eligible questions |
 | Cost and latency | Tokens and time per question, including the judge | All |
 
 ### Primary comparison
 
-Fixed before the runs. Per repository, the paired A − B differences, plus improved, tied and regressed counts, over the questions that need code evidence: SWE-QA, code-only, code+book and code+web. Book-only questions and controls are sanity checks, expected to show no A/B difference. Any group with fewer than about 10 questions is reported as counts, without comparative claims.
+Fixed before the runs. Per repository, the paired B − A differences, plus improved, tied and regressed counts, over the questions that need code evidence: SWE-QA, code-only, code+book and code+web. Book-only questions and controls are sanity checks, expected to show no difference between conditions. C − A and C − B are reported the same way as secondary comparisons. Any group with fewer than about 10 questions is reported as counts, without comparative claims.
+
+### Wiki coverage diagnostic
+
+For B and C, `wiki_gold_coverage` is the share of the needed code the wiki route reached before reranking. For authored questions it is span-level: an evidence requirement counts when a wiki-resolved span matches one of its code alternatives. For public questions, which have no annotated spans, it is file-level over the repository paths the reference answer names, so only a 0 is conclusive there. A 0 means the wiki sections read never led to the needed code, so the loss happened before ranking or generation. It separates wiki coverage gaps from ranking and generation losses and is reported per condition, not compared.
 
 ### DeepEval diagnostics (secondary)
 

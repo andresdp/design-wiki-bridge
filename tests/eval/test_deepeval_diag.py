@@ -84,3 +84,33 @@ def test_summary_per_condition_and_subset(record):
     assert s[("A", "control", "contextual_recall")]["n_skipped"] == 1
     assert s[("B", "all", "faithfulness")]["n_scored"] == 2
     assert s[("A", "all", "faithfulness")]["evaluation_cost"] == 0.02
+
+
+def test_cache_reuses_a_row_and_skips_metric_calls(record, tmp_path):
+    from dwb.eval.claims_judge import JudgeCache
+
+    cache = JudgeCache(tmp_path / "de.jsonl")
+    calls = []
+    first = run_diagnostics(record, make_trace(), "m", metric_factory=stub_factory(calls),
+                            cache=cache)
+    again = run_diagnostics(record, make_trace(), "m", metric_factory=stub_factory(calls),
+                            cache=JudgeCache(tmp_path / "de.jsonl"))
+    assert calls == ["contextual_recall", "faithfulness"]  # second call measured nothing
+    assert first["cached"] is False and again["cached"] is True
+    assert again["faithfulness"] == first["faithfulness"]
+    other = run_diagnostics(record, make_trace(final=("i1", "i2")), "m",
+                            metric_factory=stub_factory(calls), cache=cache)
+    assert other["cached"] is False  # a different context is a different test case
+
+
+def test_rows_with_errors_are_not_cached(record, tmp_path):
+    from dwb.eval.claims_judge import JudgeCache
+
+    class Boom(StubMetric):
+        def measure(self, case):
+            raise RuntimeError("rate limit")
+
+    cache = JudgeCache(tmp_path / "de.jsonl")
+    run_diagnostics(record, make_trace(), "m", metric_factory=lambda n, m: Boom(n, []),
+                    cache=cache)
+    assert cache.data == {}

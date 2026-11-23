@@ -6,7 +6,7 @@
 
 | | **User mode** | **Research mode** (experimenter) |
 |---|---|---|
-| For | Anyone asking questions about their own repository | The study: paired A/B experiments on pinned repositories |
+| For | Anyone asking questions about their own repository | The study: paired experiments (conditions A, B, C) on pinned repositories |
 | Run from | Inside any git repository (any subfolder) | The `design-wiki-bridge` folder |
 | Set up with | `dwb init` | `configs/repos.yaml`, `configs/chat.yaml`, `configs/manifests/`, `configs/eval.yaml` |
 | Repository | The one you are in, at its HEAD commit | Pinned checkouts in `artifacts/checkouts/`, selected with `--repo <name>` |
@@ -220,7 +220,7 @@ After editing it, run `dwb index` again. Changing the embedding model or the cod
 
 ## Research mode
 
-For the experimenter: the paired A/B study on pinned repositories. Run every research command from the `design-wiki-bridge` folder: configuration (`configs/`), artifacts (`artifacts/`), and `.env` are resolved relative to it. Repositories are pinned in `configs/repos.yaml`, and their checkouts live in `artifacts/checkouts/`.
+For the experimenter: the paired study of conditions A, B and C on pinned repositories. Run every research command from the `design-wiki-bridge` folder: configuration (`configs/`), artifacts (`artifacts/`), and `.env` are resolved relative to it. Repositories are pinned in `configs/repos.yaml`, and their checkouts live in `artifacts/checkouts/`.
 
 ```sh
 cd ~/Documents/GitHub/design-wiki-bridge
@@ -249,7 +249,7 @@ dwb index pdf configs/pdfs/flask.yaml                  # PDF corpus
 dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium --elapsed-s 1054.9
 ```
 
-`dwb index code` and `dwb index pdf` print the new index ID; put it in the manifests (`indexes.code_index_id`, `indexes.pdf_index_id`). `dwb wiki snapshot` registers the `openwiki/` folder generated in the checkout as a pinned snapshot (`configs/wikis/`). The research harness copies that snapshot into the checkout before each condition B run; in user mode the wiki is used in place.
+`dwb index code` and `dwb index pdf` print the new index ID; put it in the manifests (`indexes.code_index_id`, `indexes.pdf_index_id`). `dwb wiki snapshot` registers the `openwiki/` folder generated in the checkout as a pinned snapshot (`configs/wikis/`). The research harness copies that snapshot into the checkout before each condition B or C run; in user mode the wiki is used in place.
 
 ### Running and evaluating experiments
 
@@ -257,27 +257,30 @@ dwb wiki snapshot flask --provider openai --model gpt-5.6-luna --effort medium -
 dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
 dwb experiment run configs/manifests/flask-A.yaml --web-mode record
 dwb experiment run configs/manifests/flask-B.yaml --web-mode record
+dwb experiment run configs/manifests/flask-C.yaml --web-mode replay
 dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 --out reports/flask-test
+dwb experiment evaluate runs/flask-A-test-001 runs/flask-C-test-001 --out reports/flask-test-AC
+dwb experiment evaluate runs/flask-B-test-001 runs/flask-C-test-001 --out reports/flask-test-BC
 ```
 
-- **Conditions:** condition **A** uses vector search and **B** uses OpenWiki-guided search. Everything else is identical: PDFs, the web policy, the reranker, the context budget, the generator, and the citation format. `experiment check` verifies this for each manifest pair.
-- **Manifests:** manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets. `<repo>-{A,B}.yaml` run the frozen test set; `<repo>-{A,B}-dev.yaml` run the development set with identical settings (the pilot; tune only on non-variant development questions). Flask uses the three-book PDF index; Requests has PDFs off.
+- **Conditions:** condition **A** uses vector search, **B** uses OpenWiki-guided search, and **C** runs both and lets the shared reranker choose from both pools (with the same pool and context budget, so C gets no more context). Everything else is identical: PDFs, the web policy, the reranker, the context budget, the generator, and the citation format. `experiment check` verifies this for each manifest pair; for A/C and B/C it also requires the same code index or wiki snapshot.
+- **Manifests:** manifests in `configs/manifests/` pin every setting, including index and snapshot IDs, models, and budgets. `<repo>-{A,B,C}.yaml` run the frozen test set; `<repo>-{A,B,C}-dev.yaml` run the development set with identical settings (the pilot; tune only on non-variant development questions). Flask uses the three-book PDF index; Requests has PDFs off.
 - **Run:** `experiment run` writes `runs/<run_id>/`, containing the frozen manifest, `traces.jsonl` (one record per question), and `run_summary.json`. Code passages are stored by reference (commit, path, lines); `experiment evaluate` reads their text back from the checkout named in the manifest, so keep that checkout. A test set must be frozen; its hash is in the manifest, and it is checked before anything else runs. `--overwrite` replaces a previous run. If one source fails for a question (for example the OpenWiki server, or the reranker call), the question is still answered from the other sources and marked degraded; `run_summary.json` counts `failed` and `degraded` questions separately. Condition A refuses a code index built with a different `max_span_tokens` or an older chunker version: rebuild it with `dwb index code <repo>` and put the new ID in the manifest.
 - **Web modes:**
   - `record` calls Tavily for searches that aren't stored yet and saves them.
   - `replay` uses stored results only.
   - `live` stores nothing and is for latency measurements.
   
-  A `record` run searches the web for every question that allows it, even when the web gate decides the local evidence is enough (it then stores the result and uses nothing). So after one record run, a replay of either condition finds its web evidence whatever its own verdict. If Tavily fails during such a capture, the question is not degraded, but `run_summary.json` counts it in `web_capture_failed`; record again before replaying.
-- **Web gate:** with `web.conditional_web_search: true` (the default), web runs only when the `check_local` judge finds the local evidence insufficient. A gated manifest needs `prompts.sufficiency` (`experiment run` and `experiment check` stop and name it otherwise); saved runs without it can still be evaluated. The judge uses `models.generator`. Because A and B judge their own evidence, they can disagree: `experiment evaluate` writes `web_gate.csv` with the escalation rate per condition, how many gated questions the two conditions agreed or disagreed on, and how many questions whose reference evidence includes the web the judge kept local.
+  A `record` run searches the web for every question that allows it, even when the web gate decides the local evidence is enough (it then stores the result and uses nothing). So after one record run, a replay of any condition finds its web evidence whatever its own verdict (the web query is the question text, the same in every condition). If Tavily fails during such a capture, the question is not degraded, but `run_summary.json` counts it in `web_capture_failed`; record again before replaying.
+- **Web gate:** with `web.conditional_web_search: true` (the default), web runs only when the `check_local` judge finds the local evidence insufficient. A gated manifest needs `prompts.sufficiency` (`experiment run` and `experiment check` stop and name it otherwise); saved runs without it can still be evaluated. The judge uses `models.generator`. Because each condition judges its own evidence, two conditions can disagree: `experiment evaluate` writes `web_gate.csv` with the escalation rate per condition, how many gated questions the two conditions agreed or disagreed on, and how many questions whose reference evidence includes the web the judge kept local.
 - **Evaluate:** `experiment evaluate` scores two runs offline:
   - evidence recall for the candidates and the final context;
   - required-claim correctness and citation support and coverage, from the judge in `configs/eval.yaml`;
   - per-stage cost.
 
-  Results are paired A/B differences with improved/tied/regressed counts. Means and differences use only the questions scored in both runs, and `n_excluded` says how many were left out. A failed question scores correctness 0 and counts in the `failed` metric; its cost is left empty. Judge verdicts are cached per judge model and temperature. `--no-judge` gives recall and cost only.
+  Results are paired differences between the two conditions, with improved/tied/regressed counts; the columns are named after them (`mean_A`, `mean_C`, `mean_diff_C_minus_A`). For conditions B and C, `per_question.csv` also has `wiki_gold_coverage` for B and C: the share of the needed code the wiki route reached before reranking. For annotated questions (`wiki_gold_source` = `evidence_spans`) it is span-level: an evidence requirement counts when a wiki-resolved span matches any of its code alternatives under the evaluator's matching rules. For public questions (`reference_answer_files`) it is file-level, over the repository paths the reference answer names; reaching a large file is not reaching the function, so only a 0 is conclusive there. A 0 is a wiki coverage gap, which ranking and generation cannot recover; `report_summary.json` counts them per condition and source. Means and differences use only the questions scored in both runs, and `n_excluded` says how many were left out. A failed question scores correctness 0 and counts in the `failed` metric; its cost is left empty. Judge verdicts are cached per judge model and temperature, and DeepEval rows per DeepEval version, model and test case (`deepeval.cache` in `configs/eval.yaml`), so the A run costs nothing to score again in the A/C report. `--no-judge` gives recall and cost only.
 
-  Pass the A run first. `evaluate` stops if the two saved manifests are not condition A then B or fail the `experiment check` rules; `--allow-unpaired` scores them anyway and records that in `evaluator_config.json`.
+  Pass the runs in letter order (A B, A C, or B C). `evaluate` stops if the two saved manifests are not two conditions in that order or fail the `experiment check` rules; `--allow-unpaired` scores them anyway and records that in `evaluator_config.json`.
 - **Question records** live in `data/questions/{test,dev}/`; see `data/questions/README.md`.
 
 ### Building the test set
@@ -297,7 +300,7 @@ dwb benchmark check data/questions/dev/flask.jsonl data/questions/test/flask.jso
 - **Check:** fails on a shared ID, question text, or SWE-QA row, or when the test file changed after freezing. A missing test file counts as empty.
 - **Question kinds:** `public` (SWE-QA; code only, never web; upstream row IDs required), `custom` (authored; expected claims, at least one evidence span of any source type, and `provenance.author`), and `control` (authored and unanswerable from the corpus).
 - **Writing a control:** `kind: control`, no `evidence`, no `expected_claims`, `allowed_sources` without `web`, a `reference_answer` that states the decline (used only by the report and DeepEval), and `provenance.author`. It scores `control_correct` 1 when every answer claim is a gap claim; correctness and recall do not apply.
-- **Grounding and subsets:** each record's grounding is derived from its evidence source types (`code`, `pdf`, `code+pdf`, `code+web`, …). Reports group results by `public`, `control`, and each authored grounding, plus `primary` (public and authored questions that need code: the A/B comparison) and `all`.
+- **Grounding and subsets:** each record's grounding is derived from its evidence source types (`code`, `pdf`, `code+pdf`, `code+web`, …). Reports group results by `public`, `control`, and each authored grounding, plus `primary` (public and authored questions that need code: the main comparison) and `all`.
 - **Allowed sources:** authored answerable questions allow every local source the repository has (Flask: code and PDF; Requests: code); only code+web questions also allow `web`; controls and public questions never do.
 - Exit codes: 1 means problems in the records; 2 means a setup or usage error.
 
@@ -432,6 +435,6 @@ Long commands say at the start what Ctrl-C does (for example `Ctrl-C stops; fini
 | Research | `no code index for <repo> …` | `dwb index code <repo>`. |
 | Research | `replay miss` during an experiment | Run that manifest with `--web-mode record` first. |
 | Both | `code index … was built by chunker version 1` / `chunked with max_span_tokens=…` | Rebuild: `dwb index code <repo>` (research; then update the manifest's `code_index_id`) or `dwb index` (project). |
-| Research | `runs are not a valid A/B pair` | Pass the A run first, or fix the manifests so `dwb experiment check` passes; `--allow-unpaired` only for exploration. |
+| Research | `runs are not a valid A/B pair` (or A/C, B/C) | Pass the runs in letter order (A B, A C, B C), or fix the manifests so `dwb experiment check` passes; `--allow-unpaired` only for exploration. |
 | User | `openwiki … changed since dwb index` | `dwb index` again, or ask with `--no-wiki`. |
 | Research | `corrupt Tavily record` | Delete the named file and rerun with `--web-mode record`. |

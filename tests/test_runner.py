@@ -184,7 +184,7 @@ def test_cli_experiment_run_at_a_terminal(tmp_path, monkeypatch, tty):
     assert re.search(r"^questions\s+1$", r.stdout, re.M)
     assert re.search(r"^failed\s+0$", r.stdout, re.M) and "{" not in r.stdout
     assert (f"✓ Run {m.run_id} finished → next: dwb experiment evaluate runs/{m.run_id} "
-            "runs/<B> --out reports/<name>") in r.stderr
+            "runs/<B or C> --out reports/<name>") in r.stderr
 
 
 def test_cli_experiment_check_piped_and_at_a_terminal(monkeypatch):

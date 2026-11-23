@@ -1,0 +1,48 @@
+# Development manifest, condition C (requests): the pilot (U6) over
+# data/questions/dev/requests.jsonl. Same corpus, models, budgets and web settings as
+# the test manifest requests-C.yaml; tuning may use only non-variant dev questions.
+run_id: requests-C-dev-002
+condition: C   # KTD-B12: vector code search and the wiki route, both into the shared reranker
+repo: requests
+repo_sha: b25c87d7cb8d6a18a37fa12442b5f883f9e41741
+checkout: artifacts/checkouts/requests-v2.32.5
+question_set:
+  id: requests-dev
+  path: data/questions/dev/requests.jsonl
+  hash: null
+indexes:
+  code_index_id: code-requests-3c43be80eea9   # text-embedding-3-large, 876 chunks, chunker v2
+  wiki_snapshot_id: wiki-requests-4308cae002e4   # configs/wikis/wiki-requests-4308cae002e4.json
+pdf_enabled: false        # KTD-B3: Requests has no PDF corpus; RFC material is web
+models:
+  generator: gpt-5.6-luna   # KTD10: same model as the wiki generator and the reranker
+  reranker: gpt-5.6-luna    # same pinned model as the generator
+  embedding: text-embedding-3-large
+  temperature: 0.0
+prompts:
+  generate:
+    path: src/dwb/prompt_files/generate_v2.md
+  sufficiency:              # check_local judge: web runs only on insufficient local evidence
+    path: src/dwb/prompt_files/sufficiency_v1.md
+budgets:
+  code_top_k: 40            # = rerank_pool, so code-only items can fill the token budget too
+  wiki_search_k: 10
+  wiki_read_sections: 5
+  wiki_max_spans: 20
+  max_span_tokens: 1500
+  pdf_top_k: 10
+  rerank_pool: 40
+  rerank_top_n: 40          # = rerank_pool: the token budget, not a count, sizes the context
+  context_tokens: 8000
+web:
+  enabled: true
+  mode: replay
+  store_id: tavily-requests-v2   # v2: authored benchmark (PDFs off)
+  max_results: 5
+  search_depth: basic
+  conditional_web_search: true   # false: web whenever the item allows it (no judge)
+  exclude_domains:           # the project's own docs and source hosts (spike doc §8)
+    - requests.readthedocs.io
+    - docs.python-requests.org
+    - github.com
+    - pypi.org
