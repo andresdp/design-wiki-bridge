@@ -1,6 +1,6 @@
 # Offline evaluation config (U12). The judge is pinned separately from the generator (KTD10, KTD16).
 judge:
-  model: gpt-5.5-2026-04-23  # dated snapshot; differs from the generator (gpt-5.6-luna)
+  model: gpt-5.4-mini-2026-03-17  # dated snapshot; differs from the generator (gpt-5.6-luna); KTD-B14
   temperature: 0.0
   prompts_dir: src/dwb/prompt_files   # judge_claim_v1.md, judge_support_v1.md
   cache: artifacts/judge_cache.jsonl

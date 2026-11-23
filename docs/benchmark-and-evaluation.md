@@ -174,7 +174,7 @@ Per repository: the re-sourced authored questions, plus 10 SWE-QA public questio
 
 ## 7. How answers are scored
 
-All scoring runs afterwards from the saved traces, one report per pair of conditions: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name> --deepeval`, then A/C and B/C the same way. Judge verdicts and DeepEval rows are cached, so a run scored in two reports gets identical scores and costs once. The judge model (`gpt-5.5-2026-04-23`) differs from the generator.
+All scoring runs afterwards from the saved traces, one report per pair of conditions: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name> --deepeval`, then A/C and B/C the same way. Judge verdicts and DeepEval rows are cached, so a run scored in two reports gets identical scores and costs once. The judge model (`gpt-5.4-mini-2026-03-17`, temperature 0) differs from the generator. It replaced `gpt-5.5-2026-04-23` before any test run to cut cost (KTD-B14); the pilot reports were scored with the earlier judge, so compare test-report scores only with each other.
 
 ### Primary metrics
 
@@ -206,7 +206,7 @@ DeepEval runs as a library over the same saved traces. There is no tracing, no C
 | No answer or no context | Skipped, with the reason recorded | Skipped |
 | Failed question | No row (already scored 0) | No row |
 
-DeepEval uses its own pinned model, `gpt-5.4-mini-2026-03-17`, cheaper than the judge; this is set before any test run, and the scores are secondary, so a smaller model is enough (KTD-B13). On the Flask dev pilot it cut DeepEval's cost by 91% ($6.03 to $0.55 for 20 answers); its scores are not comparable with the earlier pilot reports scored by `gpt-5.5`, only across conditions scored by the same model. `deepeval.price_per_million` gives DeepEval the snapshot's price, which its own table lists only under the undated name. Results go to `deepeval_diagnostics.csv` per question, and to a summary per question type and condition, with each metric's cost. DeepEval does not pin its own temperature, so these scores can vary between runs; they are reported as diagnostics next to the primary metrics, never instead of them.
+DeepEval uses its own pinned model, `gpt-5.4-mini-2026-03-17` (the same snapshot as the judge); this is set before any test run, and the scores are secondary, so a smaller model is enough (KTD-B13). On the Flask dev pilot it cut DeepEval's cost by 91% ($6.03 to $0.55 for 20 answers); its scores are not comparable with the earlier pilot reports scored by `gpt-5.5`, only across conditions scored by the same model. `deepeval.price_per_million` gives DeepEval the snapshot's price, which its own table lists only under the undated name. Results go to `deepeval_diagnostics.csv` per question, and to a summary per question type and condition, with each metric's cost. DeepEval does not pin its own temperature, so these scores can vary between runs; they are reported as diagnostics next to the primary metrics, never instead of them.
 
 ## 8. What happens next, and who does it
 
