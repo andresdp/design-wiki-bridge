@@ -65,7 +65,8 @@ dwb status                    # what is indexed, and whether HEAD moved since
 dwb ask "How does Flask answer OPTIONS?" --repo flask --wiki
 dwb index code flask   ·   dwb index pdf configs/pdfs/flask.yaml   ·   dwb wiki snapshot flask …
 dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml
-dwb experiment run configs/manifests/flask-A.yaml --web-mode record
+dwb experiment run configs/manifests/flask-A.yaml --web-only
+dwb experiment run configs/manifests/flask-A.yaml --web-mode replay
 dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 --out reports/flask-test
 ```
 

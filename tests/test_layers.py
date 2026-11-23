@@ -30,7 +30,7 @@ LAYERS: dict[str, tuple[int, str]] = {
     "evidence": (5, ""), "trace": (5, ""), "manifest": (5, ""), "prompts": (5, ""),
     "benchmark.schemas": (5, ""), "benchmark.swe_qa": (5, ""), "benchmark.freeze": (5, ""),
     # 6 foundation
-    "repo": (6, ""), "tokens": (6, ""), "usage": (6, ""), "log": (6, ""),
+    "repo": (6, ""), "tokens": (6, ""), "usage": (6, ""), "log": (6, ""), "fatal": (6, ""),
     "progress": (6, ""),
 }
 

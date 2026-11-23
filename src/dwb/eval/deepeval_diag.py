@@ -28,6 +28,7 @@ from typing import Any
 
 from dwb.benchmark.schemas import QuestionRecord
 from dwb.eval.claims_judge import JudgeCache
+from dwb.fatal import raise_if_fatal
 from dwb.trace import TraceRecord
 
 METRIC_NAMES = ("contextual_recall", "faithfulness")
@@ -102,6 +103,7 @@ def run_diagnostics(record: QuestionRecord, trace: TraceRecord, model: str, *,
             metric.measure(case)
             out[name] = metric.score
         except Exception as e:  # diagnostics never block the report
+            raise_if_fatal(e)  # ...unless the account is out of credit: stop, rerun later
             out[f"{name}_error"] = f"{type(e).__name__}: {e}"
             metric = None
         cost = getattr(metric, "evaluation_cost", None)

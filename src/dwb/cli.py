@@ -737,9 +737,49 @@ def benchmark_check(
 # ------------------------------------------------------------------------- experiment
 
 
+def _experiment_web_only(manifest: Path, capture_web, fatal_error) -> None:
+    """``experiment run --web-only``: the record pass, without a run."""
+    from dwb.manifest import load_manifest, require_runnable
+    from dwb.runner import load_question_set
+    from dwb.web.tavily_store import TavilyStore
+
+    m = load_manifest(manifest)
+    require_runnable(m)
+    if not m.web.enabled:
+        raise _fail(f"{manifest} has web.enabled: false; there is nothing to capture")
+    _open(m.repo, "research mode", m.repo_sha[:12], f"web capture {m.web.store_id}")
+    questions = load_question_set(m, Path("."))
+    store = TavilyStore(WS.tavily_root, m.web.store_id or "live", mode="record")
+    try:
+        with ui.progress("Ctrl-C stops; captured results are kept.") as on_progress:
+            sm = capture_web(m, questions, store, on_progress=on_progress)
+    except fatal_error as e:
+        ui.error(f"Web capture stopped: {e}",
+                 f"fix the account or key, then rerun dwb experiment run {manifest} --web-only "
+                 "(stored results are reused)")
+        raise typer.Exit(1) from None
+
+    def show(sm):
+        ui.kv([("store", sm["store_id"]), ("web-eligible questions", sm["eligible"]),
+               ("captured now", sm["captured_live"]), ("already stored", sm["already_stored"]),
+               ("failed", sm["web_capture_failed"])])
+        if sm["web_capture_failed"]:
+            ui.error(f"{sm['web_capture_failed']} web captures failed",
+                     f"rerun dwb experiment run {manifest} --web-only")
+        else:
+            ui.outcome("Web results stored",
+                       f"dwb experiment run {manifest} --web-mode replay")
+
+    ui.emit(sm, human=show)
+    if sm["web_capture_failed"]:
+        raise typer.Exit(1)
+
+
 @exp_app.command("run", epilog=_examples(
     "dwb experiment run configs/manifests/flask-A.yaml",
-    "dwb experiment run configs/manifests/flask-B.yaml --web-mode replay --overwrite"))
+    "dwb experiment run configs/manifests/flask-B.yaml --web-mode replay --overwrite",
+    "dwb experiment run configs/manifests/flask-C.yaml --resume",
+    "dwb experiment run configs/manifests/flask-A.yaml --web-only"))
 def experiment_run(
     manifest: Annotated[Path, typer.Argument(help="Run manifest, e.g. "
                                                   "configs/manifests/flask-A.yaml",
@@ -748,17 +788,43 @@ def experiment_run(
         help="Override web.mode: record (live, saved), replay (saved only), live (latency; "
              "renames the run).")] = None,
     overwrite: Annotated[bool, typer.Option(help="Replace an existing run directory.")] = False,
+    resume: Annotated[bool, typer.Option(
+        help="Finish an interrupted run: keep every saved trace (failed ones stay failed) and "
+             "run only the questions without one. The manifest (and --web-mode) must be "
+             "unchanged.")] = False,
+    web_only: Annotated[bool, typer.Option(
+        help="Only store the Tavily results of the web-eligible questions (record mode), with "
+             "no retrieval or generation; then run every condition with --web-mode replay. "
+             "Writes no run directory.")] = False,
     runs_dir: Annotated[Path, typer.Option(help="Where run directories go.")] = Path("runs"),
 ) -> None:
     """Run one condition of the experiment over its question set and save the traces.
 
-    Ctrl-C stops it; traces already written are kept.
+    Ctrl-C stops it; traces already written are kept and --resume finishes the run. Running
+    out of API credit, or a rejected key, stops it the same way (the question in progress is
+    not saved): top up, then rerun with --resume.
     """
+    from dwb.fatal import FatalAPIError
     from dwb.manifest import load_manifest, require_runnable
-    from dwb.runner import build_components, load_question_set, run_manifest
+    from dwb.runner import (
+        RunStopped,
+        build_components,
+        capture_web,
+        load_question_set,
+        run_manifest,
+    )
+    from dwb.trace import ResumeError
 
     if web_mode not in (None, "record", "replay", "live"):
         raise _fail("--web-mode must be record, replay or live")
+    if overwrite and resume:
+        raise _fail("--overwrite and --resume exclude each other")
+    if web_only:
+        if resume or overwrite or web_mode not in (None, "record"):
+            raise _fail("--web-only always records and writes no run; it takes no --resume, "
+                        "--overwrite or other --web-mode")
+        _experiment_web_only(manifest, capture_web, FatalAPIError)
+        return
     m = load_manifest(manifest)
     require_runnable(m)
     if web_mode:
@@ -773,9 +839,19 @@ def experiment_run(
     try:
         with ui.progress("Ctrl-C stops; traces already written are kept.") as on_progress:
             summary = run_manifest(m, comps, base_dir=base, runs_dir=runs_dir,
-                                   overwrite=overwrite, on_progress=on_progress)
+                                   overwrite=overwrite, resume=resume,
+                                   on_progress=on_progress)
     except FileExistsError as e:
-        raise _fail(f"{e} (add --overwrite to replace it)") from None
+        raise _fail(f"{e} (add --resume to finish it, or --overwrite to replace it)") from None
+    except ResumeError as e:
+        raise _fail(str(e)) from None
+    except RunStopped as e:
+        flags = " --resume" + (f" --web-mode {web_mode}" if web_mode else "")
+        ui.error(f"Run stopped after {e.summary['completed']} of {e.summary['questions']} "
+                 f"questions: {e}",
+                 "the question in progress was not saved; fix the account or key, then run "
+                 f"dwb experiment run {manifest}{flags}")
+        raise typer.Exit(1) from None
 
     def show(sm):
         ui.kv([("questions", sm["questions"]), ("failed", sm["failed"]),
@@ -861,15 +937,27 @@ def experiment_evaluate(
     The runs are two conditions in letter order (A B, A C or B C); the paired columns are
     named after them (mean_A, mean_C, mean_diff_C_minus_A).
 
-    Ctrl-C stops it; the report is written only at the end, so nothing is kept.
+    Ctrl-C stops it; the report is written only at the end. Judge verdicts and DeepEval rows
+    are cached as they come, so rerunning the same command after a stop (Ctrl-C, or running
+    out of API credit) reuses them and pays only for the rest.
     """
     from dwb.eval.command import evaluate_runs
+    from dwb.fatal import is_fatal
 
     _open(f"{run_a.name} vs {run_b.name}", "research mode")
-    with ui.progress("Ctrl-C stops; the report is written only at the end.") as on_progress:
-        res = evaluate_runs(run_a, run_b, out_dir, config_path=config, use_judge=not no_judge,
-                            deepeval=deepeval or None, allow_unpaired=allow_unpaired,
-                            on_progress=on_progress)
+    try:
+        with ui.progress("Ctrl-C stops; cached judge and DeepEval results are kept.") \
+                as on_progress:
+            res = evaluate_runs(run_a, run_b, out_dir, config_path=config,
+                                use_judge=not no_judge, deepeval=deepeval or None,
+                                allow_unpaired=allow_unpaired, on_progress=on_progress)
+    except Exception as e:
+        if not is_fatal(e):
+            raise
+        ui.error(f"Evaluation stopped: {type(e).__name__}: {e}",
+                 "fix the account or key, then rerun the same command; cached judge and "
+                 "DeepEval results are reused")
+        raise typer.Exit(1) from None
 
     def show(d):
         ui.kv([(k, v if not isinstance(v, (list, dict)) else (", ".join(map(str, v)) or "-"))

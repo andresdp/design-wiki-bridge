@@ -1,5 +1,5 @@
 # Test manifest, condition B (flask): the paper's paired run over the frozen
-# test set. Record pass first (--web-mode record), then replay A and B.
+# test set. Record pass first (experiment run <repo>-A.yaml --web-only), then replay A, B and C.
 run_id: flask-B-test-001
 condition: B
 repo: flask

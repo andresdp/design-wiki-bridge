@@ -168,9 +168,9 @@ Per repository: the re-sourced authored questions, plus 10 SWE-QA public questio
 ## 6. How the experiment is run
 
 1. **Pilot** on the development set, A, B and C per repository, to check the pipeline end to end.
-2. **Record pass** per repository: Tavily is called live and every web result is stored, including for questions whose judge says the local evidence is enough. `web_capture_failed` must be 0.
+2. **Record pass** per repository (`experiment run <repo>-A.yaml --web-only`): Tavily is called live and the web result of every web-eligible question is stored, whatever any judge would decide, without retrieval or generation. `web_capture_failed` must be 0.
 3. **Paired runs**: conditions A, B and C on the frozen test set, all replaying the stored web results, so all see identical web evidence.
-4. **Failures** are scored as 0. A question is rerun only for an infrastructure fault (provider outage, timeout), and then in every condition, with the cause logged.
+4. **Failures** are scored as 0. A question is rerun only for an infrastructure fault (provider outage, timeout), and then in every condition, with the cause logged. Running out of API credit or a rejected key is not a failure: the run stops without saving the question in progress, and `--resume` later runs only the questions without a trace (failed ones stay failed).
 
 ## 7. How answers are scored
 
@@ -206,7 +206,7 @@ DeepEval runs as a library over the same saved traces. There is no tracing, no C
 | No answer or no context | Skipped, with the reason recorded | Skipped |
 | Failed question | No row (already scored 0) | No row |
 
-Results go to `deepeval_diagnostics.csv` per question, and to a summary per question type and condition, with each metric's cost. DeepEval does not pin its own temperature, so these scores can vary between runs; they are reported as diagnostics next to the primary metrics, never instead of them.
+DeepEval uses its own pinned model, `gpt-5.4-mini-2026-03-17`, cheaper than the judge; this is set before any test run, and the scores are secondary, so a smaller model is enough (KTD-B13). Results go to `deepeval_diagnostics.csv` per question, and to a summary per question type and condition, with each metric's cost. DeepEval does not pin its own temperature, so these scores can vary between runs; they are reported as diagnostics next to the primary metrics, never instead of them.
 
 ## 8. What happens next, and who does it
 

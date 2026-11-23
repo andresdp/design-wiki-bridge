@@ -1,5 +1,5 @@
 # Test manifest, condition C (requests): the paper's paired run over the frozen
-# test set. Record pass first (--web-mode record), then replay A, B and C.
+# test set. Record pass first (experiment run <repo>-A.yaml --web-only), then replay A, B and C.
 run_id: requests-C-test-001
 condition: C   # KTD-B12: vector code search and the wiki route, both into the shared reranker
 repo: requests

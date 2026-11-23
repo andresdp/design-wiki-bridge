@@ -11,6 +11,7 @@ from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
 from dwb.budget import Context
+from dwb.fatal import raise_if_fatal
 from dwb.prompts import load_prompt
 from dwb.trace import AnswerClaim, StageRecord
 from dwb.usage import llm_usage
@@ -60,6 +61,7 @@ class Generator:
             if not isinstance(answer, GeneratedAnswer):
                 answer = GeneratedAnswer.model_validate(answer)
         except Exception as e:
+            raise_if_fatal(e)
             error = f"{type(e).__name__}: {e}"
             answer = None
         from langchain_core.messages import HumanMessage

@@ -85,6 +85,10 @@ class TraceRecord(BaseModel):
             self.web_check.get("sufficient"), "judge_failed")
 
 
+class ResumeError(ValueError):
+    pass
+
+
 class TraceWriter:
     """Appends one JSON line per question, flushed and fsynced so a crash keeps completed ones."""
 
@@ -136,6 +140,26 @@ class RunDir:
         if overwrite and rd.traces_path.exists():
             rd.traces_path.unlink()
         return rd
+
+    @classmethod
+    def resume(cls, manifest: RunManifest, runs_dir: Path) -> tuple[RunDir, list[TraceRecord]]:
+        """Reopen an interrupted run. The saved manifest must be identical (same question-set
+        hash, models, prompt hashes, budgets and web mode), or the finished questions would
+        not belong to the same run. Every saved trace is kept and returned, failed ones
+        included: a failed question scores 0 and is rerun only by hand, in every condition
+        (protocol §6). Only the questions without a trace run again; a fatal stop
+        (``dwb.fatal``) never saves the question it interrupted."""
+        rd = cls(runs_dir / manifest.run_id)
+        if not rd.manifest_path.exists():
+            raise ResumeError(f"no run to resume in {rd.root}")
+        if rd.manifest_path.read_text() != manifest.to_yaml():
+            raise ResumeError(f"{rd.manifest_path} differs from the manifest being run (a "
+                              "changed manifest, prompt or --web-mode); a resumed run must be "
+                              "identical. Use --overwrite to start over")
+        return rd, read_traces(rd.traces_path) if rd.traces_path.exists() else []
+
+    def read_summary(self) -> dict[str, Any] | None:
+        return json.loads(self.summary_path.read_text()) if self.summary_path.exists() else None
 
     def writer(self) -> TraceWriter:
         return TraceWriter(self.traces_path)

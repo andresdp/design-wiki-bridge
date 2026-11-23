@@ -10,5 +10,5 @@ matching:                    # KTD15
   web_passage_overlap: 0.5
 deepeval:
   enabled: false             # diagnostics only: contextual recall, faithfulness
-  model: gpt-5.5-2026-04-23
+  model: gpt-5.4-mini-2026-03-17   # dated mini snapshot: diagnostics only, ~cheaper (KTD-B13)
   cache: artifacts/deepeval_cache.jsonl   # reuse rows across pairwise reports (A/B, A/C, B/C)

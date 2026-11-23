@@ -8,11 +8,13 @@ every emitter can import it without importing any presentation code.
 One event shape for every task:
 
 - ``task``: ``embed`` (an index being embedded), ``wiki`` (OpenWiki generation), ``run``
-  (an experiment run over questions) or ``evaluate`` (judging one condition's traces).
+  (an experiment run over questions), ``web`` (a web-only record pass) or ``evaluate``
+  (judging one condition's traces).
 - ``phase``: ``start`` (``total`` known when countable), ``step`` (``done`` of ``total``
   finished) or ``done`` (the task finished; a task that raises sends no ``done``).
 - ``label``: what the task is about (an index ID, a question ID, a condition).
-- ``outcome``: for a ``run`` step, ``ok``, ``failed``, ``degraded`` or ``empty``.
+- ``outcome``: for a ``run`` step, ``ok``, ``failed``, ``degraded`` or ``empty``; for a
+  ``web`` step, ``ok`` or ``failed``.
 - ``data``: an optional payload (the ``TraceRecord`` of a run step, the ``IndexInfo`` of a
   finished index, the paths a renderer may report).
 """

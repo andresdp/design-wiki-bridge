@@ -1,3 +1,5 @@
+import pytest
+
 from conftest import make_trace
 from dwb.eval.deepeval_diag import build_test_case, run_diagnostics
 
@@ -114,3 +116,17 @@ def test_rows_with_errors_are_not_cached(record, tmp_path):
     run_diagnostics(record, make_trace(), "m", metric_factory=lambda n, m: Boom(n, []),
                     cache=cache)
     assert cache.data == {}
+
+
+def test_deepeval_stops_on_a_fatal_error(record):
+    from dwb.fatal import FatalAPIError
+    from test_fatal import quota_error
+
+    class Broke:
+        evaluation_cost = None
+
+        def measure(self, case):
+            raise quota_error()
+
+    with pytest.raises(FatalAPIError):
+        run_diagnostics(record, make_trace(), "m", metric_factory=lambda n, m: Broke())
