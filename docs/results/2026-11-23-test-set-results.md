@@ -17,10 +17,12 @@ Everything after retrieval is identical across conditions: the PDF search, the w
 - **Running both routes (C) recovers everything B loses, but adds little over vector search alone.** C − A is +0.02 on Flask and +0.06 on Requests, neither distinguishable from zero. C − B is +0.22 and +0.26 (p = 0.007 and 0.002).
 - **C finds much more of the evidence than A, but most of it never reaches the answer.** Candidate recall rises by 0.17 in both repositories, while correctness barely moves. The reranker and the context budget are the bottleneck.
 - **Citations are equally reliable in every condition** (support 0.79 to 0.90). Better grounding did not mean more correct answers.
-- **Costs:**
-  - C uses about 10% (Flask) to 25% (Requests) more LLM tokens per question than A.
-  - B uses slightly fewer than A and is about 1 s faster.
-  - Building each wiki was a one-time cost of 14 to 18 minutes.
+- **B is the cheapest and fastest option per question; C is the most expensive.**
+  - Over all questions, B uses 12–14% fewer tokens than A and is 9–11% faster (about 0.9 s on Flask, 1.5 s on Requests).
+  - C uses 9% (Flask) to 20% (Requests) more tokens than A, with about the same latency.
+  - B's saving comes from the reranker, which reads a smaller pool. Generation costs about the same in every condition.
+  - Building each wiki was a one-time cost of 14 to 18 minutes; its tokens were not recorded.
+  - Per correct answer, B is the most expensive, because it answers less correctly.
 
 ## Setup
 
@@ -83,9 +85,76 @@ The protocol fixed the paired differences and the better/tied/worse counts as th
 | Mean latency per question | 10.8 s | 9.9 s | 10.7 s | 14.4 s | 12.8 s | 13.3 s |
 
 - **Requests A shows two citation-support values.** It is 0.79 against B and 0.81 against C, because B's answer to `requests-pub-029` declined entirely (3 "not established" claims, nothing cited). That question therefore drops out of the A/B citation pairing.
-- **Most of the tokens are reranking.**
-  - The reranker reads about 11k–17k tokens per question; generation reads about 8.5k.
-  - The web-gate judge adds about 0.5k on Flask and 2.5k–2.9k on Requests, where more questions allow the web.
+### Tokens and latency
+
+All token counts are OpenAI's reported usage for each call; none of the 637 recorded stage counts had to be estimated. Latency is wall-clock time per question, from a single run of each condition, so it includes API variance. The figures below cover all questions (Flask 30, Requests 20). The primary-question figures are in the table above.
+
+**Per question, all questions**
+
+| | Flask A | Flask B | Flask C | Requests A | Requests B | Requests C |
+|---|---|---|---|---|---|---|
+| LLM tokens | 23.6k | **20.4k** (−14%) | 25.7k (+9%) | 22.9k | **20.1k** (−12%) | 27.5k (+20%) |
+| Latency | 10.2 s | **9.4 s** (−9%) | 10.2 s (0%) | 13.6 s | **12.2 s** (−11%) | 12.6 s (−8%) |
+| Context sent to the generator | 7.7k | 7.7k | 7.7k | 7.3k | 6.9k | 7.6k |
+
+**Paired, all questions** (exact sign test)
+
+| | Flask | Requests |
+|---|---|---|
+| B fewer tokens than A | 24 of 30 · p = 0.001 | 12 of 20 · p = 0.50 |
+| B faster than A | 21 of 30 · p = 0.043 | 14 of 20 · p = 0.12 |
+| C more tokens than A | 22 of 30 · p = 0.016 | 15 of 20 · p = 0.041 |
+| C faster than A | 15 of 30 · p = 1.0 | 11 of 20 · p = 0.82 |
+| C more tokens than B | 30 of 30 | 20 of 20 |
+
+**Per stage, mean per question** (latency, then input / output tokens)
+
+| Stage | Flask A | Flask B | Flask C | Requests A | Requests B | Requests C |
+|---|---|---|---|---|---|---|
+| Code search (embedding call) | 0.65 s | — | 0.51 s | 0.55 s | — | 0.53 s |
+| Wiki search + read + resolve (lexical, no model call) | — | 0.51 s | 0.51 s | — | 0.48 s | 0.51 s |
+| Rerank | 3.9 s · 14.2k / 0.28k | 3.2 s · **11.1k** / 0.20k | 3.5 s · 16.3k / 0.23k | 4.3 s · 11.3k / 0.30k | 3.8 s · **9.6k** / 0.25k | 3.9 s · 15.9k / 0.27k |
+| Generate | 5.1 s · 8.2k / 0.42k | 5.1 s · 8.1k / 0.42k | 5.2 s · 8.2k / 0.44k | 7.6 s · 7.7k / 0.61k | 6.7 s · 7.3k / 0.55k | 6.5 s · 8.0k / 0.55k |
+| Web gate (only on web-eligible questions: Flask 2, Requests 7) | 2.8 s · 7.8k | 2.1 s · 8.1k | 3.0 s · 7.8k | 3.3 s · 8.1k | 3.2 s · 6.8k | 3.0 s · 8.0k |
+
+**Where B's saving comes from**
+
+- **Mostly the reranker.**
+  - B puts 20 wiki-resolved spans in the pool, where A puts 40 code spans, so the reranker reads 15–22% fewer tokens and finishes about 0.5–0.75 s sooner.
+  - That follows from the candidate budget as much as from the wiki itself. A with a 20-span pool would likely be about as cheap.
+- **A little from retrieval.** Wiki search, read and resolve take about 0.5 s with no model call. Code search takes about 0.55–0.65 s, including one embedding call, which costs only about 50 tokens.
+- **Not from generation.** Generation reads the same 8,000-token budget in every condition. Flask shows no difference. Requests B and C generate faster than A, by 0.9 s and 1.0 s, with slightly shorter answers. With one run per condition, that is within normal API variation.
+
+**Where C's extra cost comes from.** C's reranker reads the largest pool (both routes, about 16k tokens), but C's latency matches A's. Its two retrieval routes run in parallel, and its rerank and generation were not slower in these runs.
+
+**Per correct answer** (primary questions, tokens divided by mean correctness)
+
+| | A | B | C |
+|---|---|---|---|
+| Flask | 32.9k | 40.4k | 35.2k |
+| Requests | 38.6k | 56.0k | 43.9k |
+
+B is cheapest per question but most expensive per unit of correctness. A is cheapest per correct answer in both repositories.
+
+**One-time and fixed costs**
+
+- **Wiki generation:** Flask 1,055 s, Requests 836 s. OpenWiki recorded no token usage or cost for these builds, so their token cost is unknown.
+- **OpenWiki server start:** 1.2–1.4 s once per run of B or C, not per question.
+- **Index building:** code and book indexes are built once and shared by A and C. Their time and embedding tokens are not part of these reports.
+
+**Scoring cost** (approximate, reconstructed without calling the model again)
+
+The judge's token use is not logged. It was reconstructed by rendering each of the 1,101 judge calls from the saved traces and the judge cache; all 1,101 matched a cached verdict, the same count the reports made.
+
+| | Judge calls | Input tokens | Output tokens (lower bound) |
+|---|---|---|---|
+| Flask A / B / C | 222 / 198 / 222 | 168k / 139k / 180k | 12k / 10k / 12k |
+| Requests A / B / C | 156 / 142 / 161 | 98k / 119k / 124k | 9k / 8k / 9k |
+| Total | 1,101 | 828k | 60k |
+
+- **Judge:** about $5.9 at DeepEval's listed price for `gpt-5.5` ($5 / $30 per million input / output tokens). Output is counted from the stored verdicts, which excludes any hidden reasoning tokens, so the real cost may be higher.
+- **DeepEval:** about $4, as reported by DeepEval.
+- **No dollar figure for answering.** The runs themselves can't be priced, because no price is recorded for `gpt-5.6-luna`.
 
 ### Wiki coverage (B and C)
 
@@ -158,7 +227,12 @@ Four DeepEval rows first failed because the mini model returned invalid JSON. Th
   - Public SWE-QA reference answers are free text, and correctness against them depends on the judge.
 - **Control scoring is strict.** "Every claim not established" penalises answers that correctly decline and also add true context. The 0 / 3 Flask decline rate overstates real hallucination on unanswerable questions.
 - **Web evidence is a snapshot.** Tavily results were captured once, on 2026-11-23, and replayed. Live results would differ.
-- **Cost is reported in tokens and seconds, not dollars.** OpenWiki did not report the cost of generating the wiki, and no price is recorded for `gpt-5.6-luna`.
+- **Cost is reported in tokens and seconds, not dollars.**
+  - No price is recorded for `gpt-5.6-luna`.
+  - OpenWiki recorded no tokens for the wiki builds.
+  - Judge tokens are reconstructed, not measured, with output as a lower bound.
+  - Latency comes from one run per condition and includes API variance.
+  - B's token saving partly reflects its smaller candidate budget (20 vs 40), not only the wiki.
 - **Baseline.** Condition A is a Langflow-style vector baseline. The original conference export was not available, so A makes no claim to be equivalent to it.
 
 ## Insights for practitioners
@@ -167,7 +241,9 @@ Four DeepEval rows first failed because the mini model returned invalid JSON. Th
 - **Measure wiki coverage before relying on a wiki.** Generated wikis describe structure and cite a subset of the code. A quick check: collect the files and symbols your users ask about, and see whether the wiki cites them. Wherever it does not, wiki-guided retrieval cannot help.
 - **Query a lexical wiki search with identifiers, not whole questions.** Long natural-language questions dilute lexical search. Extracting symbol and file names first is a cheap fix to try, though it was not tested here.
 - **Once you have more candidates, look at the reranker and context budget.** Combining routes raised candidate recall far more than correctness. Gains are more likely from better ranking, larger budgets or deduplication than from adding more sources.
-- **Budget about 10–25% more tokens for a combined route.** The extra cost is almost all reranking a larger pool. Wiki generation is a one-time cost of about 15 minutes per repository and must be redone when the code changes.
+- **A wiki route is cheaper per question, but not per correct answer.** Here B used 12–14% fewer tokens and ran about 10% faster than vector search, because it hands the reranker fewer candidates. It still needed 23–45% more tokens per unit of correctness.
+- **Budget about 10–20% more tokens for a combined route, with no extra latency.** The two routes run in parallel, and the extra cost is almost all reranking a larger pool. Wiki generation is a one-time cost of about 15 minutes per repository and must be redone when the code changes.
+- **To cut cost, shrink the reranker's input.** Reranking is about half to two thirds of the tokens per question (49–64%), more than generation. The pool size sets its cost.
 - **Pinned, cited answers are auditable.** Citation support stayed around 0.8–0.9 in every configuration. Requiring a citation for every claim, and declines stated as "not established", made failures visible instead of silent.
 - **Score with a fixed, different judge, and check it.** Changing only the judge model moved the condition gap as much as the effect being measured. Pin a dated judge snapshot, keep it different from the generator, and have people check a sample of its verdicts.
 
