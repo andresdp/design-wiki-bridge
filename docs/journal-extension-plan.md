@@ -1,6 +1,6 @@
-# CIBSE journal extension plan
+# Journal extension plan (55JAIIO → Electronic Journal of SADIO)
 
-**Target milestone:** first week of December 2026  
+**Target:** the extended version of the 55JAIIO paper for the Electronic Journal of SADIO (EJS), 2027; submission deadline 2026-12-01. Draft: `paper/ejs-extension/`.  
 **Scope:** LangGraph, one wiki generator (LangChain OpenWiki), two SWE-QA repositories, Tavily for Web evidence, and DeepEval for offline scoring. Jev is deferred.
 
 ## Contribution and research questions

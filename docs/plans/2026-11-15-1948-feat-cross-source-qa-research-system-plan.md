@@ -13,7 +13,7 @@ execution: code
 
 ## Goal Capsule
 
-**Objective.** Build the research code for the CIBSE journal extension: one LangGraph query graph with two interchangeable repository-retrieval branches (vector baseline, OpenWiki-guided), shared downstream stages, a manifest-driven batch runner, and a separate offline evaluation command.
+**Objective.** Build the research code for the journal extension of the 55JAIIO paper (Electronic Journal of SADIO): one LangGraph query graph with two interchangeable repository-retrieval branches (vector baseline, OpenWiki-guided), shared downstream stages, a manifest-driven batch runner, and a separate offline evaluation command.
 
 **Authority hierarchy.** `docs/journal-extension-plan.md` owns the study design (RQs, conditions, benchmark protocol, analysis). This plan owns the implementation decisions (KTDs below). `CLAUDE.md` owns environment and workflow rules. Where this plan and the journal plan disagree on a mechanism, this plan wins and U13 updates the journal plan's wording.
 

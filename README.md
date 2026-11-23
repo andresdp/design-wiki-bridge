@@ -8,7 +8,7 @@
 
 Cross-source question answering over software projects with verifiable citations. The system uses a generated repository wiki ([LangChain OpenWiki](https://github.com/langchain-ai/openwiki)) only as a map for finding the original code and test evidence. Answers then combine that evidence with external specifications (PDFs, Web pages) and cite each claim to an original source span.
 
-This is the research code for the journal extension of a CIBSE conference paper. The study design is in [`docs/journal-extension-plan.md`](docs/journal-extension-plan.md), and the implementation plan is in [`docs/plans/`](docs/plans/).
+This is the research code for the journal extension (Electronic Journal of SADIO) of a 55JAIIO conference paper. The study design is in [`docs/journal-extension-plan.md`](docs/journal-extension-plan.md), and the implementation plan is in [`docs/plans/`](docs/plans/).
 
 ## Research questions
 
