@@ -11,3 +11,4 @@ matching:                    # KTD15
 deepeval:
   enabled: false             # diagnostics only: contextual recall, faithfulness
   model: gpt-5.5-2026-04-23
+  cache: artifacts/deepeval_cache.jsonl   # reuse rows across pairwise reports (A/B, A/C, B/C)

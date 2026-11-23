@@ -64,7 +64,7 @@ The 25-question benchmark was written against RFC PDFs, a book and the project p
 ### Success Criteria
 
 - Both repositories' test sets validate, freeze and pass `benchmark check` against their dev sets.
-- Paired A/B runs complete with `web_capture_failed` 0, failures handled per KTD-B11, and `experiment evaluate --deepeval` writes per-subset tables.
+- Runs of A, B and C complete with `web_capture_failed` 0, failures handled per KTD-B11, and `experiment evaluate --deepeval` writes per-subset tables for A/B, A/C and B/C.
 
 ---
 
@@ -88,7 +88,8 @@ The 25-question benchmark was written against RFC PDFs, a book and the project p
 - **KTD-B9. Measure web retrievability before freezing; do not filter on it.** A Tavily pass queries each web-eligible question's text exactly as the graph sends it, with the manifest's `max_results`, `search_depth` and `exclude_domains`, and counts a hit only when an evidence alternative matches a returned passage under the evaluator's rules (URL without fragment plus passage overlap). One equivalence rule is fixed in advance: an RFC cited on rfc-editor.org also matches its official copies on datatracker.ietf.org and httpwg.org. Questions are not reworded, re-sourced or dropped because of the result, so web-stage recall stays an unconditioned estimate. Each question's pre-check result goes in its provenance. *Revised 2026-11-22:* the first pass (`data/questions/drafts/webcheck-2026-11-22.json`) retrieved gold for 1 of 9 web test questions, because the raw question text is a poor web query; filtering on that would have tuned the test set to the retriever. The web stage is shared by both conditions, so the primary A/B comparison does not depend on it.
 
 - **KTD-B10. Primary analysis is fixed before the runs.** The primary A/B comparison is per repository, over the condition-sensitive questions: public questions plus authored answerable questions that need code evidence (code, code+book, code+web). It reports paired differences and improved/tied/regressed counts, as the journal plan specifies. Book-only questions and controls are sanity checks expected to show no A/B difference. Any subset with fewer than about 10 questions is reported as descriptive counts, without a comparative claim.
-- **KTD-B11. Failures are scored, not rerun away.** A failed question scores 0. A rerun is allowed only for an infrastructure fault (provider outage, timeout), applies to both conditions for that question, and is logged with its cause.
+- **KTD-B11. Failures are scored, not rerun away.** A failed question scores 0. A rerun is allowed only for an infrastructure fault (provider outage, timeout), applies to every condition for that question, and is logged with its cause.
+- **KTD-B12. Condition C: both repository branches into the shared reranker.** *Added 2026-11-22, after the dev pilot and before any test run.* In the pilot, every B answer scoring 0 asked about code the wiki never cites (`morsel_to_cookie`, `test_pragmas`/`get_encodings_from_content`, the `TestUrlFor` tests); vector search found it. B stays unchanged. C runs vector search and the wiki route in parallel; `join_local` merges their candidates and the reranker's pool alternates between branches, with the same pool (40) and context budget (8,000 tokens), so C gets no more context. C uses A's code index and B's wiki snapshot (`check_paired` fails A/C or B/C pairs that differ there). B − A stays the primary comparison (KTD-B10); C − A (does the wiki add to vector search?) and C − B (does vector search fill the wiki's gaps?) are secondary. `experiment evaluate` pairs any two conditions in letter order and names its columns after them; judge verdicts and DeepEval rows are cached, so each run is scored once. A per-question diagnostic, `wiki_gold_coverage` (B and C), counts the needed code the wiki route reached before reranking (span-level for annotated questions, file-level over the reference answer's paths for public ones), separating wiki coverage gaps from ranking losses. (session-settled: user-directed: chosen over a code-lookup fallback inside B, which would change what B measures, and over tuning B's wiki query on 4 public dev questions per repository.)
 
 ### High-Level Technical Design
 
@@ -219,14 +220,24 @@ U1 → U2 (code) and U3 (config) can proceed in parallel after U1; U4 needs U1 (
 
 **Goal:** paired traces and reports for the paper.
 **Requirements:** R11, R9, R10.
-**Dependencies:** U2, U5.
+**Dependencies:** U2, U5, U9.
 **Files:** outputs only (`runs/`, `reports/`).
 **Approach:**
-1. Pilot: run the development set through A and B per repository (dev manifests from U3); evaluate; inspect failures and DeepEval skips. Prompt or configuration changes may only be driven by failures on non-variant development questions; variants run only as a harness smoke test (format, control scoring, DeepEval skips). (session-settled: user-directed — chosen over allowing variant-driven changes with disclosure: variants reword test questions.)
-2. Per repository: a record pass to capture web for all eligible questions (check `web_capture_failed` is 0), then the paired A and B runs in replay mode.
-3. `dwb experiment evaluate runs/<A> runs/<B> --out reports/<repo>-test --deepeval`.
+1. Pilot: run the development set through A, B and C per repository (dev manifests from U3 and U9); evaluate; inspect failures and DeepEval skips. Prompt or configuration changes may only be driven by failures on non-variant development questions; variants run only as a harness smoke test (format, control scoring, DeepEval skips). (session-settled: user-directed — chosen over allowing variant-driven changes with disclosure: variants reword test questions.)
+2. Per repository: a record pass to capture web for all eligible questions (check `web_capture_failed` is 0), then the A, B and C runs in replay mode.
+3. `dwb experiment evaluate runs/<A> runs/<B> --out reports/<repo>-test --deepeval`, then A/C (`reports/<repo>-test-AC`) and B/C (`reports/<repo>-test-BC`).
 **Test expectation:** none -- operational.
 **Verification:** failures are scored and logged per KTD-B11; reports contain per-subset tables, `web_gate.csv` and the DeepEval summary.
+
+### U9. Condition C and pairwise evaluation
+
+**Goal:** a third condition that runs both repository branches (KTD-B12), reports for any pair of conditions, and the wiki coverage diagnostic.
+**Requirements:** R11.
+**Dependencies:** U2, U3.
+**Files:** `src/dwb/manifest.py`, `src/dwb/graph.py`, `src/dwb/runner.py`, `src/dwb/chat.py`, `src/dwb/cli.py`, `src/dwb/eval/command.py`, `src/dwb/eval/report.py`, `src/dwb/eval/deepeval_diag.py`, `configs/eval.yaml`, `configs/manifests/<repo>-C{,-dev}.yaml`; tests in `tests/test_graph.py`, `tests/test_manifest.py`, `tests/eval/test_report.py`, `tests/eval/test_deepeval_diag.py`.
+**Approach:** condition `C` needs both the code index and the wiki snapshot; the graph adds both branch entries and both exits into `join_local`; `check_paired` compares the shared code index or wiki and reports the repository candidate budget as the sum of the branches; `evaluate` accepts two conditions in letter order and labels columns by condition; the DeepEval cache keys rows on version, model, kind and test case; `wiki_gold_coverage` per question.
+**Test scenarios:** C runs both branches and each shared stage once; a span found by both branches merges and records `also_from`; C answers from vector search when the wiki is empty; C manifests require both inputs and pair with A and B; an A/C pair with another code index fails; an A/C report has `mean_C` columns; C before A is rejected; wiki coverage counts a requirement when any alternative is matched at span level (the right file at other lines does not count), uses reference-answer paths for public questions, and counts wiki spans merged into vector spans; a cached DeepEval row is reused and an errored row is not cached.
+**Verification:** the full suite and lint pass; the C dev pilot runs for both repositories with no failures.
 
 ### U8. Web retrievability check command
 
@@ -258,13 +269,13 @@ U1 → U2 (code) and U3 (config) can proceed in parallel after U1; U4 needs U1 (
 
 - `conda run -n taxonomy pytest` and `conda run -n taxonomy ruff check src tests` pass after U1–U3.
 - `dwb benchmark validate`, `freeze` and `check` pass for both repositories (U5).
-- `dwb experiment check` passes for both A/B pairs.
+- `dwb experiment check` passes for the A/B, A/C and B/C pairs of both repositories (test and dev).
 - Every web-eligible test question carries its retrievability pre-check result.
 
 ## Definition of Done
 
 - R1–R12 hold; every test-set question is human-reviewed and frozen.
-- Paired runs and reports exist for both repositories with no failed web captures and failures handled per KTD-B11.
+- Runs of A, B and C and the A/B, A/C and B/C reports exist for both repositories, with no failed web captures and failures handled per KTD-B11.
 - The superseded draft plan is removed; no abandoned code remains in the diff.
 
 ## Deferred to Implementation

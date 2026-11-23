@@ -3,7 +3,7 @@
 `dwb` answers questions about a software repository with citations to original evidence: code at a commit, PDF pages, and web passages. The same pipeline serves two purposes:
 
 - a **user tool** you run inside any git repository (`dwb init` → `dwb index` → `dwb chat`);
-- a **research harness** that compares two ways of finding repository evidence, vector search (condition A) and OpenWiki-guided search (condition B), on a frozen question set, with offline evaluation.
+- a **research harness** that compares ways of finding repository evidence, vector search (condition A), OpenWiki-guided search (condition B), and both together (condition C), on a frozen question set, with offline evaluation.
 
 This document describes the components, how data flows through them, and the design decisions behind them. Usage is in [`usage.md`](usage.md), the study design in [`journal-extension-plan.md`](journal-extension-plan.md), the implementation plan in [`plans/`](plans/), and the empirical findings behind several decisions in [`spikes/2026-11-openwiki-swe-qa-spike.md`](spikes/2026-11-openwiki-swe-qa-spike.md) (cited below as *spike §n*). Conceptual figures for the paper are in [`paper-figures.md`](paper-figures.md).
 
@@ -100,7 +100,7 @@ flowchart TB
 
 Two consequences of the layering:
 
-- **Swapping a condition is a wiring change.** `graph` imports only the wiki result types from layer 4. `runner` decides which repository branch (A or B) and which PDF and web adapters to build, so the shared stages are identical code in both conditions.
+- **Swapping a condition is a wiring change.** `graph` imports only the wiki result types from layer 4. `runner` decides which repository branches (A: vector, B: wiki, C: both) and which PDF and web adapters to build, so the shared stages are identical code in both conditions.
 - **Both modes are thin.** The user tool (`project`) and the research harness (`workspace`, `runner`) differ only in layer 2. Both reach the same pipeline (§8).
 
 ## 3. Code map
@@ -137,13 +137,13 @@ The evaluator (`eval/`) never imports the graph, the generator, the reranker, or
 
 ## 4. The query graph
 
-One explicit LangGraph `StateGraph`, compiled per run or session for one repository branch (condition A or B):
+One explicit LangGraph `StateGraph`, compiled per run or session for one condition: the vector branch (A), the wiki branch (B), or both in parallel (C):
 
 ```mermaid
 flowchart TD
     Q(["question<br/>(id, text, allowed_sources)"]) --> prepare["prepare<br/>normalize text"]
-    prepare -->|"condition A"| code["code_retrieve<br/>Chroma top-k (40)"]
-    prepare -->|"condition B"| ws["wiki_search<br/>openwiki_search (10)"]
+    prepare -->|"condition A or C"| code["code_retrieve<br/>Chroma top-k (40)"]
+    prepare -->|"condition B or C"| ws["wiki_search<br/>openwiki_search (10)"]
     ws --> wr["wiki_read<br/>openwiki_read top 5 + provenance"]
     wr --> res["resolve<br/>sections → code spans (≤ 20)"]
     prepare -->|"pdf allowed & enabled"| pdf["pdf_retrieve<br/>Chroma top-k (10)"]
@@ -171,7 +171,7 @@ flowchart TD
 - **The web is a wider search after a narrow one.** Web runs only for items whose `allowed_sources` include `web`, when the manifest enables it, and is decided after the join, in one place, for both conditions. With `web.conditional_web_search` on (the default), `check_local` first asks one LLM judge (the generator's pinned model, prompt `sufficiency_v1`, temperature 0) whether the merged local evidence can answer every part of the question. The judge reads the local pool interleaved by branch and cut to the context budget, without a rerank. Web runs when the verdict is insufficient, when there is no local evidence (no judge call), or when the judge fails (the question is then degraded). The verdict, its reason and the evidence IDs the judge saw go to the trace as `web_check`. With the flag off, web runs for every eligible item and no judge is called.
 - **Record runs capture web for every eligible item.** In an experiment record run, `web_retrieve` also runs when the verdict is sufficient: it stores the Tavily response and adds nothing (stage `used: false`, `web_triggered` false), so a replay of either condition finds its web evidence whatever its own verdict. Capture-only calls are left out of latency and cost. Chat never captures this way.
 - **A failing source degrades the question; it does not fail it.** If code, wiki search, wiki read, resolve, PDF or web retrieval raises, that node records the error in its stage and adds a `warnings` entry, and the other branches still answer. A failed rerank call falls back to pool order the same way. Degraded questions are counted in the run summary and as the `degraded` metric. A Tavily replay miss is the exception: it fails the question, because a replay run must not answer without its frozen web evidence.
-- **There is no fallback between repository branches.** If condition B finds nothing and no other source is enabled, the graph ends at `empty_context` rather than quietly switching to vector search.
+- **There is no fallback between repository branches.** If condition B finds nothing and no other source is enabled, the graph ends at `empty_context` rather than quietly switching to vector search. Condition C runs both branches by design, not as a fallback: their candidates meet in `join_local`, where a span both branches found is merged (the survivor records `also_from`), and the reranker's pool alternates between branches by in-branch rank. With the shared pool of 40, C sends up to 15 vector, 15 wiki and 10 PDF candidates when all three are full (A sends 30 vector and 10 PDF). The context budget is the same 8,000 tokens, so C does not get more context than A or B (KTD-B12).
 - **Execution is `ainvoke`,** with no checkpointer and no streaming. Each node returns a `StageRecord` (latency, counts, tokens, stage-specific extras).
 
 ## 5. Condition B in detail
@@ -319,18 +319,20 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    M["manifest A / B"] -->|"check_paired:<br/>fail on any shared-stage difference"| OK{ok}
+    M["manifests A / B / C"] -->|"check_paired:<br/>fail on any shared-stage difference"| OK{ok}
     QS["question set<br/>(frozen: hash must match)"] --> RUN
     OK --> RUN["experiment run<br/>one trace per question; errors isolated"]
     RUN --> TR[("runs/run_id/<br/>manifest.yaml (frozen, prompt hashes)<br/>traces.jsonl, run_summary.json")]
-    TR --> GATE{"evaluate gate:<br/>A then B, check_paired<br/>on the saved manifests"}
+    TR --> GATE{"evaluate gate:<br/>two conditions in letter order<br/>(A B, A C, B C), check_paired<br/>on the saved manifests"}
     GATE --> HY["hydrate code text<br/>from the checkout"]
     HY --> REC["recall<br/>(candidates & final context; KTD15 matching)"]
     HY --> JUD["claims judge<br/>correctness · citation support · coverage<br/>(cached; gap claims excluded)"]
     HY --> COST["per-stage cost<br/>latency, tokens"]
-    REC & JUD & COST --> PAIR["pair A/B by question<br/>means and diffs over the same questions;<br/>improved/tied/regressed; per subset: primary,<br/>public, each grounding, control"]
+    REC & JUD & COST --> PAIR["pair the two conditions by question<br/>means and diffs over the same questions;<br/>improved/tied/regressed; per subset: primary,<br/>public, each grounding, control"]
     PAIR --> REP[("reports/:<br/>per_question, paired, paired_summary,<br/>cost, evaluator_config, judge_log")]
 ```
+
+Each report compares two conditions. Its paired columns are named after them (`mean_A`, `mean_C`, `mean_diff_C_minus_A`), so an A/B report keeps its original layout; the three comparisons are three reports over the same traces. Judge verdicts and DeepEval rows are cached, so scoring a run again in a second report makes no new calls. `per_question.csv` also carries `wiki_gold_coverage` for B and C: the share of the needed code the wiki route reached before reranking. For annotated questions (`wiki_gold_source` = `evidence_spans`) it is span-level: an evidence requirement counts when a wiki-resolved span matches any of its code alternatives under the evaluator's matching rules. For public questions (`reference_answer_files`) it is file-level, over the repository paths the reference answer names; reaching a large file is not reaching the function, so only a 0 is conclusive there. A 0 is a wiki coverage gap, which ranking and generation cannot recover; `report_summary.json` counts them per condition and source.
 
 ## 10. Main design decisions
 
@@ -339,7 +341,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 | # | Decision | Rationale | Rejected alternatives |
 |---|---|---|---|
 | 1 | **Explicit `StateGraph` with deterministic routing** (KTD11) | The two conditions must be controlled and comparable; an agent choosing tools would add an uncontrolled variable. The web gate (decision 11) is the one LLM-judged edge: one fixed judge, prompt and budget shared by both conditions, deciding only whether to widen the search | Deep Agents, LLM routing |
-| 2 | **Two interchangeable repository branches; everything downstream shared** (R4, R6) | Isolates the effect of how repository evidence is found. `check_paired` fails any A/B pair that differs in a shared stage | Per-condition tuning |
+| 2 | **Interchangeable repository branches; everything downstream shared** (R4, R6) | Isolates the effect of how repository evidence is found. `check_paired` fails any pair of conditions that differs in a shared stage, or (A/C, B/C) in the code index or wiki snapshot they share | Per-condition tuning |
 | 3 | **Deterministic evidence IDs plus per-prompt aliases** (KTD1) | The same span gets the same ID across runs and conditions, which makes recall comparable. Short `E1…En` aliases keep prompts small and give validation a closed set | Random IDs, citing paths inline |
 | 4 | **Wiki guides discovery, never evidence** (R3) | Answers must cite original code; generated text is not ground truth | Citing wiki sections |
 | 5 | **OpenWiki through its native MCP search/read, one persistent session** (KTD2) | Keeps "native OpenWiki retrieval" true with the least glue. The server is local and model-free | Reading wiki files directly; a new server per call |
@@ -358,9 +360,10 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 | 18 | **User mode indexes the HEAD commit through git, keeps everything in `.dwb/`** | Citations point at a real commit; uncommitted edits are excluded with a warning, and a stale index is flagged. Nothing is written to the repository's `.gitignore` | Indexing the working tree |
 | 19 | **Token accounting from LangChain callbacks, approximate counts as fallback** | Provider usage where available; LangChain's `count_tokens_approximately` for embeddings (no callbacks) or missing usage, labelled as approximate. The context budget keeps an exact counter because it is a pipeline rule | tiktoken everywhere; no embedding accounting |
 | 20 | **Failures count against the condition; degraded answers are flagged** (code review 2026-11-17) | A failed question scores correctness 0 (no answer) instead of dropping out of one side's mean, which would favor the condition that fails more. Its cost is left empty, not 0. A source or rerank failure keeps the answer but marks it `degraded`. Means are taken over the questions scored on both sides | Excluding failures silently; failing the whole question when one source fails |
-| 21 | **`evaluate` rechecks the pair** (code review 2026-11-17) | The saved manifests must be A then B and pass `check_paired`, so a swapped or mismatched pair cannot produce a valid-looking report. `--allow-unpaired` overrides it and is recorded in `evaluator_config.json`. Judge verdicts are cached per judge model and temperature | Trusting the argument order |
+| 21 | **`evaluate` rechecks the pair** (code review 2026-11-17) | The saved manifests must be two conditions in letter order (A B, A C, B C) and pass `check_paired`, so a swapped or mismatched pair cannot produce a valid-looking report. `--allow-unpaired` overrides it and is recorded in `evaluator_config.json`. Judge verdicts are cached per judge model and temperature | Trusting the argument order |
 | 22 | **Indexes must match the manifest they are used with** (code review 2026-11-17) | Condition A's index must be cut with the manifest's `max_span_tokens` and the current `chunker_version`; the runner refuses otherwise. User mode uses only the IDs `dwb index` recorded in `state.json`, and refuses a wiki that changed since | Picking the newest matching index |
 | 23 | **One presentation module and one exception boundary** (CLI UX plan KTD1, KTD5, KTD6) | `dwb.ui` resolves consoles and the output mode when output is written (`CliRunner` swaps streams per call), so `NO_COLOR`, `--no-color`, `--json` and TTY detection hold per invocation. The boundary is a custom Typer group, so tests exercise it; Click's own exits pass through untouched | Per-command `except` blocks; a boundary in `main()` that tests never reach |
+| 24 | **Condition C runs both repository branches into the shared reranker** (KTD-B12, after the dev pilot) | The pilot showed B fails when the wiki does not cite the code a question names, while A finds it. C asks whether the wiki adds anything on top of vector search, which is how a wiki would be used in practice. The branches compete in the same pool and context budget, so C gets no extra context | A code-lookup fallback inside B (changes what B measures); a larger budget for C
 
 ## 11. Invariants
 
@@ -376,7 +379,7 @@ IDs refer to the implementation plan (KTD) or the spike document (§).
 ## 12. Known limitations and parked work
 
 - **Run-to-run variance** from generation and judging is visible even at temperature 0 (spike §10). Report it as a validity threat, or measure it with repeated dev runs.
-- **Condition B depends on wiki coverage and on lexical wiki search** over the raw question (spike §9). The query rule is frozen and not tuned.
+- **Condition B depends on wiki coverage and on lexical wiki search** over the raw question (spike §9). The query rule is frozen and not tuned. In the dev pilot (2026-11-22) every B answer that scored 0 asked about a symbol the wiki never cites (`morsel_to_cookie`, `get_encodings_from_content`, the `TestUrlFor` tests); `wiki_gold_coverage` measures this on the test set, and condition C measures what vector search recovers.
 - **`gpt-5.6-luna` has no dated snapshot ID**, so the model behind the name could change during the study.
 - **A question that fails mid-graph keeps only its error,** not the stages that already ran (`ainvoke`, no streaming). Source failures no longer fail the question (see §4), so this now covers only generation-stage and replay-miss failures.
 - **Chunker version 2 (2026-11-17) changes condition A's indexes.** Class-body lines after the first method are now indexed, and lines are split on `\n` only. Indexes built before have `chunker_version` 1 and must be rebuilt; their IDs change, so the A manifests need the new IDs.

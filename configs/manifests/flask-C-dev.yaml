@@ -1,0 +1,49 @@
+# Development manifest, condition C (flask): the pilot (U6) over
+# data/questions/dev/flask.jsonl. Same corpus, models, budgets and web settings as
+# the test manifest flask-C.yaml; tuning may use only non-variant dev questions.
+run_id: flask-C-dev-002
+condition: C   # KTD-B12: vector code search and the wiki route, both into the shared reranker
+repo: flask
+repo_sha: 2c1b30d0503cfb064f1cb252e6614a06915a362a
+checkout: artifacts/checkouts/flask-3.1.2
+question_set:
+  id: flask-dev
+  path: data/questions/dev/flask.jsonl
+  hash: null
+indexes:
+  code_index_id: code-flask-d8133bc0499d   # text-embedding-3-large, 1362 chunks, chunker v2
+  wiki_snapshot_id: wiki-flask-52e1119f2d9c   # configs/wikis/wiki-flask-52e1119f2d9c.json
+  pdf_index_id: pdf-flask-books-v1-5b41dac5d845   # Grinberg, Aggarwal, Aronowitz books, 638 pages
+pdf_enabled: true
+models:
+  generator: gpt-5.6-luna   # KTD10: same model as the wiki generator and the reranker
+  reranker: gpt-5.6-luna    # same pinned model as the generator
+  embedding: text-embedding-3-large
+  temperature: 0.0
+prompts:
+  generate:
+    path: src/dwb/prompt_files/generate_v2.md
+  sufficiency:              # check_local judge: web runs only on insufficient local evidence
+    path: src/dwb/prompt_files/sufficiency_v1.md
+budgets:
+  code_top_k: 40            # = rerank_pool, so code-only items can fill the token budget too
+  wiki_search_k: 10
+  wiki_read_sections: 5
+  wiki_max_spans: 20
+  max_span_tokens: 1500
+  pdf_top_k: 10
+  rerank_pool: 40
+  rerank_top_n: 40          # = rerank_pool: the token budget, not a count, sizes the context
+  context_tokens: 8000
+web:
+  enabled: true
+  mode: replay
+  store_id: tavily-flask-v3   # v3: books corpus, werkzeug docs excluded (keys change)
+  max_results: 5
+  search_depth: basic
+  conditional_web_search: true   # false: web whenever the item allows it (no judge)
+  exclude_domains:           # the project's own docs and source hosts (spike doc §8)
+    - flask.palletsprojects.com
+    - werkzeug.palletsprojects.com
+    - github.com
+    - pypi.org

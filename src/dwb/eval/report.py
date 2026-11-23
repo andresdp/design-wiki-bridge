@@ -1,9 +1,13 @@
-"""Per-question metrics, A/B pairing, and report tables (R14)."""
+"""Per-question metrics, pairing of two conditions (A/B, A/C, B/C), and report tables (R14).
+
+Paired columns carry the conditions' letters (``mean_A``, ``mean_C``, ``mean_diff_C_minus_A``),
+so an A/B report keeps its original layout."""
 
 from __future__ import annotations
 
 import csv
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean
@@ -11,8 +15,9 @@ from typing import Any
 
 from dwb.benchmark.schemas import QuestionRecord
 from dwb.eval.claims_judge import ClaimsJudge
-from dwb.eval.matching import MatchRules
+from dwb.eval.matching import DEFAULT_RULES, MatchRules, matches
 from dwb.eval.recall import recall
+from dwb.manifest import USES_WIKI
 from dwb.trace import TraceRecord
 
 METRICS = ("recall_candidates", "recall_final", "recall_candidates_jaccard",
@@ -45,6 +50,68 @@ def in_primary(subset: str) -> bool:
 def declined(trace: TraceRecord) -> bool:
     """The answer declines: it has claims and every one is a "not established" gap claim."""
     return bool(trace.claims) and all(c.kind == "gap" for c in trace.claims)
+
+
+# a repository path with at least one directory, as SWE-QA reference answers name them
+REF_PATH = re.compile(r"(?<![\w/.-])(?:\./)?((?:[\w.-]+/)+[\w-]+\.(?:py|pyi|rst|md|toml|cfg|txt|"
+                      r"ya?ml))\b")
+
+
+def gold_files(record: QuestionRecord) -> list[set[str]]:
+    """For a public question (no annotated spans), the repository paths its reference
+    answer names, one needed file each."""
+    if record.kind != "public" or not record.reference_answer:
+        return []
+    return [{p} for p in sorted(set(REF_PATH.findall(record.reference_answer)))]
+
+
+def _wiki_items(trace: TraceRecord) -> list[dict]:
+    """Code items the wiki route resolved (before reranking), including spans merged into a
+    vector-search survivor (condition C)."""
+    return [e for e in trace.evidence.values() if e.get("source_type") == "code"
+            and (e.get("provenance", {}).get("branch") == "wiki"
+                 or "wiki" in e.get("provenance", {}).get("also_from", []))]
+
+
+def wiki_files(trace: TraceRecord) -> set[str]:
+    return {e["locator"]["path"] for e in _wiki_items(trace)}
+
+
+def wiki_gold_coverage(record: QuestionRecord, trace: TraceRecord,
+                       rules: MatchRules | None = None) -> tuple[float | None, str | None]:
+    """Share of the needed code the wiki route reached, before ranking. 0 means a wiki
+    coverage gap: ranking and generation could not recover it. ``None`` for condition A or
+    when nothing names the needed code.
+
+    - ``evidence_spans``: code requirements met by a wiki-resolved span (the evaluator's span
+      matching; any alternative counts);
+    - ``reference_answer_files`` (public questions): repository paths named in the reference
+      answer that the wiki route reached at file level. Coarse: reaching a large file is not
+      reaching the function, so only a 0 is conclusive."""
+    if trace.condition not in USES_WIKI:
+        return None, None
+    items = _wiki_items(trace)
+    code_reqs = [[a for a in e.alternatives if a.source_type == "code"] for e in record.evidence]
+    code_reqs = [r for r in code_reqs if r]
+    if code_reqs:
+        hit = sum(1 for alts in code_reqs
+                  if any(matches(e, a, rules or DEFAULT_RULES) for a in alts for e in items))
+        return round(hit / len(code_reqs), 6), "evidence_spans"
+    files = gold_files(record)
+    if files:
+        reached = {e["locator"]["path"] for e in items}
+        return round(sum(1 for f in files if f & reached) / len(files), 6), \
+            "reference_answer_files"
+    return None, None
+
+
+def wiki_coverage_summary(rows: list[dict]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for source in ("evidence_spans", "reference_answer_files"):
+        scored = [r["wiki_gold_coverage"] for r in rows if r.get("wiki_gold_source") == source]
+        out[source] = {"n": len(scored), "mean": _mean(scored),
+                       "n_none_reached": sum(1 for v in scored if v == 0)}
+    return out
 
 
 def _counted(stage) -> bool:
@@ -86,6 +153,8 @@ def question_row(record: QuestionRecord, trace: TraceRecord, judge: ClaimsJudge 
         "correctness": None, "citation_support": None, "coverage": None,
         "control_correct": None,
     }
+    row["wiki_gold_coverage"], row["wiki_gold_source"] = wiki_gold_coverage(record, trace,
+                                                                         rules)
     if record.kind == "control":
         # unanswerable (R6): correct only when the answer declines; a failed control has no
         # answer and scores 0. The claim judge is never called, recall does not apply.
@@ -126,7 +195,8 @@ def cost_rows(traces: list[TraceRecord]) -> list[dict[str, Any]]:
     return rows
 
 
-def pair(rows_a: list[dict], rows_b: list[dict]) -> tuple[list[dict], list[str]]:
+def pair(rows_a: list[dict], rows_b: list[dict], x: str = "A",
+         y: str = "B") -> tuple[list[dict], list[str]]:
     a = {r["question_id"]: r for r in rows_a}
     b = {r["question_id"]: r for r in rows_b}
     missing = sorted(set(a) ^ set(b))
@@ -135,7 +205,7 @@ def pair(rows_a: list[dict], rows_b: list[dict]) -> tuple[list[dict], list[str]]
         row = {"question_id": qid, "kind": a[qid]["kind"], "subset": a[qid]["subset"]}
         for m in METRICS:
             va, vb = a[qid].get(m), b[qid].get(m)
-            row[f"{m}_A"], row[f"{m}_B"] = va, vb
+            row[f"{m}_{x}"], row[f"{m}_{y}"] = va, vb
             row[f"{m}_diff"] = (vb - va) if va is not None and vb is not None else None
         paired.append(row)
     return paired, missing
@@ -149,7 +219,7 @@ def summary_subsets(paired: list[dict]) -> list[str]:
     return [PRIMARY, *ordered, "all"]
 
 
-def paired_summary(paired: list[dict]) -> list[dict]:
+def paired_summary(paired: list[dict], x: str = "A", y: str = "B") -> list[dict]:
     out = []
     for subset in summary_subsets(paired):
         rows = [p for p in paired if subset == "all" or p["subset"] == subset
@@ -161,9 +231,9 @@ def paired_summary(paired: list[dict]) -> list[dict]:
             out.append({
                 "subset": subset, "metric": m, "n_paired": len(diffs),
                 "n_excluded": len(rows) - len(both),
-                "mean_A": _mean([p[f"{m}_A"] for p in both]),
-                "mean_B": _mean([p[f"{m}_B"] for p in both]),
-                "mean_diff_B_minus_A": _mean(diffs),
+                f"mean_{x}": _mean([p[f"{m}_{x}"] for p in both]),
+                f"mean_{y}": _mean([p[f"{m}_{y}"] for p in both]),
+                f"mean_diff_{y}_minus_{x}": _mean(diffs),
                 "improved": sum(1 for d in diffs if sign * d > TIE_EPS),
                 "tied": sum(1 for d in diffs if abs(d) <= TIE_EPS),
                 "regressed": sum(1 for d in diffs if sign * d < -TIE_EPS),
@@ -171,8 +241,9 @@ def paired_summary(paired: list[dict]) -> list[dict]:
     return out
 
 
-def web_gate_summary(rows_a: list[dict], rows_b: list[dict]) -> dict[str, Any]:
-    """The web gate over questions it ran on in both conditions. A and B judge their own
+def web_gate_summary(rows_a: list[dict], rows_b: list[dict], x: str = "A",
+                     y: str = "B") -> dict[str, Any]:
+    """The web gate over questions it ran on in both conditions. The two judge their own
     local evidence, so their verdicts can differ; on discordant questions one condition
     answered with web and the other without, and score differences there mix retrieval with
     web access. Escalation = the gate sent the question to the web (insufficient or
@@ -197,9 +268,9 @@ def web_gate_summary(rows_a: list[dict], rows_b: list[dict]) -> dict[str, Any]:
         "both_sufficient": sum(1 for q in both if not up_a[q] and not up_b[q]),
         "both_insufficient": sum(1 for q in both if up_a[q] and up_b[q]),
         "discordant": sum(1 for q in both if up_a[q] != up_b[q]),
-        "escalation_rate_A": rate(up_a), "escalation_rate_B": rate(up_b),
-        "web_reference_judged_sufficient_A": kept_local(a),
-        "web_reference_judged_sufficient_B": kept_local(b),
+        f"escalation_rate_{x}": rate(up_a), f"escalation_rate_{y}": rate(up_b),
+        f"web_reference_judged_sufficient_{x}": kept_local(a),
+        f"web_reference_judged_sufficient_{y}": kept_local(b),
     }
 
 
@@ -222,10 +293,12 @@ def write_csv(path: Path, rows: list[dict]) -> None:
 
 def write_report(out: Path, rows_a: list[dict], rows_b: list[dict], traces_a: list[TraceRecord],
                  traces_b: list[TraceRecord], config: dict, judge: ClaimsJudge | None,
-                 diagnostics: list[dict] | None = None) -> dict[str, Any]:
+                 diagnostics: list[dict] | None = None,
+                 labels: tuple[str, str] = ("A", "B")) -> dict[str, Any]:
+    x, y = labels
     out.mkdir(parents=True, exist_ok=True)
-    paired, missing = pair(rows_a, rows_b)
-    summary = paired_summary(paired)
+    paired, missing = pair(rows_a, rows_b, x, y)
+    summary = paired_summary(paired, x, y)
     write_csv(out / "per_question.csv", rows_a + rows_b)
     write_csv(out / "paired.csv", paired)
     write_csv(out / "paired_summary.csv", summary)
@@ -240,11 +313,13 @@ def write_report(out: Path, rows_a: list[dict], rows_b: list[dict], traces_a: li
         with (out / "judge_log.jsonl").open("w") as fh:
             for entry in judge.stats.log:
                 fh.write(json.dumps(entry) + "\n")
-    gate = web_gate_summary(rows_a, rows_b)
+    gate = web_gate_summary(rows_a, rows_b, x, y)
     write_csv(out / "web_gate.csv", [gate])
     result = {"paired": len(paired), "missing_from_one_side": missing,
               "judge_calls": judge.stats.calls if judge else 0,
               "judge_cache_hits": judge.stats.cache_hits if judge else 0,
-              "web_gate": gate}
+              "web_gate": gate,
+              "wiki_coverage": {c: wiki_coverage_summary(r)
+                                for c, r in ((x, rows_a), (y, rows_b)) if c in USES_WIKI}}
     (out / "report_summary.json").write_text(json.dumps(result, indent=2))
     return result

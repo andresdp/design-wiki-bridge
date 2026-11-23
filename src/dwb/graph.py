@@ -1,8 +1,8 @@
 """The query graph (KTD11): an explicit async StateGraph with deterministic routing.
 
-prepare -> {repo branch (A: code_retrieve | B: wiki_search -> wiki_read -> resolve),
-pdf_retrieve} -> join_local (defer=True) -> [check_local] -> [web_retrieve] -> rerank ->
-assemble_context -> generate -> validate. With no candidates the graph ends at
+prepare -> {repo branch (A: code_retrieve | B: wiki_search -> wiki_read -> resolve | C: both
+in parallel), pdf_retrieve} -> join_local (defer=True) -> [check_local] -> [web_retrieve] ->
+rerank -> assemble_context -> generate -> validate. With no candidates the graph ends at
 ``empty_context`` (R5) and never substitutes another retriever.
 
 Web runs only for items that allow it and, when ``web.conditional_web_search`` is on, only
@@ -25,7 +25,7 @@ from dwb.budget import Context, assemble_context
 from dwb.evidence import EvidenceItem
 from dwb.generate import GeneratedAnswer, Generator, render_answer, validate_claims
 from dwb.log import get_logger
-from dwb.manifest import RunManifest
+from dwb.manifest import USES_CODE_INDEX, USES_WIKI, RunManifest
 from dwb.merge import merge_candidates
 from dwb.rerank import Reranker, interleave_pool
 from dwb.retrieval.wiki_types import Resolver, Section, SectionRef, WikiClient
@@ -66,10 +66,10 @@ class GraphState(TypedDict, total=False):
 class Components:
     reranker: Reranker
     generator: Generator
-    code_retriever: Any = None  # .retrieve(query, k) -> list[EvidenceItem]   (condition A)
+    code_retriever: Any = None  # .retrieve(query, k) -> list[EvidenceItem]   (A and C)
     pdf_retriever: Any = None  # .retrieve(query, k) -> list[EvidenceItem]
-    wiki: WikiClient | None = None  # condition B
-    resolver: Resolver | None = None  # condition B
+    wiki: WikiClient | None = None  # B and C
+    resolver: Resolver | None = None  # B and C
     web_store: Any = None  # TavilyStore
     judge: SufficiencyJudge | None = None  # the web gate (web.conditional_web_search)
 
@@ -106,9 +106,14 @@ def build_graph(c: Components, m: RunManifest, *, capture_all_web: bool = False)
     if gated and c.judge is None:
         raise ValueError("web.conditional_web_search is on but no sufficiency judge was "
                          "supplied (Components.judge)")
-    # repository branch entry and exit nodes, used by both the router and the edges
-    repo_entry, repo_exit = ("code_retrieve", "code_retrieve") if m.condition == "A" else (
-        "wiki_search", "resolve")
+    # repository branches as (entry, exit) nodes, used by both the router and the edges.
+    # C runs both; their candidates meet in join_local and the shared reranker (KTD-B12)
+    repo_branches = []
+    if m.condition in USES_CODE_INDEX:
+        repo_branches.append(("code_retrieve", "code_retrieve"))
+    if m.condition in USES_WIKI:
+        repo_branches.append(("wiki_search", "resolve"))
+    repo_entries = [entry for entry, _ in repo_branches]
 
     def wants_pdf(q: QuestionRecord) -> bool:
         return m.pdf_enabled and "pdf" in q.allowed_sources and c.pdf_retriever is not None
@@ -123,7 +128,7 @@ def build_graph(c: Components, m: RunManifest, *, capture_all_web: bool = False)
         return {"query": query, "stages": [_stage("prepare", t0, allowed=q.allowed_sources)]}
 
     def route_local(s: GraphState) -> list[str]:
-        targets = [repo_entry]
+        targets = list(repo_entries)
         if wants_pdf(s["question"]):
             targets.append("pdf_retrieve")
         return targets
@@ -300,9 +305,9 @@ def build_graph(c: Components, m: RunManifest, *, capture_all_web: bool = False)
 
     g = StateGraph(GraphState)
     g.add_node("prepare", prepare)
-    if m.condition == "A":
+    if m.condition in USES_CODE_INDEX:
         g.add_node("code_retrieve", code_retrieve)
-    else:
+    if m.condition in USES_WIKI:
         g.add_node("wiki_search", wiki_search)
         g.add_node("wiki_read", wiki_read)
         g.add_node("resolve", resolve)
@@ -320,8 +325,9 @@ def build_graph(c: Components, m: RunManifest, *, capture_all_web: bool = False)
     g.add_node("empty_context", empty_context)
 
     g.add_edge(START, "prepare")
-    g.add_conditional_edges("prepare", route_local, [repo_entry, "pdf_retrieve"])
-    g.add_edge(repo_exit, "join_local")
+    g.add_conditional_edges("prepare", route_local, [*repo_entries, "pdf_retrieve"])
+    for _, repo_exit in repo_branches:
+        g.add_edge(repo_exit, "join_local")
     g.add_edge("pdf_retrieve", "join_local")
     after_join = ["check_local" if gated else "web_retrieve", "rerank", "empty_context"]
     g.add_conditional_edges("join_local", route_after_join, after_join)

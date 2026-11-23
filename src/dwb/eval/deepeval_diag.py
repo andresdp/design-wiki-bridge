@@ -11,16 +11,23 @@ Per question:
   Faithfulness catches answers made up for an unanswerable question);
 - failed trace: no diagnostics at all (correctness is already 0);
 - no answer or no final context: skipped with a reason.
+
+With a cache (``deepeval.cache`` in configs/eval.yaml), a row is reused when the DeepEval
+version, model, question kind and test case are identical, so scoring the same run in a
+second pairwise report (A/B, then A/C) costs nothing. Rows with an error are not cached.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from collections.abc import Callable
 from statistics import mean
 from typing import Any
 
 from dwb.benchmark.schemas import QuestionRecord
+from dwb.eval.claims_judge import JudgeCache
 from dwb.trace import TraceRecord
 
 METRIC_NAMES = ("contextual_recall", "faithfulness")
@@ -63,8 +70,15 @@ def build_test_case(record: QuestionRecord, trace: TraceRecord) -> dict[str, Any
     }
 
 
+def cache_key(record: QuestionRecord, trace: TraceRecord, model: str) -> str:
+    return hashlib.sha256(json.dumps(
+        [deepeval_version(), model, record.kind, build_test_case(record, trace)],
+        sort_keys=True).encode()).hexdigest()
+
+
 def run_diagnostics(record: QuestionRecord, trace: TraceRecord, model: str, *,
-                    metric_factory: MetricFactory | None = None) -> dict[str, Any] | None:
+                    metric_factory: MetricFactory | None = None,
+                    cache: JudgeCache | None = None) -> dict[str, Any] | None:
     """One diagnostics row, or ``None`` for a failed trace (it gets no diagnostics)."""
     if trace.errors:
         return None
@@ -72,6 +86,9 @@ def run_diagnostics(record: QuestionRecord, trace: TraceRecord, model: str, *,
     if not trace.answer or not trace.final_context_ids:
         out["skipped"] = "no answer" if not trace.answer else "empty final context"
         return out
+    key = cache_key(record, trace, model) if cache is not None else None
+    if key is not None and (hit := cache.get(key)) is not None:
+        return {**hit, "cached": True}
     out["skipped"] = ""
     if record.kind == "control":
         out["contextual_recall_skipped"] = "control: reference is a decline"
@@ -89,7 +106,9 @@ def run_diagnostics(record: QuestionRecord, trace: TraceRecord, model: str, *,
             metric = None
         cost = getattr(metric, "evaluation_cost", None)
         out[f"{name}_cost"] = cost
-    return out
+    if key is not None and not any(k.endswith("_error") for k in out):
+        cache.put(key, out)
+    return {**out, "cached": False}
 
 
 def _test_case(fields: dict[str, Any], real: bool) -> Any:
@@ -101,8 +120,9 @@ def _test_case(fields: dict[str, Any], real: bool) -> Any:
 
 
 def deepeval_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Per condition, subset (plus ``all``) and metric: scored count, mean, skips, errors and
-    the summed evaluation cost. ``rows`` carry ``condition`` and ``subset``."""
+    """Per condition, subset (plus ``all``) and metric: scored count, mean, skips, errors,
+    the summed evaluation cost and how many rows came from the cache. ``rows`` carry
+    ``condition`` and ``subset``."""
     out = []
     for cond in sorted({r["condition"] for r in rows}):
         cond_rows = [r for r in rows if r["condition"] == cond]
@@ -119,6 +139,8 @@ def deepeval_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "n_skipped": sum(1 for r in sub if r.get("skipped")
                                      or r.get(f"{m}_skipped")),
                     "n_errors": sum(1 for r in sub if r.get(f"{m}_error")),
+                    # cost of computing these scores, also when an earlier report did (cached)
                     "evaluation_cost": round(sum(costs), 6) if costs else None,
+                    "n_cached": sum(1 for r in sub if r.get("cached")),
                 })
     return out

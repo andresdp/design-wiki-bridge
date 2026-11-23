@@ -1,4 +1,5 @@
-"""``dwb experiment evaluate``: score two saved runs (A and B) and write the paired report."""
+"""``dwb experiment evaluate``: score two saved runs of different conditions (A/B, A/C or B/C,
+in that order) and write the paired report."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from typing import Any
 import yaml
 
 from dwb.benchmark.schemas import QuestionRecord, load_records
-from dwb.eval.claims_judge import ClaimsJudge
+from dwb.eval.claims_judge import ClaimsJudge, JudgeCache
 from dwb.eval.matching import MatchRules
 from dwb.eval.report import question_row, write_report
 from dwb.evidence_text import hydrate
@@ -25,18 +26,25 @@ class UnpairedRunsError(ValueError):
     pass
 
 
+def run_conditions(run_a: Path, run_b: Path) -> tuple[str, str]:
+    return (load_manifest(run_a / "manifest.yaml").condition,
+            load_manifest(run_b / "manifest.yaml").condition)
+
+
 def check_runs(run_a: Path, run_b: Path, *, allow_unpaired: bool = False) -> dict[str, Any]:
-    """The two saved runs must be condition A then B under paired manifests (R6). The saved
-    manifests are the resolved ones the runs used, so this rechecks what actually ran."""
+    """The two saved runs must be two different conditions in letter order (A then B, A then
+    C, B then C) under paired manifests (R6). The saved manifests are the resolved ones the
+    runs used, so this rechecks what actually ran."""
     ma, mb = load_manifest(run_a / "manifest.yaml"), load_manifest(run_b / "manifest.yaml")
     problems = []
-    if (ma.condition, mb.condition) != ("A", "B"):
-        problems.append(f"expected runs of condition A then B, got {ma.condition} then "
-                        f"{mb.condition} (pass the A run first)")
+    if not ma.condition < mb.condition:
+        problems.append(f"expected two conditions in letter order (A B, A C or B C), got "
+                        f"{ma.condition} then {mb.condition}")
     pc = check_paired(ma, mb)
     problems += pc.failures
     if problems and not allow_unpaired:
-        raise UnpairedRunsError("runs are not a valid A/B pair:\n  " + "\n  ".join(problems))
+        raise UnpairedRunsError(f"runs are not a valid {ma.condition}/{mb.condition} pair:\n  "
+                                + "\n  ".join(problems))
     for p in problems:
         LOG.warning("Unpaired (allowed): %s", p)
     return {"ok": not problems, "failures": problems, "notes": pc.notes,
@@ -65,6 +73,7 @@ def evaluate_runs(
     ``evaluate`` start (``label`` A or B, ``total`` traces), one step per trace scored or
     skipped, and a done event."""
     paired_check = check_runs(run_a, run_b, allow_unpaired=allow_unpaired)
+    x, y = run_conditions(run_a, run_b)
     cfg = yaml.safe_load(config_path.read_text())
     rules = MatchRules(**cfg.get("matching", {}))
     judge = None
@@ -81,13 +90,15 @@ def evaluate_runs(
                             temperature=cfg["judge"].get("temperature", 0.0),
                             cache_path=(base_dir / cache) if cache else None)
     run_deepeval = cfg.get("deepeval", {}).get("enabled", False) if deepeval is None else deepeval
+    de_cache_path = cfg.get("deepeval", {}).get("cache")
+    de_cache = JudgeCache(base_dir / de_cache_path) if run_deepeval and de_cache_path else None
 
     rows: dict[str, list[dict]] = {}
     traces: dict[str, list[TraceRecord]] = {}
     diagnostics: list[dict] = []
-    LOG.info("Evaluating A=%s vs B=%s (judge: %s)", run_a, run_b,
+    LOG.info("Evaluating %s=%s vs %s=%s (judge: %s)", x, run_a, y, run_b,
              cfg["judge"]["model"] if judge else "off, recall and cost only")
-    for label, rd in (("A", run_a), ("B", run_b)):
+    for label, rd in ((x, run_a), (y, run_b)):
         records = _records_for(rd, base_dir)
         traces[label] = read_traces(rd / "traces.jsonl")
         run_m = load_manifest(rd / "manifest.yaml")
@@ -116,7 +127,7 @@ def evaluate_runs(
             if run_deepeval:
                 from dwb.eval.deepeval_diag import run_diagnostics
 
-                diag = run_diagnostics(rec, t, cfg["deepeval"]["model"])
+                diag = run_diagnostics(rec, t, cfg["deepeval"]["model"], cache=de_cache)
                 if diag is not None:  # a failed trace gets no diagnostics (KTD-B7)
                     diagnostics.append({"question_id": t.question_id, "condition": t.condition,
                                         "subset": row["subset"], **diag})
@@ -126,27 +137,33 @@ def evaluate_runs(
     config = {"eval_config": cfg, "match_rules": rules.__dict__,
               "judge_prompt_hashes": ({"claim": judge.claim_hash, "support": judge.support_hash}
                                       if judge else None),
-              "runs": {"A": str(run_a), "B": str(run_b)}, "paired_check": paired_check}
+              "runs": {x: str(run_a), y: str(run_b)}, "paired_check": paired_check}
     if run_deepeval:
         from dwb.eval.deepeval_diag import deepeval_version
 
         config["deepeval_version"] = deepeval_version()
-    result = write_report(out, rows["A"], rows["B"], traces["A"], traces["B"], config, judge,
-                          diagnostics if run_deepeval else None)
+    result = write_report(out, rows[x], rows[y], traces[x], traces[y], config, judge,
+                          diagnostics if run_deepeval else None, labels=(x, y))
     LOG.info("Report written to [bold]%s[/]: %d paired questions, %d judge calls, %d cache hits",
              out, result["paired"], result["judge_calls"], result["judge_cache_hits"])
     if result["missing_from_one_side"]:
         LOG.warning("Not paired (missing from one run): %s", result["missing_from_one_side"])
     g = result["web_gate"]
     if g["n_gated"]:
-        LOG.info("Web gate on %d questions: escalated A %.0f%%, B %.0f%%; %d discordant "
+        LOG.info("Web gate on %d questions: escalated %s %.0f%%, %s %.0f%%; %d discordant "
                  "(answered with web in one condition only)", g["n_gated"],
-                 100 * g["escalation_rate_A"], 100 * g["escalation_rate_B"], g["discordant"])
-        kept = g["web_reference_judged_sufficient_A"] + g["web_reference_judged_sufficient_B"]
-        if kept:
-            LOG.warning("The judge kept %d web-needing questions local (A %d, B %d); see "
-                        "web_gate.csv", kept, g["web_reference_judged_sufficient_A"],
-                        g["web_reference_judged_sufficient_B"])
+                 x, 100 * g[f"escalation_rate_{x}"], y, 100 * g[f"escalation_rate_{y}"],
+                 g["discordant"])
+        kx, ky = (g[f"web_reference_judged_sufficient_{c}"] for c in (x, y))
+        if kx + ky:
+            LOG.warning("The judge kept %d web-needing questions local (%s %d, %s %d); see "
+                        "web_gate.csv", kx + ky, x, kx, y, ky)
+    for c, w in result["wiki_coverage"].items():
+        for source, label in (("evidence_spans", "annotated code"),
+                              ("reference_answer_files", "files the reference answer names")):
+            if w[source]["n"]:
+                LOG.info("Wiki route (%s) reached none of the %s on %d of %d questions", c,
+                         label, w[source]["n_none_reached"], w[source]["n"])
     return result
 
 

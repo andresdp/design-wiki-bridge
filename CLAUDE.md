@@ -20,8 +20,8 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 - PDF index: `dwb index pdf configs/pdfs/<repo>.yaml`
 - Register a generated wiki: `dwb wiki snapshot <repo> --provider openai --model <model> --effort <effort> --elapsed-s <s>`
 - Paired gate: `dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml`
-- Run one condition: `dwb experiment run configs/manifests/flask-A.yaml [--web-mode record|replay|live] [--overwrite]` (`<repo>-{A,B}.yaml` run the frozen test set; `<repo>-{A,B}-dev.yaml` the development set for the pilot)
-- Evaluate: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name>` (`--no-judge` gives recall and cost only)
+- Run one condition: `dwb experiment run configs/manifests/flask-A.yaml [--web-mode record|replay|live] [--overwrite]` (`<repo>-{A,B,C}.yaml` run the frozen test set; `<repo>-{A,B,C}-dev.yaml` the development set for the pilot)
+- Evaluate: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name>` (any two conditions in letter order: A B, A C, B C; `--no-judge` gives recall and cost only)
 - Curate question sets: `dwb benchmark draft <selection>`, `dwb benchmark validate <records>`, `dwb benchmark freeze <records>`, `dwb benchmark check <dev> <test>` (docs/usage.md, "Building the test set")
 
 `conda run` doesn't forward stdin, so heredoc scripts piped into it silently do nothing. Write the script to a file first.
@@ -42,9 +42,10 @@ Stack: **LangGraph** (query workflow), **Chroma** with OpenAI embeddings (condit
 
 ## Intended architecture (from the plan)
 
-One LangGraph query graph with **two interchangeable repository-retrieval branches**. The experiment config picks one per run:
+One LangGraph query graph with **two interchangeable repository-retrieval branches**. The experiment config picks one, or both, per run:
 - **Condition A (Langflow-style baseline):** top-k code spans from a vector index of the pinned repository. The conference's Langflow export isn't available, so the code makes no claim of conference equivalence.
 - **Condition B (OpenWiki):** OpenWiki search → read selected sections → resolve their file and symbol references to original code or test spans at the same commit. Wiki text is never cited. It only guides discovery and is kept in the trace.
+- **Condition C (both, KTD-B12):** A's vector search and B's wiki route in parallel; the shared reranker picks from both pools under the same pool and context budget. Added after the dev pilot and before any test run. B − A stays the primary comparison; C − A and C − B are secondary.
 
 Everything downstream is shared and must stay identical across conditions: PDF retriever, the Tavily Web-fallback policy and its sufficiency judge (evaluated only after the local branches finish), the reranker, the context budget, the generator, and the citation format. Any change to a shared stage affects both conditions.
 
@@ -56,7 +57,7 @@ Invariants to preserve:
 - **Evaluation is a separate command** that runs over saved traces (DeepEval plus a custom claim/cited-span evaluator). It never runs inline with generation.
 - **Web:** the quality comparison uses frozen/replayed Tavily passages (exact requests, URLs, capture dates). Web retrieval runs only when the run manifest enables it *and* the item's `allowed_sources` includes `web`. With `web.conditional_web_search` on (the default), it also requires the `check_local` judge to find the local evidence insufficient; record runs capture web for every eligible item so replays never miss. Public SWE-QA items never allow `web`, so the system cannot retrieve published benchmark answers. Web searches also exclude the project's own docs and source hosts (`web.exclude_domains`; spike doc §8).
 - If wiki retrieval returns nothing, the other enabled branches must still contribute evidence. The same holds when a source raises: the node records a `warnings` entry and the question is answered from the rest (degraded, not failed); a Tavily replay miss is the one exception.
-- Evaluation pairs A and B over the same questions. A failed question scores correctness 0 rather than dropping out, and `experiment evaluate` refuses runs that are not A then B under `check_paired` (unless `--allow-unpaired`).
+- Evaluation pairs two conditions over the same questions (A/B, A/C, B/C, one report each). A failed question scores correctness 0 rather than dropping out, and `experiment evaluate` refuses runs that are not two conditions in letter order under `check_paired` (unless `--allow-unpaired`).
 
 ## Project skills and where they conflict with the plan
 

@@ -115,8 +115,8 @@ wiki_app = typer.Typer(
                      "--effort high --elapsed-s 600"))
 exp_app = typer.Typer(
     no_args_is_help=True,
-    help="Run and evaluate the paired A/B experiments (research mode, from the "
-         "design-wiki-bridge folder).",
+    help="Run and evaluate the paired experiments: conditions A, B and C, compared in pairs "
+         "(research mode, from the design-wiki-bridge folder).",
     epilog=_examples("dwb experiment check configs/manifests/flask-A.yaml "
                      "configs/manifests/flask-B.yaml",
                      "dwb experiment run configs/manifests/flask-A.yaml"))
@@ -784,7 +784,9 @@ def experiment_run(
                ("unresolved citation IDs", sm["unresolved_citation_ids"]),
                ("elapsed", f"{sm['elapsed_s']:.1f} s"), ("run", runs_dir / m.run_id)])
         run_dir = runs_dir / m.run_id
-        pair = (f"{run_dir} runs/<B>" if m.condition == "A" else f"runs/<A> {run_dir}")
+        # pairs are given in condition order: A B, A C, B C
+        pair = {"A": f"{run_dir} runs/<B or C>", "B": f"runs/<A> {run_dir}",
+                "C": f"runs/<A or B> {run_dir}"}[m.condition]
         nxt = f"dwb experiment evaluate {pair} --out reports/<name>"
         if sm["failed"]:
             ui.error(f"{sm['failed']} of {sm['questions']} questions failed",
@@ -836,21 +838,28 @@ def experiment_check(
 
 @exp_app.command("evaluate", epilog=_examples(
     "dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 --out reports/flask-test",
+    "dwb experiment evaluate runs/flask-A-test-001 runs/flask-C-test-001 "
+    "--out reports/flask-test-AC",
     "dwb experiment evaluate runs/flask-A-test-001 runs/flask-B-test-001 "
     "--out reports/flask-dev --no-judge"))
 def experiment_evaluate(
-    run_a: Annotated[Path, typer.Argument(help="Run directory of condition A.", exists=True)],
-    run_b: Annotated[Path, typer.Argument(help="Run directory of condition B.", exists=True)],
+    run_a: Annotated[Path, typer.Argument(
+        help="Run directory of the earlier condition (A, or B for a B/C pair).", exists=True)],
+    run_b: Annotated[Path, typer.Argument(
+        help="Run directory of the later condition (B or C).", exists=True)],
     out_dir: Annotated[Path, typer.Option("--out", help="Report directory.")],
     config: Annotated[Path, typer.Option(help="Evaluation config.")] = Path("configs/eval.yaml"),
     no_judge: Annotated[bool, typer.Option("--no-judge", help="Recall and cost only; no LLM "
                                                               "judge calls.")] = False,
     deepeval: Annotated[bool, typer.Option(help="Also run DeepEval diagnostics.")] = False,
     allow_unpaired: Annotated[bool, typer.Option(
-        help="Score runs that fail the A/B pairing check anyway (recorded in the report).")]
+        help="Score runs that fail the pairing check anyway (recorded in the report).")]
         = False,
 ) -> None:
     """Score two saved runs offline and write the paired report tables.
+
+    The runs are two conditions in letter order (A B, A C or B C); the paired columns are
+    named after them (mean_A, mean_C, mean_diff_C_minus_A).
 
     Ctrl-C stops it; the report is written only at the end, so nothing is kept.
     """
