@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
 from dwb.budget import Context
+from dwb.fatal import raise_if_fatal
 from dwb.prompts import load_prompt
 from dwb.trace import StageRecord
 from dwb.usage import llm_usage
@@ -56,6 +57,7 @@ class SufficiencyJudge:
             if not isinstance(out, _JudgeOutput):
                 out = _JudgeOutput.model_validate(out)
         except Exception as e:
+            raise_if_fatal(e)
             error = f"{type(e).__name__}: {e}"
             out = None
         u = llm_usage(usage, [HumanMessage(question), HumanMessage(context.text)],

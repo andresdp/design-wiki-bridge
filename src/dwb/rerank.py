@@ -19,6 +19,7 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 
 from dwb.evidence import EvidenceItem
+from dwb.fatal import raise_if_fatal
 from dwb.trace import StageRecord
 from dwb.usage import approx_tokens, llm_usage
 
@@ -101,6 +102,7 @@ class LLMListwiseReranker:
                 )
                 raw = list(out["ranking"].ranked_document_ids)
             except Exception as e:  # keep the run going; fall back to pool order
+                raise_if_fatal(e)  # unless the account is out of credit (dwb.fatal)
                 error = f"{type(e).__name__}: {e}"
         latency = (time.perf_counter() - t0) * 1000
         order, issues = repair_ranking(raw, len(docs))

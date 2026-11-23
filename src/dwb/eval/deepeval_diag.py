@@ -28,6 +28,7 @@ from typing import Any
 
 from dwb.benchmark.schemas import QuestionRecord
 from dwb.eval.claims_judge import JudgeCache
+from dwb.fatal import raise_if_fatal
 from dwb.trace import TraceRecord
 
 METRIC_NAMES = ("contextual_recall", "faithfulness")
@@ -44,12 +45,28 @@ def deepeval_version() -> str | None:
         return None
 
 
-def _default_metric(name: str, model: str) -> Any:
-    os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
-    from deepeval.metrics import ContextualRecallMetric, FaithfulnessMetric
+def default_metric_factory(price_per_million: dict[str, float] | None = None) -> MetricFactory:
+    """DeepEval's own metrics. ``price_per_million`` (``{"input": .., "output": ..}`` in USD)
+    lets DeepEval report ``evaluation_cost`` for a model its price table does not list, such
+    as a dated snapshot; without it the model name is passed as is."""
+    def make(name: str, model: str) -> Any:
+        os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
+        from deepeval.metrics import ContextualRecallMetric, FaithfulnessMetric
 
-    cls = {"contextual_recall": ContextualRecallMetric, "faithfulness": FaithfulnessMetric}[name]
-    return cls(model=model)
+        cls = {"contextual_recall": ContextualRecallMetric,
+               "faithfulness": FaithfulnessMetric}[name]
+        if not price_per_million:
+            return cls(model=model)
+        from deepeval.models import GPTModel
+
+        return cls(model=GPTModel(model=model,
+                                  cost_per_input_token=price_per_million["input"] / 1e6,
+                                  cost_per_output_token=price_per_million["output"] / 1e6))
+    make.real = True  # its metrics take an LLMTestCase, not the plain dict a stub gets
+    return make
+
+
+_default_metric = default_metric_factory()
 
 
 def metrics_for(record: QuestionRecord) -> tuple[str, ...]:
@@ -97,11 +114,13 @@ def run_diagnostics(record: QuestionRecord, trace: TraceRecord, model: str, *,
     for name in metrics_for(record):
         try:
             if case is None:
-                case = _test_case(build_test_case(record, trace), metric_factory is None)
+                case = _test_case(build_test_case(record, trace),
+                                  getattr(factory, "real", False))
             metric = factory(name, model)
             metric.measure(case)
             out[name] = metric.score
         except Exception as e:  # diagnostics never block the report
+            raise_if_fatal(e)  # ...unless the account is out of credit: stop, rerun later
             out[f"{name}_error"] = f"{type(e).__name__}: {e}"
             metric = None
         cost = getattr(metric, "evaluation_cost", None)

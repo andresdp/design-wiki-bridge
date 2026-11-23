@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import AsyncExitStack
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from dwb.benchmark.freeze import file_hash
 from dwb.benchmark.schemas import QuestionRecord, load_records
-from dwb.graph import Components, build_graph, trace_from_state
+from dwb.fatal import FatalAPIError, raise_if_fatal
+from dwb.graph import Components, build_graph, query_text, trace_from_state
 from dwb.log import get_logger
 from dwb.manifest import MODEL_NET, USES_CODE_INDEX, USES_WIKI, RunManifest, require_runnable
 from dwb.progress import OnProgress, report
@@ -41,6 +43,15 @@ def load_question_set(m: RunManifest, base_dir: Path) -> list[QuestionRecord]:
     return records
 
 
+class RunStopped(RuntimeError):
+    """The run stopped on an error no retry fixes (``dwb.fatal``); the question in progress
+    was not saved. ``summary`` is the partial run summary that was written."""
+
+    def __init__(self, message: str, summary: dict[str, Any]):
+        super().__init__(message)
+        self.summary = summary
+
+
 async def run_questions(
     m: RunManifest,
     components: Components,
@@ -49,51 +60,87 @@ async def run_questions(
     *,
     run_stages: list[StageRecord] | None = None,
     on_progress: OnProgress | None = None,
+    kept: list[TraceRecord] | None = None,
 ) -> dict[str, Any]:
     """Answer every question and write the traces and the run summary. ``on_progress`` gets a
     ``run`` start (``total`` questions, ``data["traces"]`` the traces file), one step per
     question once its trace is written (``outcome`` ok/failed/degraded/empty, ``data`` the
     ``TraceRecord`` plus the running failed/degraded/empty_context counts) and a done event
-    carrying the summary."""
+    carrying the summary.
+
+    ``kept``: traces of a resumed run (``RunDir.resume``), failed ones included; those
+    questions are not run again and count in the summary. An out-of-credit or bad-key error
+    stops the run with ``RunStopped`` after writing a partial summary (``stopped``)."""
     # record runs capture web for every eligible item, so a replay of either condition
     # finds it whatever that condition's gate verdict
     graph = build_graph(components, m, capture_all_web=m.web.mode == "record")
     t_run = time.perf_counter()
     run_stages = list(run_stages or [])
+    kept = list(kept or [])
+    ids = {q.id for q in questions}
+    stray = [t.question_id for t in kept if t.question_id not in ids]
+    if stray:
+        raise QuestionSetError(f"resumed traces for questions not in the set: {stray}")
+    done_ids = {t.question_id for t in kept}
+    todo = [q for q in questions if q.id not in done_ids]
+    if kept:
+        LOG.info("Resuming %s: %d of %d questions already done, %d to run", m.run_id,
+                 len(kept), len(questions), len(todo))
     LOG.debug("Run [bold]%s[/]: condition %s, %s @ %s, %d questions → %s", m.run_id,
               m.condition, m.repo, m.repo_sha[:12], len(questions), run_dir.root)
-    report(on_progress, "run", "start", total=len(questions), label=m.run_id,
+    report(on_progress, "run", "start", total=len(todo), label=m.run_id,
            data={"traces": run_dir.traces_path, "run_dir": run_dir.root})
+    previous = run_dir.read_summary() if kept else None
+    resumes = list((previous or {}).get("resumes", []))
+    if kept or (previous and previous.get("stopped")):
+        resumes.append({"at": datetime.now(UTC).isoformat(), "kept": len(kept)})
+    new: list[TraceRecord] = []
+    stopped = None
     async with AsyncExitStack() as stack:
         startup = await start_wiki(stack, components)  # one MCP session for the whole run
         if startup is not None:
             run_stages.append(startup)
-        counts = await _run_all(graph, m, questions, run_dir, on_progress)
-    n_failed, n_degraded, n_empty, n_web, n_unresolved, n_capture_failed = counts
+        try:
+            await _run_all(graph, m, todo, run_dir, on_progress, new)
+        except FatalAPIError as e:
+            stopped = str(e)
+    records = kept + new
+    counts = run_counts(records)
     summary = {
         "run_id": m.run_id,
         "condition": m.condition,
         "questions": len(questions),
-        "failed": n_failed,
-        "degraded": n_degraded,
-        "empty_context": n_empty,
-        "web_triggered": n_web,
+        "completed": len(records),
+        "failed": counts["failed"],
+        "degraded": counts["degraded"],
+        "empty_context": counts["empty_context"],
+        "web_triggered": counts["web_triggered"],
         # record runs: web captures that failed, so replays of those questions may miss
-        "web_capture_failed": n_capture_failed,
-        "unresolved_citation_ids": n_unresolved,
-        "elapsed_s": round(time.perf_counter() - t_run, 3),
+        "web_capture_failed": counts["web_capture_failed"],
+        "unresolved_citation_ids": counts["unresolved_citation_ids"],
+        "elapsed_s": round(time.perf_counter() - t_run, 3),  # this session only
         "run_stages": [s.model_dump() for s in run_stages],
     }
+    if resumes:
+        summary["resumes"] = resumes
+    if stopped:
+        summary["stopped"] = stopped
     run_dir.write_summary(summary)
-    if n_capture_failed:
+    if stopped:
+        LOG.error("Run stopped after %d of %d questions: %s", len(records), len(questions),
+                  stopped)
+        raise RunStopped(stopped, summary)
+    if counts["web_capture_failed"]:
         LOG.warning("%d web captures failed in this record run; replays of those questions "
                     "will miss if their gate asks for the web. Rerun with --web-mode record.",
-                    n_capture_failed)
-    style = "red" if n_failed else "green"
+                    counts["web_capture_failed"])
+    style = "red" if counts["failed"] else "green"
     LOG.debug("[%s]Done[/]: %d questions, %d failed, %d degraded, %d empty context, %d with web, "
-              "%d unresolved citation IDs, %.1f s. Traces: %s", style, len(questions), n_failed,
-              n_degraded, n_empty, n_web, n_unresolved, summary["elapsed_s"], run_dir.traces_path)
-    report(on_progress, "run", "done", done=len(questions), total=len(questions),
+              "%d unresolved citation IDs, %.1f s. Traces: %s", style, len(questions),
+              counts["failed"], counts["degraded"], counts["empty_context"],
+              counts["web_triggered"], counts["unresolved_citation_ids"], summary["elapsed_s"],
+              run_dir.traces_path)
+    report(on_progress, "run", "done", done=len(todo), total=len(todo),
            label=m.run_id, elapsed_s=summary["elapsed_s"], data=summary)
     return summary
 
@@ -112,11 +159,26 @@ async def start_wiki(stack: AsyncExitStack, components: Components) -> StageReco
     return stage
 
 
+def run_counts(records: list[TraceRecord]) -> dict[str, int]:
+    return {
+        "failed": sum(bool(r.errors) for r in records),
+        "degraded": sum(bool(r.degraded) for r in records),
+        "empty_context": sum(bool(r.empty_context) for r in records),
+        "web_triggered": sum(bool(r.web_triggered) for r in records),
+        "unresolved_citation_ids": sum(int(r.validation.get("n_unresolved_ids", 0) or 0)
+                                       for r in records),
+        "web_capture_failed": sum(any(s.name == "web_retrieve" and s.extra.get("used") is False
+                                      and s.extra.get("error") for s in r.stages)
+                                  for r in records),
+    }
+
+
 async def _run_all(
     graph, m: RunManifest, questions: list[QuestionRecord], run_dir: RunDir,
-    on_progress: OnProgress | None,
-) -> tuple[int, int, int, int, int, int]:
-    n_failed = n_degraded = n_empty = n_web = n_unresolved = n_capture_failed = 0
+    on_progress: OnProgress | None, out: list[TraceRecord],
+) -> None:
+    """Run ``questions`` in order, appending each trace to the run and to ``out``. A fatal
+    provider error (``dwb.fatal``) raises ``FatalAPIError`` before that question is saved."""
     total = len(questions)
     with run_dir.writer() as w:
         for i, q in enumerate(questions, start=1):
@@ -126,23 +188,18 @@ async def _run_all(
                 state = await graph.ainvoke({"question": q})
                 rec = trace_from_state(state, m)
             except Exception as e:
+                raise_if_fatal(e)
                 rec = TraceRecord(question_id=q.id, run_id=m.run_id, condition=m.condition,
                                   errors=[f"{type(e).__name__}: {e}"])
             elapsed = time.perf_counter() - t0
             _log_trace(rec, elapsed)
-            n_failed += bool(rec.errors)
-            n_degraded += rec.degraded
-            n_empty += rec.empty_context
-            n_web += rec.web_triggered
-            n_unresolved += int(rec.validation.get("n_unresolved_ids", 0) or 0)
-            n_capture_failed += any(s.name == "web_retrieve" and s.extra.get("used") is False
-                                    and s.extra.get("error") for s in rec.stages)
             w.append(rec)
+            out.append(rec)
+            c = run_counts(out)
             report(on_progress, "run", "step", done=i, total=total, label=q.id,
                    outcome=outcome(rec), elapsed_s=elapsed,
-                   data={"trace": rec, "failed": n_failed, "degraded": n_degraded,
-                         "empty_context": n_empty})
-    return n_failed, n_degraded, n_empty, n_web, n_unresolved, n_capture_failed
+                   data={"trace": rec, "failed": c["failed"], "degraded": c["degraded"],
+                         "empty_context": c["empty_context"]})
 
 
 def outcome(rec: TraceRecord) -> str:
@@ -292,6 +349,49 @@ def check_code_index(info, m: RunManifest) -> None:
             f"--max-span-tokens {m.budgets.max_span_tokens}")
 
 
+def web_eligible(m: RunManifest, questions: list[QuestionRecord]) -> list[QuestionRecord]:
+    """The questions whose graph run may search the web (the same rule as the graph's)."""
+    return [q for q in questions if m.web.enabled and "web" in q.allowed_sources]
+
+
+def capture_web(m: RunManifest, questions: list[QuestionRecord], store: Any, *,
+                on_progress: OnProgress | None = None) -> dict[str, Any]:
+    """Web-only record pass: store the Tavily result of every web-eligible question, with no
+    retrieval, reranking or generation. A record-mode graph run captures the same requests
+    (``capture_all_web``), since the request is built from the question text and the
+    manifest's web settings only, never from a condition's evidence. Requests already in the
+    store are kept as they are (record mode reuses them). Out of credit or a bad key stops
+    it; rerunning continues where it stopped."""
+    eligible = web_eligible(m, questions)
+    LOG.info("Web capture into store %s: %d of %d questions allow the web", m.web.store_id,
+             len(eligible), len(questions))
+    report(on_progress, "web", "start", total=len(eligible), label=m.web.store_id)
+    stored = live = 0
+    failed: list[dict[str, str]] = []
+    for i, q in enumerate(eligible, start=1):
+        try:
+            store.search(query_text(q), max_results=m.web.max_results,
+                         search_depth=m.web.search_depth, exclude_domains=m.web.exclude_domains)
+        except Exception as e:
+            raise_if_fatal(e)
+            failed.append({"question_id": q.id, "error": f"{type(e).__name__}: {e}"})
+            LOG.warning("    %s: web capture failed: %s", q.id, failed[-1]["error"])
+            out = "failed"
+        else:
+            src = getattr(store, "last_call", {}).get("source")
+            live += src == "live"
+            stored += src == "store"
+            out = "ok"
+        report(on_progress, "web", "step", done=i, total=len(eligible), label=q.id, outcome=out)
+    summary = {"store_id": m.web.store_id, "question_set": m.question_set.id,
+               "questions": len(questions), "eligible": len(eligible),
+               "captured_live": live, "already_stored": stored,
+               "web_capture_failed": len(failed), "failures": failed}
+    report(on_progress, "web", "done", done=len(eligible), total=len(eligible),
+           label=m.web.store_id, data=summary)
+    return summary
+
+
 def run_manifest(
     m: RunManifest,
     components: Components,
@@ -300,14 +400,22 @@ def run_manifest(
     runs_dir: Path,
     run_stages: list[StageRecord] | None = None,
     overwrite: bool = False,
+    resume: bool = False,
     on_progress: OnProgress | None = None,
 ) -> dict[str, Any]:
-    """Check the question set before anything else, then process every question."""
+    """Check the question set before anything else, then process every question
+    (``resume``: only the ones an interrupted run has not finished)."""
+    if overwrite and resume:
+        raise ValueError("--overwrite and --resume exclude each other")
     require_runnable(m)
     questions = load_question_set(m, base_dir)
     LOG.info("Question set %s: %d questions (%s)", m.question_set.id, len(questions),
              "frozen, hash verified" if m.question_set.hash else "not frozen (dev)")
     m = m.resolve_prompts(base_dir)
-    run_dir = RunDir.start(m, runs_dir, overwrite=overwrite)
+    kept: list[TraceRecord] = []
+    if resume:
+        run_dir, kept = RunDir.resume(m, runs_dir)
+    else:
+        run_dir = RunDir.start(m, runs_dir, overwrite=overwrite)
     return asyncio.run(run_questions(m, components, questions, run_dir, run_stages=run_stages,
-                                     on_progress=on_progress))
+                                     on_progress=on_progress, kept=kept))

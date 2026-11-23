@@ -169,7 +169,7 @@ def test_cli_experiment_run_piped_prints_the_summary_json(tmp_path, monkeypatch)
     assert r.exit_code == 0, r.output
     out = json.loads(r.stdout)
     assert r.stdout == json.dumps(out, indent=2) + "\n"  # json.dumps(summary, indent=2)
-    assert list(out) == ["run_id", "condition", "questions", "failed", "degraded",
+    assert list(out) == ["run_id", "condition", "questions", "completed", "failed", "degraded",
                          "empty_context", "web_triggered", "web_capture_failed",
                          "unresolved_citation_ids",
                          "elapsed_s", "run_stages"]
@@ -392,10 +392,30 @@ def test_cli_run_interrupted_after_one_question_reports_what_was_kept(tmp_path, 
     assert "! Stopped" in r.stderr and "Traceback" not in r.output
     traces = Path("runs") / m.run_id / "traces.jsonl"
     assert f"  • kept: 1 trace in {traces}" in r.stderr.splitlines()
-    assert ("Run incomplete (1 of 2 questions, no run_summary.json): it cannot be evaluated. "
-            "Rerun with --overwrite to restart it.") in r.stderr
+    assert ("Run incomplete (1 of 2 questions to run): it cannot be evaluated yet. Add "
+            "--resume to finish it (the finished questions are kept), or --overwrite to "
+            "restart it.") in r.stderr
     assert len(read_traces(tmp_path / traces)) == 1
     assert not (tmp_path / "runs" / m.run_id / "run_summary.json").exists()
+
+
+def test_cli_resume_finishes_an_interrupted_run(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    import dwb.cli as cli
+    import dwb.graph as graph
+    import dwb.runner as runner
+
+    m, r = _cli_run_two(tmp_path, monkeypatch, stop_at=2)
+    assert r.exit_code == 130
+    monkeypatch.setattr(runner, "trace_from_state", graph.trace_from_state)  # no more Ctrl-C
+    r = CliRunner().invoke(cli.app, ["experiment", "run", "m.yaml"])
+    assert r.exit_code == 2 and "--resume" in r.stderr  # a plain rerun points to --resume
+    r = CliRunner().invoke(cli.app, ["experiment", "run", "m.yaml", "--resume"])
+    assert r.exit_code == 0, r.output
+    out = json.loads(r.stdout)
+    assert out["completed"] == 2 and out["failed"] == 0 and out["resumes"][0]["kept"] == 1
+    assert len(read_traces(tmp_path / "runs" / m.run_id / "traces.jsonl")) == 2
 
 
 def test_record_runs_capture_web_even_when_the_gate_says_sufficient(tmp_path):

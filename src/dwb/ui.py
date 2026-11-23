@@ -532,9 +532,9 @@ class ProgressRenderer:
 
     def _run_note(self) -> None:
         st = self._state
-        note_on_stop(f"Run incomplete ({st['done']} of {st['total']} questions, no "
-                     "run_summary.json): it cannot be evaluated. Rerun with --overwrite to "
-                     "restart it.", key="run")
+        note_on_stop(f"Run incomplete ({st['done']} of {st['total']} questions to run): it "
+                     "cannot be evaluated yet. Add --resume to finish it (the finished "
+                     "questions are kept), or --overwrite to restart it.", key="run")
 
     def _on_run(self, ev: Any) -> None:
         g, st = glyphs(self.con), self._state
@@ -563,6 +563,22 @@ class ProgressRenderer:
         elif ev.phase == "done":
             self.hide("run")
             note_on_stop(None, key="run")
+
+    def _on_web(self, ev: Any) -> None:
+        g = glyphs(self.con)
+        if ev.phase == "start":
+            if self.animate:
+                self.show("web", "Web capture", ev.total or 0)
+            else:
+                self.line(f"Capturing web results for {ev.total} questions")
+        elif ev.phase == "step":
+            self._update("web", completed=ev.done)
+            if ev.outcome == "failed":
+                self.line(f"  [fail]{g.fail}[/] {escape(ev.label)}  capture failed")
+            elif not self.animate:
+                self.line(f"  [{ev.done}/{ev.total}] {escape(ev.label)}")
+        elif ev.phase == "done":
+            self.hide("web")
 
     def _on_evaluate(self, ev: Any) -> None:
         g = glyphs(self.con)

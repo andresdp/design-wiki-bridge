@@ -20,7 +20,7 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 - PDF index: `dwb index pdf configs/pdfs/<repo>.yaml`
 - Register a generated wiki: `dwb wiki snapshot <repo> --provider openai --model <model> --effort <effort> --elapsed-s <s>`
 - Paired gate: `dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml`
-- Run one condition: `dwb experiment run configs/manifests/flask-A.yaml [--web-mode record|replay|live] [--overwrite]` (`<repo>-{A,B,C}.yaml` run the frozen test set; `<repo>-{A,B,C}-dev.yaml` the development set for the pilot)
+- Run one condition: `dwb experiment run configs/manifests/flask-A.yaml [--web-mode record|replay|live] [--overwrite | --resume]` (`<repo>-{A,B,C}.yaml` run the frozen test set; `<repo>-{A,B,C}-dev.yaml` the development set for the pilot). `--web-only` is the record pass (Tavily only, no run). Out of credit or a bad key stops a run without saving the question in progress; `--resume` runs only the questions without a trace
 - Evaluate: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name>` (any two conditions in letter order: A B, A C, B C; `--no-judge` gives recall and cost only)
 - Curate question sets: `dwb benchmark draft <selection>`, `dwb benchmark validate <records>`, `dwb benchmark freeze <records>`, `dwb benchmark check <dev> <test>` (docs/usage.md, "Building the test set")
 

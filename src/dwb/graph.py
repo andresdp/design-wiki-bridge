@@ -23,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from dwb.benchmark.schemas import QuestionRecord
 from dwb.budget import Context, assemble_context
 from dwb.evidence import EvidenceItem
+from dwb.fatal import raise_if_fatal
 from dwb.generate import GeneratedAnswer, Generator, render_answer, validate_claims
 from dwb.log import get_logger
 from dwb.manifest import USES_CODE_INDEX, USES_WIKI, RunManifest
@@ -90,8 +91,16 @@ def _embed_stage(name: str, t0: float, items: list[EvidenceItem], query: str, re
     return st
 
 
+def query_text(q: QuestionRecord) -> str:
+    """The query every retriever gets (also the Tavily request, so a web-only record pass
+    stores exactly what a graph run asks for)."""
+    return " ".join(q.question.split())
+
+
 def _degraded(name: str, t0: float, e: Exception, **out) -> dict:
-    """A source failed: record it and let the other branches answer (R5)."""
+    """A source failed: record it and let the other branches answer (R5). Out of credit
+    or a bad key is not a source failure: it stops the run (``dwb.fatal``)."""
+    raise_if_fatal(e)
     msg = f"{type(e).__name__}: {e}"
     LOG.warning("    %s failed, continuing without it: %s", name, msg)
     return {"stages": [_stage(name, t0, error=msg)], "warnings": [f"{name}: {msg}"], **out}
@@ -124,7 +133,7 @@ def build_graph(c: Components, m: RunManifest, *, capture_all_web: bool = False)
     async def prepare(s: GraphState) -> dict:
         t0 = time.perf_counter()
         q = s["question"]
-        query = " ".join(q.question.split())
+        query = query_text(q)
         return {"query": query, "stages": [_stage("prepare", t0, allowed=q.allowed_sources)]}
 
     def route_local(s: GraphState) -> list[str]:
@@ -240,6 +249,7 @@ def build_graph(c: Components, m: RunManifest, *, capture_all_web: bool = False)
         except ReplayMiss:
             raise  # a replay run must not quietly answer without its frozen web evidence
         except Exception as e:
+            raise_if_fatal(e)
             if capture:  # nothing was going to use it: not a degraded answer, but the store
                 # now lacks this request, so a replay whose gate wants the web will miss
                 msg = f"{type(e).__name__}: {e}"
