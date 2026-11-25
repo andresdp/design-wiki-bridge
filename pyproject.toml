@@ -26,6 +26,10 @@ dependencies = [
     "prompt-toolkit>=3",
 ]
 
+[project.optional-dependencies]
+# scripts/paired_stats.py (statistical tests over saved reports)
+analysis = ["numpy>=1.26", "scipy>=1.11"]
+
 [project.scripts]
 dwb = "dwb.cli:main"
 
@@ -35,7 +39,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["tests/fixtures"]
-pythonpath = ["src", "tests", "tests/web"]
+pythonpath = ["src", "tests", "tests/web", "scripts"]
 markers = [
     "live: needs network access and API keys (OPENAI_API_KEY, TAVILY_API_KEY); skipped by default",
 ]

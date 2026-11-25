@@ -36,7 +36,7 @@ All conditions share the PDF retrieval, the item-declared Tavily Web policy (rec
 
 ## Results
 
-On the frozen test sets, replacing vector search with the wiki route (B − A) lowered required-claim correctness by 0.20 in both repositories, mainly because the wiki route never reached the needed code for 20–39% of the questions. Combining both routes (C) recovered those losses but added little over vector search alone (+0.02 Flask, +0.06 Requests). The wiki route was 12–14% cheaper in tokens and about 10% faster per question, but the most expensive per correct answer. Citation support stayed between 0.79 and 0.90 in every condition. Full results, interpretation, limitations and practitioner guidance: [`docs/results/2026-11-23-test-set-results.md`](docs/results/2026-11-23-test-set-results.md).
+On the frozen test sets, replacing vector search with the wiki route (B − A) lowered required-claim correctness by 0.20 in both repositories, mainly because the wiki route never reached the needed code for 20–39% of the questions. Combining both routes (C) recovered those losses but added little over vector search alone (+0.02 Flask, +0.06 Requests). The wiki route was 12–14% cheaper in tokens and about 10% faster per question, but the most expensive per correct answer. Citation support stayed between 0.79 and 0.90 in every condition. Full results, interpretation, limitations and practitioner guidance: [`docs/results/2026-11-23-test-set-results.md`](docs/results/2026-11-23-test-set-results.md). Statistical tests (Wilcoxon, permutation, bootstrap intervals, rank-biserial effect sizes) and their interpretation: [`docs/results/2026-11-23-statistical-tests.md`](docs/results/2026-11-23-statistical-tests.md), reproducible with `pip install -e '.[analysis]'` and `python scripts/paired_stats.py` (reads `reports/`, writes `docs/results/stats/`).
 
 ## Setup
 
@@ -98,5 +98,6 @@ data/questions/  test/ (frozen), dev/, selections/
 docs/          usage.md (guide), architecture.md, benchmark-and-evaluation.md (protocol),
                results/ (findings), journal-extension-plan.md, plans/, spikes/
 artifacts/     gitignored: repo checkouts, SWE-QA files, indexes, wiki snapshots, Tavily store
+scripts/       paired_stats.py: statistical tests over saved reports
 runs/, reports/  gitignored: run traces and evaluation reports
 ```

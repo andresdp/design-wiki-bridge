@@ -11,10 +11,11 @@ Everything after retrieval is identical across conditions: the PDF search, the w
 ## Summary
 
 - **The primary comparison, B − A, is negative in both repositories.** Replacing vector search with the wiki route lowers claim correctness by 0.20 on Flask and on Requests.
-  - On Flask, B was better on 3 questions and worse on 15 (exact sign test, two-sided, p = 0.008).
-  - On Requests, B was better on 3 and worse on 8 (p = 0.23, not significant at this size).
+  - On Flask, B was better on 3 questions and worse on 15: 95% CI [−0.32, −0.10], Wilcoxon p = 0.003, rank-biserial effect size r = −0.80 (large).
+  - On Requests, B was better on 3 and worse on 8: 95% CI [−0.35, −0.05], Wilcoxon p = 0.052, permutation p = 0.028, r = −0.77. Same size and direction as Flask, borderline significant on its own; pooled over both repositories, p < 0.001.
+  - Statistical tests, effect sizes and their interpretation: [`2026-11-23-statistical-tests.md`](2026-11-23-statistical-tests.md).
 - **The loss happens before ranking or generation: the wiki route does not reach the needed code.** It reached none of the annotated code on 5 of 25 Flask questions and 7 of 18 Requests questions.
-- **Running both routes (C) recovers everything B loses, but adds little over vector search alone.** C − A is +0.02 on Flask and +0.06 on Requests, neither distinguishable from zero. C − B is +0.22 and +0.26 (p = 0.007 and 0.002).
+- **Running both routes (C) recovers everything B loses, but adds little over vector search alone.** C − A is +0.02 on Flask and +0.06 on Requests, neither distinguishable from zero (pooled 95% CI [−0.02, +0.08]). C − B is +0.22 and +0.26 (Holm-adjusted Wilcoxon p = 0.007 and 0.005, r ≈ +0.9).
 - **C finds much more of the evidence than A, but most of it never reaches the answer.** Candidate recall rises by 0.17 in both repositories, while correctness barely moves. The reranker and the context budget are the bottleneck.
 - **Citations are equally reliable in every condition** (support 0.79 to 0.90). Better grounding did not mean more correct answers.
 - **B is the cheapest and fastest option per question; C is the most expensive.**
@@ -64,14 +65,15 @@ Everything after retrieval is identical across conditions: the PDF search, the w
 
 ### Primary comparison (fixed before the runs)
 
-Claim correctness is the share of each question's required claims the answer states correctly, as scored by the judge. Each comparison cell gives the mean difference, then the counts of questions where the second condition did better, tied or did worse, then the sign-test p-value.
+Claim correctness is the share of each question's required claims the answer states correctly, as scored by the judge. Each comparison cell gives the mean difference with its 95% bootstrap confidence interval, the counts of questions where the second condition did better, tied or did worse, the Wilcoxon signed-rank p-value and the rank-biserial effect size r (−1 to +1).
 
 | Repository | A | B | C | B − A | C − A | C − B |
 |---|---|---|---|---|---|---|
-| Flask (n = 25) | 0.71 | 0.51 | 0.73 | −0.20 · 3 / 7 / 15 · p = 0.008 | +0.02 · 7 / 13 / 5 · p = 0.77 | +0.22 · 13 / 10 / 2 · p = 0.007 |
-| Requests (n = 18) | 0.58 | 0.38 | 0.64 | −0.20 · 3 / 7 / 8 · p = 0.23 | +0.06 · 7 / 7 / 4 · p = 0.55 | +0.26 · 13 / 4 / 1 · p = 0.002 |
+| Flask (n = 25) | 0.71 | 0.51 | 0.73 | −0.20 [−0.32, −0.10] · 3 / 7 / 15 · p = 0.003 · r = −0.80 | +0.02 [−0.04, +0.08] · 7 / 13 / 5 · p = 0.53 · r = +0.22 | +0.22 [+0.11, +0.35] · 13 / 10 / 2 · p = 0.002 · r = +0.90 |
+| Requests (n = 18) | 0.58 | 0.38 | 0.64 | −0.20 [−0.35, −0.05] · 3 / 7 / 8 · p = 0.052 · r = −0.77 | +0.06 [−0.04, +0.15] · 7 / 7 / 4 · p = 0.29 · r = +0.39 | +0.26 [+0.13, +0.40] · 13 / 4 / 1 · p = 0.001 · r = +0.93 |
+| Pooled (n = 43) | 0.66 | 0.45 | 0.69 | −0.20 [−0.30, −0.11] · 6 / 14 / 23 · p < 0.001 · r = −0.79 | +0.03 [−0.02, +0.08] · 14 / 20 / 9 · p = 0.23 · r = +0.32 | +0.24 [+0.15, +0.33] · 26 / 14 / 3 · p < 0.001 · r = +0.90 |
 
-The protocol fixed the paired differences and the better/tied/worse counts as the analysis. The sign tests are exploratory: two-sided, exact, ties excluded, with no correction for multiple comparisons.
+The protocol fixed the paired differences and the better/tied/worse counts as the analysis; the tests were added afterwards. Only B − A per repository was pre-specified as primary; the C comparisons are secondary (Holm-adjusted Wilcoxon p: C − A 0.57 in both repositories, C − B 0.007 and 0.005). The sign-flip permutation test agrees with Wilcoxon except for Requests B − A, where it gives p = 0.028. Methods, all metrics and the interpretation of effect sizes are in [`2026-11-23-statistical-tests.md`](2026-11-23-statistical-tests.md).
 
 ### Retrieval, grounding and cost (primary questions)
 
@@ -97,7 +99,7 @@ All token counts are OpenAI's reported usage for each call; none of the 637 reco
 | Latency | 10.2 s | **9.4 s** (−9%) | 10.2 s (0%) | 13.6 s | **12.2 s** (−11%) | 12.6 s (−8%) |
 | Context sent to the generator | 7.7k | 7.7k | 7.7k | 7.3k | 6.9k | 7.6k |
 
-**Paired, all questions** (exact sign test)
+**Paired, all questions** (exact sign test; the primary-question tests with Wilcoxon, permutation and confidence intervals are in [`2026-11-23-statistical-tests.md`](2026-11-23-statistical-tests.md) §5.4)
 
 | | Flask | Requests |
 |---|---|---|
@@ -213,7 +215,7 @@ Four DeepEval rows first failed because the mini model returned invalid JSON. Th
 
 ## Limitations
 
-- **Sample size.** There are 25 and 18 primary questions in two Python repositories. Only the Flask B − A and the two C − B differences are clearly distinguishable from zero. Every subset has fewer than 10 questions, and nothing here generalises to other languages, larger codebases or other wiki generators.
+- **Sample size.** There are 25 and 18 primary questions in two Python repositories. The Flask B − A and the two C − B differences are clearly distinguishable from zero; Requests B − A is borderline (Wilcoxon p = 0.052, permutation p = 0.028) and significant only when pooled with Flask. With these sizes, a paired test can reliably detect correctness differences of about 0.17–0.22 (B − A) and 0.08–0.13 (C − A), so smaller effects cannot be ruled out. Every subset has fewer than 10 questions, and nothing here generalises to other languages, larger codebases or other wiki generators.
 - **One wiki, one run.** Each repository has a single wiki snapshot (OpenWiki 0.9.0, effort medium) and a single run per condition. Wiki generation is stochastic, and a different snapshot, higher effort or a larger model could cover more code. Temperature 0 does not make the generator fully deterministic.
 - **Wiki search was used as shipped.** Condition B sends the full question to OpenWiki's lexical search, with no query rewriting or identifier extraction. The pilot suggests identifier-focused queries would help. That was deliberately not tuned, because B measures the tool as shipped.
 - **Shared models.**

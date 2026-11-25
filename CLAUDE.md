@@ -22,6 +22,7 @@ All of these run in the `taxonomy` env, from the repo root (paths and `.env` are
 - Paired gate: `dwb experiment check configs/manifests/flask-A.yaml configs/manifests/flask-B.yaml`
 - Run one condition: `dwb experiment run configs/manifests/flask-A.yaml [--web-mode record|replay|live] [--overwrite | --resume]` (`<repo>-{A,B,C}.yaml` run the frozen test set; `<repo>-{A,B,C}-dev.yaml` the development set for the pilot). `--web-only` is the record pass (Tavily only, no run). Out of credit or a bad key stops a run without saving the question in progress; `--resume` runs only the questions without a trace
 - Evaluate: `dwb experiment evaluate runs/<A> runs/<B> --out reports/<name>` (any two conditions in letter order: A B, A C, B C; `--no-judge` gives recall and cost only)
+- Statistical tests over saved reports: `conda run -n taxonomy python scripts/paired_stats.py --reports reports --out docs/results/stats` (deterministic; documented in `docs/results/2026-11-23-statistical-tests.md`)
 - Curate question sets: `dwb benchmark draft <selection>`, `dwb benchmark validate <records>`, `dwb benchmark freeze <records>`, `dwb benchmark check <dev> <test>` (docs/usage.md, "Building the test set")
 
 `conda run` doesn't forward stdin, so heredoc scripts piped into it silently do nothing. Write the script to a file first.
